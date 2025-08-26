@@ -1,0 +1,26 @@
+<!DOCTYPE html> 
+<html lang="ko"> 
+<head> 
+  <meta charset="UTF-8"> 
+  <title>MyBook 학습 도우미</title> 
+</head> 
+<body> 
+  <h1>학습 내용 분석하기</h1> 
+  <textarea id="inputText" rows="10" cols="50" placeholder="여기에 학습 내용을 입력하세요"></textarea> 
+  <br> 
+  <button id="summaryBtn">핵심 요약</button> 
+  <button id="mindmapBtn">마인드맵 생성</button> 
+  <button id="chainThoughtBtn">꼬리 질문</button> 
+  <button id="compareBtn">개념 비교</button> 
+  
+  <h3>분석 결과</h3> 
+  <div id="output" style="white-space: pre-wrap; margin-top: 20px;"></div> 
+  
+  <div id="feedback" style="margin-top: 10px; display: none;"> 
+    <button id="likeBtn">👍 좋아요</button> 
+    <button id="dislikeBtn">👎 싫어요</button> 
+  </div> 
+
+  <script type="module" src="app.js"></script> 
+</body> 
+</html>
