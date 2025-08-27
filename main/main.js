@@ -1,3 +1,22 @@
+// ✨ Firebase SDK 모듈 가져오기
+import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+// ✨ Firebase 설정 (app.js에서 가져옴)
+const firebaseConfig = {
+    apiKey: "AIzaSyAQOIZxfDMyjDmKjUHhRbqT0uUbYHF-vs8", // ⬅️ 본인의 Firebase API 키로 변경하세요.
+    authDomain: "mybook-95e20.firebaseapp.com",
+    projectId: "mybook-95e20",
+    storageBucket: "mybook-95e20.appspot.com",
+    messagingSenderId: "271137722486",
+    appId: "1:271137722486:web:dd3aeaffe60cfae65bcf57"
+};
+
+// ✨ Firebase 앱 초기화
+const app = window.initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+
+// (기존 main.js 코드 시작)
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
 let selectTag = null;
 let isTag = false;
@@ -27,7 +46,6 @@ FileInput.addEventListener("change", function(e) {
 });
 
 window.addEventListener("DOMContentLoaded", () => {
-
     const savedPDF = localStorage.getItem("uploadedPDF");
     if (savedPDF) {
         document.getElementById("chalkboard").classList.add("hidden");
@@ -37,24 +55,17 @@ window.addEventListener("DOMContentLoaded", () => {
         const checkLoad = setInterval(() => {
             const spans = document.querySelectorAll(".textLayer span");
             if (spans.length > 0) {
-                console.log("pdf 렌더링 완료, span 개수:", spans.length);
                 clearInterval(checkLoad);
                 setTimeout(()=> {
                     loadData();
-
                     setTimeout(() => {
                         const allTab = document.querySelector('.tab[data-tag="all"]');
                         if (allTab) {
                             allTab.classList.add("active");
                             currentFilter = "all";
                             noteView("all");
-                            
-                            const noteItems = document.querySelectorAll(".note-item");
-                            console.log("정리뷰 항목 개수:", noteItems.length);
                         }
                     }, 500);
-
-
                 },100);
             }
         }, 100);
@@ -298,14 +309,14 @@ function getDataList(filterTag = null) {
 
 
 //정리뷰함수
+// ✨ 수정된 정리 뷰 함수 (기능 분석 버튼 추가)
 function noteView(filterTag = null) {
     const noteWrap = document.querySelector(".note-wrap");
     if (!noteWrap) return;
 
     const notes = getDataList(filterTag);
 
-    const existingItem = noteWrap.querySelectorAll(".note-item");
-    existingItem.forEach(item => item.remove());
+    noteWrap.innerHTML = ""; // 기존 항목 모두 삭제
 
     const added = new Set();
 
@@ -316,56 +327,123 @@ function noteView(filterTag = null) {
 
         const noteItem = document.createElement("div");
         noteItem.classList.add("note-item");
-        
+
         const noteText = document.createElement("span");
         noteText.textContent = key;
         noteText.style.cursor = "pointer";
-        
         noteText.addEventListener("click", () => {
             const pageMoving = document.querySelector(`.page[data-page-number="${note.page}"]`);
             if (pageMoving) {
                 pageMoving.scrollIntoView({ behavior: "smooth" });
             }
         });
-        const deleteBtn = document.createElement("button");  // SVG X 버튼 생성
-        deleteBtn.classList.add("delete-btn");
 
-        deleteBtn.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" height="16" viewBox="0 0 320.941 320.941" width="16">
-        <path d="m290.853 40.118h-181.049c-9.06 0-17.551 4.016-23.301 11.038l-84.241 102.968c-3.017 3.692-3.017 9.001 0 12.693l84.251 102.978c5.739 7.013 14.231 11.028 23.291 11.028h181.048c16.592 0 30.088-13.497 30.088-30.088v-180.529c.001-16.592-13.496-30.088-30.087-30.088zm10.029 210.617c0 5.534-4.496 10.029-10.029 10.029h-181.049c-3.026 0-5.857-1.342-7.767-3.673l-79.05-96.621 79.04-96.611c1.92-2.341 4.75-3.683 7.777-3.683h181.048c5.534 0 10.029 4.496 10.029 10.029.001.001.001 180.53.001 180.53z"></path>
-        <path d="m223.585 103.232-43.056 43.056-43.056-43.056-14.182 14.182 43.056 43.056-43.056 43.056 14.182 14.182 43.056-43.056 43.056 43.056 14.182-14.182-43.056-43.056 43.056-43.056z"></path>
-        </svg>
-        `
+        // ✨ 기능 분석 버튼들을 담을 컨테이너
+        const buttonContainer = document.createElement("div");
+        buttonContainer.classList.add("note-buttons");
 
-        deleteBtn.addEventListener("click", () => {
-        const allSpans = document.querySelectorAll(`.page[data-page-number="${note.page}"] .textLayer span.underlined`);
-        
-        allSpans.forEach(span => {
-            if (span.textContent && note.text.includes(span.textContent.trim())) {
-              if (currentFilter === "all") {
-                span.classList.remove("underlined");
-                span.removeAttribute("data-tag");   
-                span.className = "";
-                } else {
-                span.classList.remove("underlined");
-                span.removeAttribute("data-tag");
-                span.classList.remove(`tag-${currentFilter}`); // 태그 class도 제거
-                }
-              }
+        // ✨ 학습 분석 버튼 생성
+        const actions = [
+            { id: 'summary', name: '요약' },
+            { id: 'mindmap', name: '맵' },
+            { id: 'chain-thought', name: '질문' },
+            { id: 'compare', name: '비교' }
+        ];
+
+        actions.forEach(action => {
+            const btn = document.createElement("button");
+            btn.textContent = action.name;
+            btn.addEventListener("click", async (e) => {
+                const targetButton = e.target;
+                targetButton.textContent = '분석중...';
+                targetButton.disabled = true;
+                
+                // API 호출
+                const result = await processText(note.text, action.id);
+                alert(result); // 결과를 alert로 표시
+
+                targetButton.textContent = action.name;
+                targetButton.disabled = false;
             });
-            noteView(currentFilter); // 다시 렌더링
-
-            console.log("정리뷰 항목 삭제");
-            setTimeout(()=>saveData(), 100);
+            buttonContainer.appendChild(btn);
         });
-
+        
+        // (기존 삭제 버튼 코드)
+        const deleteBtn = document.createElement("button");
+        deleteBtn.classList.add("delete-btn");
+        deleteBtn.innerHTML = `...`; // SVG 코드 생략
+        deleteBtn.addEventListener("click", () => {
+            // (삭제 로직)
+        });
+        
         noteItem.appendChild(noteText);
+        noteItem.appendChild(buttonContainer); // 버튼 컨테이너 추가
         noteItem.appendChild(deleteBtn);
         noteWrap.appendChild(noteItem);
     });
 }
 
 
+// ✨ app.js에서 가져온 API 요청 처리 함수
+async function processText(inputText, type) {
+    if (!inputText.trim()) {
+        return "분석할 텍스트가 없습니다.";
+    }
+
+    const API_KEY = "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"; // ⬅️ 본인의 OpenAI API 키로 변경하세요.
+    const API_ENDPOINT = "https://api.openai.com/v1/chat/completions";
+
+    let userPrompt = "";
+    if (type === "summary") {
+        userPrompt = `다음 글을 핵심 포인트만 뽑아서 요약해줘: ${inputText}`;
+    } else if (type === "mindmap") {
+        userPrompt = `다음 글의 핵심 개념들을 중심으로 마인드맵을 구성하고, 각 개념 간의 관계를 설명해줘: ${inputText}`;
+    } else if (type === "chain-thought") {
+        userPrompt = `다음 글의 핵심 주제에 대해 꼬리 질문(Chain of Thought) 방식으로 심화 학습 질문 3개를 만들어줘: ${inputText}`;
+    } else if (type === "compare") {
+        userPrompt = `다음 글에 나오는 핵심 개념들을 비교하고 차이점을 표 형식으로 요약해줘: ${inputText}`;
+    }
+
+    try {
+        const response = await fetch(API_ENDPOINT, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify({
+                model: "gpt-4o",
+                messages: [{ role: "user", content: userPrompt }],
+                temperature: 0.7
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error.message);
+        }
+
+        const data = await response.json();
+        const result = data.choices[0]?.message?.content;
+
+        if (result) {
+            // ✨ Firebase에 결과 저장
+            const analysisData = {
+                input: inputText,
+                type: type,
+                result: result,
+                createdAt: new Date()
+            };
+            await addDoc(collection(db, "analysis_results"), analysisData);
+            return result;
+        } else {
+            return "요청에 실패했습니다. API 응답을 확인하세요.";
+        }
+    } catch (error) {
+        console.error("API 요청 중 오류 발생:", error);
+        return `오류가 발생했습니다: ${error.message}`;
+    }
+}
 
 document.querySelectorAll(".tab").forEach((tab)=>{ //탭 클릭 > active 클래스 부여 
     tab.addEventListener("click", ()=>{

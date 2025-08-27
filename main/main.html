@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <link rel="stylesheet" href="../main/reset.css">
-    <link rel="stylesheet" href="../main/main.css">
+    <link rel="stylesheet" href="./reset.css">
+    <link rel="stylesheet" href="./main.css">
     <title>My Book</title>
 </head>
 <body>
@@ -14,7 +14,7 @@
         <div class="header_box">
             <div class="header">
                 <div id="pens"><div id="pen1"><i class="fa-solid fa-pen fa-xl"></i></div></div>
-                <button class="tag-btn" id="tag-btn"><i class="fa-solid fa-tag fa-2xl"></i></i></button>
+                <button class="tag-btn" id="tag-btn"><i class="fa-solid fa-tag fa-2xl"></i></button>
                 <div class="dropdown" id="dropdown"><ul><li><button>중요</button></li><li><button>암기</button></li><li><button>참고</button></li></ul></div>
                 <div class="eraser"><div id="eraser-btn"><i class="fa-solid fa-eraser fa-xl"></i></div></div>
             </div>
@@ -27,7 +27,7 @@
     <section class="viewer-box">
         <div id="chalkboard" class="chalkboard"><p>pdf 파일 추가</p></div>
 
-        <div id="book-layout" class="book hidden"><!--클래스 두개 부여-->
+        <div id="book-layout" class="book hidden">
             <div id="pdf-container" class="Allpage left-page"></div>
             <div class="center-line"></div>
             <div id="note-container" class="Allpage right-page">
@@ -42,6 +42,14 @@
         </div>
     </section>
     
-    <script src="../main/main.js"></script>
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    window.initializeApp = initializeApp;
+</script>
+
+<link rel="stylesheet" href="./reset.css">
+<link rel="stylesheet" href="./main.css">
+<script type="module" src="./main.js"></script>
+
 </body>
 </html>

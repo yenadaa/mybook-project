@@ -1,11 +1,22 @@
+/* 폰트 정의: 중복을 제거하고 명확하게 정리했습니다. */
 @font-face {
-    font-family: 'Eulyoo1945';/*저작권 확인*/
+    font-family: 'Eulyoo1945-SemiBold';
     src: url('../fonts/Eulyoo1945-SemiBold.ttf') format('truetype');
-    font-weight: normal;
-    font-style: normal;
-  }
+}
 
-* {font-family: 'Eulyoo1945', sans-serif;}  
+@font-face {
+    font-family: 'Eulyoo1945-Regular';
+    src: url('../fonts/Eulyoo1945-Regular.ttf') format('truetype');
+}
+
+@font-face {
+    font-family: 'Typo_CrayonM';
+    src: url('../fonts/Typo_CrayonM.ttf') format('truetype');
+}
+
+
+/* 기본 스타일: 기본 폰트를 보통 굵기(Regular)로 변경하여 가독성을 높였습니다. */
+* {font-family: 'Eulyoo1945-Regular', sans-serif;}
 body{background-color: #2d3241; caret-color: transparent;}
 .header_box{display: flex; justify-content: space-between; padding: 18px 150px 5px;}
 .header{display: flex; gap: 40px;}
@@ -49,8 +60,7 @@ hr{text-align: center; height: 1px; background: rgb(193, 193, 193); border:0; ba
 .tag-btn{position: relative;}
 .tag-btn.active > i{color:yellow;}
 .dropdown{visibility: hidden; z-index: 999; position: absolute; background: white; border-radius: 5px; left:250px; box-shadow: 0px 3px 4px 1px #6a6a6a7d;}
-.dropdown.show{visibility: visible; opacity: 1;} 
+.dropdown.show{visibility: visible; opacity: 1;}
 li{list-style: none; margin: 10px 0;}
 li>button{width: 100px; height: 23px;}
 li>button:hover{background: rgb(180, 180, 180);}
-
