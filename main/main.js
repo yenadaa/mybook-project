@@ -492,42 +492,48 @@ function loadData() {
     
     // 밑줄 다시 적용
     dataList.forEach(item => {
-        const page = document.querySelector(`.page[data-page-number="${item.page}"]`);
-        if (!page) return;
+    const page = document.querySelector(`.page[data-page-number="${item.page}"]`);
+    if (!page) return;
 
-        const spans = page.querySelectorAll(".textLayer span");
-        spans.forEach(span => {
-            const textnode = [...span.childNodes].find(n => n.nodeType === Node.TEXT_NODE);
-            if (!textnode) return;
+    const spans = page.querySelectorAll(".textLayer span");
+    spans.forEach(span => {
+        const rect = span.getBoundingClientRect();
+        const pageRect = page.getBoundingClientRect();
 
+        const spanPos = {
+            left: Math.round(rect.left - pageRect.left),
+            top: Math.round(rect.top - pageRect.top)
+        };
+
+        // 좌표 + 텍스트 매칭
+        const nearX = Math.abs(item.position.left - spanPos.left) < 5;
+        const nearY = Math.abs(item.position.top - spanPos.top) < 5;
+
+        if (nearX && nearY && span.textContent.includes(item.text)) {
+            const textnode = span.firstChild;
             const idx = textnode.nodeValue.indexOf(item.text);
-            if (idx === -1) return;  // 텍스트 못 찾으면 패스
+            if (idx !== -1) {
+                const before = textnode.nodeValue.slice(0, idx);
+                const match = textnode.nodeValue.slice(idx, idx + item.text.length);
+                const after = textnode.nodeValue.slice(idx + item.text.length);
 
-            const rect = span.getBoundingClientRect();
-            const pageRect = page.getBoundingClientRect();
-            const spanPos = {
-                left: Math.round(rect.left - pageRect.left),
-                top: Math.round(rect.top - pageRect.top),
-                right: Math.round(rect.right - pageRect.left)
-            };
-            const withinX = item.position.left >= spanPos.left - 4 && item.position.left <= spanPos.right + 4;
-            const withinY = Math.abs(item.position.top - spanPos.top) <= 10;
-            if(!withinX || !withinY) return;
-                
+                const beforeNode = document.createTextNode(before);
+                const matchNode = document.createElement("span");
+                matchNode.className = "underlined";
+                matchNode.textContent = match;
 
-            const mid = textnode.splitText(idx);
-            const tail = mid.splitText(item.text.length);
+                if (item.tag) {
+                    matchNode.dataset.tag = item.tag;
+                    matchNode.classList.add(`tag-${item.tag}`);
+                }
 
-            const marked = document.createElement("span");
-            marked.className = "underlined";
-            marked.textContent = mid.nodeValue;
-            if(item.tag) {
-                marked.dataset.tag = item.tag;
-                marked.classList.add(`tag-${item.tag}`);
+                const afterNode = document.createTextNode(after);
+
+                span.replaceChildren(beforeNode, matchNode, afterNode);
             }
-            mid.replaceWith(marked);
-        });
+        }
     });
+});
     // 정리본 자동 출력
     currentFilter = "all";
     noteView("all");
