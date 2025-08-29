@@ -204,7 +204,7 @@ document.addEventListener("mouseup", function () {
             wrap.classList.add("underlined");
 
             try {
-                tange.surroundContents(wrap);
+                range.surroundContents(wrap);
             } catch (e) {
                 const textnode = range.startContainer;
                 const start = range.startOffset;
@@ -240,7 +240,7 @@ document.addEventListener("mouseup", function () {
         window.__lastNoteText = selectedText;
         window.__lastNotePage = spansInRange[0]?.closest(".page")?.dataset.pageNumber || "1";
 
-        noteView();
+        noteView(currentFilter);
         selection.removeAllRanges();
 
         console.log("자동 저장 실행");
@@ -277,7 +277,7 @@ function getDataList(filterTag = null) {
 
     allSpans.forEach(span => {
         const tag = span.dataset.tag;
-        if (filterTag && tag !== filterTag) return; // 태그 필터링
+        if (filterTag && filterTag !== "all" && tag !== filterTag) return; // 태그 필터링
 
         const page = span.closest(".page")?.dataset.pageNumber || "1";
         if (!groupedByPage[page]) groupedByPage[page] = [];
@@ -428,6 +428,8 @@ document.addEventListener("click", (e)=> {
 
     tagBtn.classList.remove("active");
 
+    noteView(currentFilter);
+
     console.log("태그 지정됨, 자동 저장")
     setTimeout(()=>saveData(), 100);
 });
@@ -474,6 +476,15 @@ function saveData() {
 
 }
 
+function clearHighlights() {
+    const highs = document.querySelectorAll(".textLayer span.underlined");
+    highs.forEach(hl => {
+        const parent = hl.parentNode;
+        hl.replaceWith(document.createTextNode(hl.textContent)); //요소제거, 텍스트만 제거
+        if (parent) parent.normalize(); // 인접한 텍스트 노드 병합
+    });
+}
+
 function loadData() {
     console.log("불러오기 함수 실행");
     
@@ -483,12 +494,7 @@ function loadData() {
 
     const dataList = JSON.parse(savedData);
     
-    // 기존 밑줄 제거
-    document.querySelectorAll("span.underlined").forEach(span => {
-        span.classList.remove("underlined");
-        span.removeAttribute("data-tag");
-        span.classList.remove("tag-중요", "tag-암기", "tag-참고");
-    });
+    clearHighlights();
     
     // 밑줄 다시 적용
     dataList.forEach(item => {
@@ -506,37 +512,47 @@ function loadData() {
         };
 
         // 좌표 + 텍스트 매칭
-        const nearX = Math.abs(item.position.left - spanPos.left) < 5;
-        const nearY = Math.abs(item.position.top - spanPos.top) < 5;
+        const nearX = Math.abs(item.position.left - spanPos.left) <= 20;
+        const nearY = Math.abs(item.position.top - spanPos.top) <= 20;
 
-        if (nearX && nearY && span.textContent.includes(item.text)) {
-            const textnode = span.firstChild;
-            const idx = textnode.nodeValue.indexOf(item.text);
-            if (idx !== -1) {
-                const before = textnode.nodeValue.slice(0, idx);
-                const match = textnode.nodeValue.slice(idx, idx + item.text.length);
-                const after = textnode.nodeValue.slice(idx + item.text.length);
+        if (!(nearX && nearY)) return;
+        if (!span.textContent || !span.textContent.includes(item.text)) return;
 
-                const beforeNode = document.createTextNode(before);
-                const matchNode = document.createElement("span");
-                matchNode.className = "underlined";
-                matchNode.textContent = match;
+        let textnode = Array.from(span.childNodes).find(n => n.nodeType === Node.TEXT_NODE);
+        if (!textnode) {
+            span.textContent = span.textContent;
+            span.normalize();
+            textnode = Array.from(span.childNodes).find(n => n.nodeType === Node.TEXT_NODE);
+            if (!textnode) return;
+        }
 
-                if (item.tag) {
-                    matchNode.dataset.tag = item.tag;
-                    matchNode.classList.add(`tag-${item.tag}`);
-                }
 
-                const afterNode = document.createTextNode(after);
+            
+        const idx = textnode.nodeValue.indexOf(item.text);
+        if (idx !== -1) {
+            const before = textnode.nodeValue.slice(0, idx);
+            const match = textnode.nodeValue.slice(idx, idx + item.text.length);
+            const after = textnode.nodeValue.slice(idx + item.text.length);
 
-                span.replaceChildren(beforeNode, matchNode, afterNode);
+            const beforeNode = document.createTextNode(before);
+            const matchNode = document.createElement("span");
+            matchNode.className = "underlined";
+            matchNode.textContent = match;
+
+            if (item.tag) {
+                matchNode.dataset.tag = item.tag;
+                matchNode.classList.add(`tag-${item.tag}`);
             }
+
+            const afterNode = document.createTextNode(after);
+
+            span.replaceChildren(beforeNode, matchNode, afterNode);
         }
     });
 });
     // 정리본 자동 출력
     currentFilter = "all";
-    noteView("all");
+    requestAnimationFrame(() => noteView());
 
     // 탭 UI도 "all" 활성화
     const allTab = document.querySelector('.tab[data-tag="all"]');
@@ -545,4 +561,4 @@ function loadData() {
         allTab.classList.add("active");
     } 
     console.log("불러오기 완료!");
-} //test
+} 
