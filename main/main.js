@@ -1,564 +1,586 @@
-pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
-let selectTag = null;
-let isTag = false;
-let isPenActive = false;
-let isEraserActive = false;
-let currentFilter = "all";
-const FileInput = document.getElementById("file-btn");
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
 
-document.getElementById("chalkboard").addEventListener("click", function() {
-    FileInput.click();
-});
+    let selectTag = null;
+    let isTag = false;
+    let isPenActive = false;
+    let isEraserActive = false;
+    let currentFilter = "all";
+    const FileInput = document.getElementById("file-btn");
 
-FileInput.addEventListener("change", function(e) {
-    const file = e.target.files[0];
-    const reader = new FileReader();
+    let undoStack = [];
+    let redoStack = [];
+    let highlights = [];
+    let lastSelectedHighlightId = null;
 
-    reader.onload = function() {
+    const UNDO_BUTTON = document.getElementById("undo-btn");
+    const REDO_BUTTON = document.getElementById("redo-btn");
+
+    if (UNDO_BUTTON) {
+      UNDO_BUTTON.addEventListener("click", () => {
+        undo();
+      });
+    }
+    if (REDO_BUTTON) {
+      REDO_BUTTON.addEventListener("click", () => {
+        redo();
+      });
+    }
+
+    function updateButtons() {
+      if (UNDO_BUTTON) UNDO_BUTTON.disabled = undoStack.length === 0;
+      if (REDO_BUTTON) REDO_BUTTON.disabled = redoStack.length === 0;
+    }
+    updateButtons();
+
+    function executeCommand(command) {
+      undoStack.push(command);
+      redoStack = [];
+      command.execute();
+      updateButtons();
+      noteView(currentFilter);
+      setTimeout(saveData, 100);
+      console.log("실행된 명령:", command.action);
+    }
+
+    function undo() {
+      if (undoStack.length > 0) {
+        const lastCommand = undoStack.pop();
+        if (lastCommand) {
+          console.log("Undo 실행:", lastCommand.action);
+          lastCommand.undo();
+          redoStack.push(lastCommand);
+          updateButtons();
+          noteView(currentFilter);
+          setTimeout(saveData, 100);
+        }
+      }
+    }
+
+    function redo() {
+      if (redoStack.length > 0) {
+        const lastUndoneCommand = redoStack.pop();
+        if (lastUndoneCommand) {
+          console.log("Redo 실행:", lastUndoneCommand.action);
+          lastUndoneCommand.execute();
+          undoStack.push(lastUndoneCommand);
+          updateButtons();
+          noteView(currentFilter);
+          setTimeout(saveData, 100);
+        }
+      }
+    }
+
+    class AddHighlightCommand {
+      constructor(pageNumber, rects, text) {
+        this.action = "add_highlight";
+        this.pageNumber = pageNumber;
+        this.rects = rects;
+        this.text = text;
+        this.id = Date.now() + Math.random(); // 충돌 방지
+      }
+      execute() {
+        const newHighlight = {
+          page: this.pageNumber,
+          rects: this.rects,
+          text: this.text,
+          id: this.id,
+          tag: null,
+        };
+        highlights.push(newHighlight);
+        renderHighlights();
+
+        // 생성 직후 자동 선택
+        lastSelectedHighlightId = newHighlight.id;
+        console.log("신규 하이라이트 선택됨:", lastSelectedHighlightId);
+      }
+      undo() {
+        highlights = highlights.filter((h) => h.id !== this.id);
+        renderHighlights();
+        if (lastSelectedHighlightId === this.id) lastSelectedHighlightId = null;
+      }
+    }
+
+    class RemoveHighlightsCommand {
+      constructor(ids) {
+        this.action = "remove_highlights_batch";
+        this.ids = ids;
+        this.highlightData = highlights.filter((h) => this.ids.includes(h.id));
+      }
+      execute() {
+        highlights = highlights.filter((h) => !this.ids.includes(h.id));
+        renderHighlights();
+      }
+      undo() {
+        highlights.push(...this.highlightData);
+        renderHighlights();
+      }
+    }
+
+    class AddTagCommand {
+      constructor(highlightId, tag) {
+        this.action = "add_tag";
+        this.highlightId = highlightId;
+        this.newTag = tag;
+        this.originalTag =
+          highlights.find((h) => h.id === highlightId)?.tag || null;
+      }
+      execute() {
+        const highlight = highlights.find((h) => h.id === this.highlightId);
+        if (highlight) {
+          highlight.tag = this.newTag;
+        }
+        renderHighlights();
+        noteView(currentFilter);
+      }
+      undo() {
+        const highlight = highlights.find((h) => h.id === this.highlightId);
+        if (highlight) {
+          highlight.tag = this.originalTag;
+        }
+        renderHighlights();
+        noteView(currentFilter);
+      }
+    }
+
+    class RemoveNoteItemCommand {
+      constructor(highlightIds) {
+        this.action = "remove_note_item";
+        this.highlightIds = highlightIds;
+        this.highlightData = highlights.filter((h) =>
+          this.highlightIds.includes(h.id)
+        );
+      }
+      execute() {
+        highlights = highlights.filter((h) => !this.highlightIds.includes(h.id));
+        renderHighlights();
+      }
+      undo() {
+        highlights.push(...this.highlightData);
+        renderHighlights();
+      }
+    }
+
+    document.getElementById("chalkboard").addEventListener("click", function () {
+      FileInput.click();
+    });
+
+    FileInput.addEventListener("change", function (e) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = function () {
         const base64Data = reader.result;
         localStorage.setItem("uploadedPDF", base64Data);
-
         document.getElementById("chalkboard").classList.add("hidden");
         document.getElementById("book-layout").classList.remove("hidden");
-
         renderPDF(base64Data);
-    };
-    reader.readAsDataURL(file);
-});
+      };
+      reader.readAsDataURL(file);
+    });
 
-window.addEventListener("DOMContentLoaded", () => {
-
-    const savedPDF = localStorage.getItem("uploadedPDF");
-    if (savedPDF) {
+    window.addEventListener("DOMContentLoaded", () => {
+      const savedPDF = localStorage.getItem("uploadedPDF");
+      if (savedPDF) {
         document.getElementById("chalkboard").classList.add("hidden");
         document.getElementById("book-layout").classList.remove("hidden");
         renderPDF(savedPDF);
-
         const checkLoad = setInterval(() => {
-            const spans = document.querySelectorAll(".textLayer span");
-            if (spans.length > 0) {
-                console.log("pdf 렌더링 완료, span 개수:", spans.length);
-                clearInterval(checkLoad);
-                setTimeout(()=> {
-                    loadData();
-
-                    setTimeout(() => {
-                        const allTab = document.querySelector('.tab[data-tag="all"]');
-                        if (allTab) {
-                            allTab.classList.add("active");
-                            currentFilter = "all";
-                            noteView("all");
-                            
-                            const noteItems = document.querySelectorAll(".note-item");
-                            console.log("정리뷰 항목 개수:", noteItems.length);
-                        }
-                    }, 500);
-
-
-                },100);
-            }
+          const pageDivs = document.querySelectorAll(".page");
+          if (pageDivs.length > 0) {
+            clearInterval(checkLoad);
+            setTimeout(() => {
+              loadData();
+              renderHighlights();
+              const allTab = document.querySelector('.tab[data-tag="all"]');
+              if (allTab) {
+                allTab.classList.add("active");
+                currentFilter = "all";
+                noteView("all");
+              }
+            }, 500);
+          }
         }, 100);
-    }
-});
+      }
+    });
 
-const viewer = document.getElementById("pdf-container");
+    const viewer = document.getElementById("pdf-container");
 
-function renderPDF(dataUrl) {
-    const pdfContainer = document.getElementById("pdf-container");
-    pdfContainer.innerHTML = "";
-
-    pdfjsLib.getDocument(dataUrl).promise.then((pdf) => {
+    function renderPDF(dataUrl) {
+      const pdfContainer = document.getElementById("pdf-container");
+      pdfContainer.innerHTML = "";
+      pdfjsLib.getDocument(dataUrl).promise.then((pdf) => {
         const totalPg = pdf.numPages;
-
         for (let i = 1; i <= totalPg; i++) {
-            pdf.getPage(i).then((page) => {
-                const wrap = document.createElement("div");
-                wrap.classList.add("wrap");
+          pdf.getPage(i).then((page) => {
+            const wrap = document.createElement("div");
+            wrap.classList.add("wrap");
 
-                const pageDiv = document.createElement("div");
-                pageDiv.classList.add("page");
-                pageDiv.dataset.pageNumber = i;
+            const pageDiv = document.createElement("div");
+            pageDiv.classList.add("page");
+            pageDiv.dataset.pageNumber = i;
 
-                const width = page.view[2];
-                const height = page.view[3];
-                const ratio = width / height;
-                let scale;
-                if (ratio > 1.1) {
-                    scale = 0.7;
-                } else if (ratio < 0.9) {
-                    scale = 1.2;
-                } else {
-                    scale = 1.3;
-                }
+            const width = page.view[2];
+            const height = page.view[3];
+            const ratio = width / height;
+            let scale;
+            if (ratio > 1.1) {
+              scale = 0.7;
+            } else if (ratio < 0.9) {
+              scale = 1.2;
+            } else {
+              scale = 1.3;
+            }
 
-                const viewport = page.getViewport({ scale });
+            const viewport = page.getViewport({ scale });
+            const canvas = document.createElement("canvas");
+            const context = canvas.getContext("2d");
+            const outputScale = window.devicePixelRatio || 1;
 
-                const canvas = document.createElement("canvas");
-                const context = canvas.getContext("2d");
+            canvas.width = viewport.width * outputScale;
+            canvas.height = viewport.height * outputScale;
+            canvas.style.width = `${viewport.width}px`;
+            canvas.style.height = `${viewport.height}px`;
+            context.scale(outputScale, outputScale);
 
-                const outputScale = window.devicePixelRatio || 1;
-                canvas.width = viewport.width * outputScale;
-                canvas.height = viewport.height * outputScale;
-                canvas.style.width = `${viewport.width}px`;
-                canvas.style.height = `${viewport.height}px`;
-                context.scale(outputScale, outputScale);
+            const textLayer = document.createElement("div");
+            textLayer.classList.add("textLayer");
+            textLayer.style.width = `${viewport.width}px`;
+            textLayer.style.height = `${viewport.height}px`;
+            textLayer.style.top = "0";
+            textLayer.style.left = "0";
+            textLayer.style.position = "absolute";
 
-                const textLayer = document.createElement("div");
-                textLayer.classList.add("textLayer");
-                textLayer.style.width = `${viewport.width}px`;
-                textLayer.style.height = `${viewport.height}px`;
-                textLayer.style.top = "0";
-                textLayer.style.left = "0";
-                textLayer.style.position = 'absolute';
-
-                page.render({
-                    canvasContext: context,
-                    viewport: viewport
-                }).promise.then(() => {
-                    page.getTextContent().then(function(textContent) {
-                        pdfjsLib.renderTextLayer({
-                            textContent: textContent,
-                            container: textLayer,
-                            viewport: viewport,
-                            textDivs: [],
-                            enhanceTextSelection: true
-                        }).promise.then(() => {
-                            textLayer.querySelectorAll("span").forEach((span) => {
-                                const width = span.getBoundingClientRect().width;
-                                const height = span.getBoundingClientRect().height;
-
-                                if (width < 2 || height < 2) {
-                                    span.remove();
-                                }
-                            });
-                        });
+            page
+              .render({
+                canvasContext: context,
+                viewport: viewport,
+              })
+              .promise.then(() => {
+                page.getTextContent().then(function (textContent) {
+                  pdfjsLib
+                    .renderTextLayer({
+                      textContent: textContent,
+                      container: textLayer,
+                      viewport: viewport,
+                      textDivs: [],
+                      enhanceTextSelection: true,
+                    })
+                    .promise.then(() => {
+                      textLayer.querySelectorAll("span").forEach((span) => {
+                        const w = span.getBoundingClientRect().width;
+                        const h = span.getBoundingClientRect().height;
+                        if (w < 2 || h < 2) span.remove();
+                      });
                     });
                 });
+              });
 
-                pageDiv.appendChild(canvas);
-                pageDiv.appendChild(textLayer);
-                wrap.appendChild(pageDiv);
-                viewer.appendChild(wrap);
-            });
+            pageDiv.appendChild(canvas);
+            pageDiv.appendChild(textLayer);
+            wrap.appendChild(pageDiv);
+            viewer.appendChild(wrap);
+          });
         }
-    });
-}
+      });
+    }
 
+    const penBtn1 = document.getElementById("pen1");
+    const eraserBtn = document.getElementById("eraser-btn");
+    const tagBtn = document.getElementById("tag-btn");
+    const dropdown = document.getElementById("dropdown");
 
-const penBtn1 = document.getElementById("pen1");
-const eraserBtn = document.getElementById("eraser-btn");
-
-penBtn1.addEventListener("click", function () {
-    isPenActive = !isPenActive;
-
-    if (isPenActive) {
+    penBtn1.addEventListener("click", function () {
+      isPenActive = !isPenActive;
+      if (isPenActive) {
         isEraserActive = false;
+        isTag = false;
         penBtn1.classList.add("active");
         eraserBtn.classList.remove("active");
-    } else {
+        tagBtn.classList.remove("active");
+        dropdown.classList.remove("show");
+      } else {
         penBtn1.classList.remove("active");
-    }
-});
+      }
+    });
 
-eraserBtn.addEventListener("click", function () {
-    isEraserActive = !isEraserActive;
-
-    if (isEraserActive) {
+    eraserBtn.addEventListener("click", function () {
+      isEraserActive = !isEraserActive;
+      if (isEraserActive) {
         isPenActive = false;
+        isTag = false;
         eraserBtn.classList.add("active");
         penBtn1.classList.remove("active");
-    } else {
+        tagBtn.classList.remove("active");
+        dropdown.classList.remove("show");
+      } else {
         eraserBtn.classList.remove("active");
-    }
-});
-
-document.addEventListener("mouseup", function () {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed) return;
-
-    const range = selection.getRangeAt(0);
-    const selectedText = range.toString().replace(/\s+/g, " ").trim();
-    if (!selectedText) return;
-
-    const normalize = (str) => str.replace(/\s+/g, " ").trim();
-
-    let spansInRange = [];
-
-    const allSpans = document.querySelectorAll(".textLayer span");
-    spansInRange = Array.from(allSpans).filter(span => {
-        const spanRange = document.createRange();
-        spanRange.selectNodeContents(span);
-        return range.compareBoundaryPoints(Range.END_TO_START, spanRange) < 0 &&
-               range.compareBoundaryPoints(Range.START_TO_END, spanRange) > 0;
+      }
     });
 
-    if(isPenActive && spansInRange.length === 1) {
-        const span = spansInRange[0];
-        
-        if(
-            range.startContainer === range.endContainer &&
-            range.startContainer.nodeType === Node.TEXT_NODE &&
-            span.contains(range.startContainer)
-        ) {
-            const wrap = document.createElement("span");
-            wrap.classList.add("underlined");
+    // 하이라이트 클릭: 지우개/태그 모드 동작
+    document.addEventListener("click", function (e) {
+      if (isEraserActive && e.target.classList.contains("highlight-span")) {
+        const highlightId = parseFloat(e.target.dataset.id);
+        if (highlightId) {
+          const command = new RemoveHighlightsCommand([highlightId]);
+          executeCommand(command);
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
 
-            try {
-                range.surroundContents(wrap);
-            } catch (e) {
-                const textnode = range.startContainer;
-                const start = range.startOffset;
-                const end = range.endOffset;
+      if (isTag && e.target.classList.contains("highlight-span")) {
+        const highlightId = parseFloat(e.target.dataset.id);
+        if (highlightId) {
+          lastSelectedHighlightId = highlightId;
+          dropdown.classList.add("show");
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    });
 
-                const mid = textnode.splitText(start);
-                const tail = mid.splitText(end - start);
+    // 드래그 선택 후 동작
+    document.addEventListener("mouseup", function () {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) return;
 
-                const marked = document.createElement("span");
-                marked.classList.add("underlined");
-                marked.textContent = mid.nodeValue;
-                mid.replaceWith(marked);
+      const range = selection.getRangeAt(0);
+      const selectedText = range.toString().trim();
+      if (!selectedText) return;
+
+      const startElement =
+        range.startContainer.nodeType === Node.TEXT_NODE
+          ? range.startContainer.parentElement
+          : range.startContainer;
+
+      const pageDiv = startElement.closest(".page");
+      if (!pageDiv) return;
+
+      const pageNumber = pageDiv.dataset.pageNumber;
+      const selectionRects = Array.from(range.getClientRects());
+
+      const pageHighlights = highlights.filter((h) => h.page === pageNumber);
+      const overlappingHighlights = pageHighlights.filter((h) => {
+        return h.rects.some((hRect) =>
+          selectionRects.some(
+            (sRect) =>
+              hRect.left < sRect.right &&
+              hRect.right > sRect.left &&
+              hRect.top < sRect.bottom &&
+              hRect.bottom > sRect.top
+          )
+        );
+      });
+
+      if (isPenActive) {
+        const rects = selectionRects.map((r) => {
+          const pageRect = pageDiv.getBoundingClientRect();
+          return {
+            left: r.left - pageRect.left,
+            top: r.top - pageRect.top,
+            width: r.width,
+            height: r.height,
+          };
+        });
+        const command = new AddHighlightCommand(pageNumber, rects, selectedText);
+        executeCommand(command);
+      } else if (isEraserActive) {
+        if (overlappingHighlights.length > 0) {
+          const command = new RemoveHighlightsCommand(
+            overlappingHighlights.map((h) => h.id)
+          );
+          executeCommand(command);
+        }
+      } else if (isTag) {
+        if (overlappingHighlights.length === 1) {
+          lastSelectedHighlightId = overlappingHighlights[0].id;
+        }
+      }
+
+      selection.removeAllRanges();
+    });
+
+    function toSlug(s) {
+      return String(s).trim().replace(/\s+/g, "-");
+    }
+
+    function renderHighlights() {
+      document.querySelectorAll(".highlight-span").forEach((el) => el.remove());
+
+      highlights.forEach((h) => {
+        const pageDiv = document.querySelector(
+          `.page[data-page-number="${h.page}"]`
+        );
+        if (pageDiv && h.rects && Array.isArray(h.rects)) {
+          h.rects.forEach((rect) => {
+            const highlightSpan = document.createElement("span");
+            highlightSpan.classList.add("highlight-span");
+            highlightSpan.style.position = "absolute";
+            highlightSpan.style.left = `${rect.left}px`;
+            highlightSpan.style.top = `${rect.top}px`;
+            highlightSpan.style.width = `${rect.width}px`;
+            highlightSpan.style.height = `${rect.height}px`;
+            highlightSpan.style.backgroundColor = "yellow";
+            highlightSpan.style.opacity = "0.4";
+            highlightSpan.style.pointerEvents = "auto";
+            highlightSpan.style.cursor = "pointer";
+
+            highlightSpan.dataset.id = h.id;
+            highlightSpan.dataset.text = h.text;
+            if (h.tag) {
+              highlightSpan.dataset.tag = h.tag;
+              highlightSpan.classList.add(`tag-${toSlug(h.tag)}`);
             }
 
-            window.__lastNoteText = range.toString().replace(/\s+/g, " ").trim();
-            window.__lastNotePage = span.closest(".page")?.dataset.pageNumber || "1";
-
-            noteView(currentFilter);
-            selection.removeAllRanges();
-            setTimeout(() => saveData(), 100);
-            return;
+            pageDiv.appendChild(highlightSpan);
+          });
         }
-    } 
-
-    spansInRange = spansInRange.filter(span => {
-        const text = normalize(span.textContent || "");
-        return text && normalize(selectedText).includes(text);
-    });
-
-    if (isPenActive && spansInRange.length > 0) {
-        spansInRange.forEach(span => span.classList.add("underlined"));
-
-        window.__lastNoteText = selectedText;
-        window.__lastNotePage = spansInRange[0]?.closest(".page")?.dataset.pageNumber || "1";
-
-        noteView(currentFilter);
-        selection.removeAllRanges();
-
-        console.log("자동 저장 실행");
-        setTimeout(()=>saveData(), 100);
-
-        return;
+      });
     }
 
-    if (isEraserActive && spansInRange.length > 0) {
-        const underlinedSpans = spansInRange.filter(span => span.classList.contains("underlined"));
+    function getDataList(filterTag = null) {
+      const filteredHighlights = highlights.filter((h) => {
+        if (filterTag === "all" || !filterTag) return true;
+        return h.tag === filterTag;
+      });
 
-        if (underlinedSpans.length > 0) {
-            underlinedSpans.forEach(span => {
-                span.classList.remove("underlined");
-                span.removeAttribute("data-tag");
-                span.classList.remove("tag-중요", "tag-암기", "tag-참고");
-            });
-
-            noteView(currentFilter); //정리 뷰 업데이트
-
-            console.log("지우개 사용 자동 저장");
-            setTimeout(() => saveData(), 100);
-        } 
-        selection.removeAllRanges();
-        return;
-    }
-});
-
-
-
-function getDataList(filterTag = null) {
-    const allSpans = document.querySelectorAll(".textLayer span.underlined");
-    const groupedByPage = {};
-
-    allSpans.forEach(span => {
-        const tag = span.dataset.tag;
-        if (filterTag && filterTag !== "all" && tag !== filterTag) return; // 태그 필터링
-
-        const page = span.closest(".page")?.dataset.pageNumber || "1";
-        if (!groupedByPage[page]) groupedByPage[page] = [];
-        groupedByPage[page].push(span.textContent.trim());
-    });
-
-    const dataList = [];
-
-    for (const page in groupedByPage) {
-        const joined = groupedByPage[page].join(" ").replace(/\s+/g, " ").trim();
-        if (joined) {
-            dataList.push({ text: joined, page });
+      const groupedByPageAndId = {};
+      filteredHighlights.forEach((h) => {
+        const key = `${h.page}-${h.id}`;
+        if (!groupedByPageAndId[key]) {
+          groupedByPageAndId[key] = {
+            text: h.text,
+            page: h.page,
+            id: h.id,
+          };
         }
+      });
+
+      return Object.values(groupedByPageAndId);
     }
 
-    return dataList;
-}
+    function noteView(filterTag = null) {
+      const noteWrap = document.querySelector(".note-wrap");
+      if (!noteWrap) return;
 
+      const notes = getDataList(filterTag);
+      const existingItem = noteWrap.querySelectorAll(".note-item");
+      existingItem.forEach((item) => item.remove());
 
-//정리뷰함수
-function noteView(filterTag = null) {
-    const noteWrap = document.querySelector(".note-wrap");
-    if (!noteWrap) return;
-
-    const notes = getDataList(filterTag);
-
-    const existingItem = noteWrap.querySelectorAll(".note-item");
-    existingItem.forEach(item => item.remove());
-
-    const added = new Set();
-
-    notes.forEach((note) => {
-        const key = `[p.${note.page}] ${note.text}`;
-        if (added.has(key)) return;
-        added.add(key);
-
+      notes.forEach((note) => {
         const noteItem = document.createElement("div");
         noteItem.classList.add("note-item");
-        
+
         const noteText = document.createElement("span");
-        noteText.textContent = key;
+        noteText.textContent = `[p.${note.page}] ${note.text}`;
         noteText.style.cursor = "pointer";
-        
         noteText.addEventListener("click", () => {
-            const pageMoving = document.querySelector(`.page[data-page-number="${note.page}"]`);
-            if (pageMoving) {
-                pageMoving.scrollIntoView({ behavior: "smooth" });
-            }
+          const pageMoving = document.querySelector(
+            `.page[data-page-number="${note.page}"]`
+          );
+          if (pageMoving) {
+            pageMoving.scrollIntoView({ behavior: "smooth" });
+          }
         });
-        const deleteBtn = document.createElement("button");  // SVG X 버튼 생성
+
+        const deleteBtn = document.createElement("button");
         deleteBtn.classList.add("delete-btn");
-
         deleteBtn.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" height="16" viewBox="0 0 320.941 320.941" width="16">
-        <path d="m290.853 40.118h-181.049c-9.06 0-17.551 4.016-23.301 11.038l-84.241 102.968c-3.017 3.692-3.017 9.001 0 12.693l84.251 102.978c5.739 7.013 14.231 11.028 23.291 11.028h181.048c16.592 0 30.088-13.497 30.088-30.088v-180.529c.001-16.592-13.496-30.088-30.087-30.088zm10.029 210.617c0 5.534-4.496 10.029-10.029 10.029h-181.049c-3.026 0-5.857-1.342-7.767-3.673l-79.05-96.621 79.04-96.611c1.92-2.341 4.75-3.683 7.777-3.683h181.048c5.534 0 10.029 4.496 10.029 10.029.001.001.001 180.53.001 180.53z"></path>
-        <path d="m223.585 103.232-43.056 43.056-43.056-43.056-14.182 14.182 43.056 43.056-43.056 43.056 14.182 14.182 43.056-43.056 43.056 43.056 14.182-14.182-43.056-43.056 43.056-43.056z"></path>
-        </svg>
-        `
-
+          <svg xmlns="http://www.w3.org/2000/svg" height="16" viewBox="0 0 320.941 320.941" width="16">
+            <path d="m290.853 40.118h-181.049c-9.06 0-17.551 4.016-23.301 11.038l-84.241 102.968c-3.017 3.692-3.017 9.001 0 12.693l84.251 102.978c5.739 7.013 14.231 11.028 23.291 11.028h181.048c16.592 0 30.088-13.497 30.088-30.088v-180.529c.001-16.592-13.496-30.088-30.087-30.088zm10.029 210.617c0 5.534-4.496 10.029-10.029 10.029h-181.049c-3.026 0-5.857-1.342-7.767-3.673l-79.05-96.621 79.04-96.611c1.92-2.341 4.75-3.683 7.777-3.683h181.048c5.534 0 10.029 4.496 10.029 10.029.001.001.001 180.53.001 180.53z"></path>
+            <path d="m223.585 103.232-43.056 43.056-43.056-43.056-14.182 14.182 43.056 43.056-43.056 43.056 14.182 14.182 43.056-43.056 43.056 43.056 14.182-14.182-43.056-43.056 43.056-43.056z"></path>
+          </svg>
+        `;
         deleteBtn.addEventListener("click", () => {
-        const allSpans = document.querySelectorAll(`.page[data-page-number="${note.page}"] .textLayer span.underlined`);
-        
-        allSpans.forEach(span => {
-            if (span.textContent && note.text.includes(span.textContent.trim())) {
-              if (currentFilter === "all") {
-                span.classList.remove("underlined");
-                span.removeAttribute("data-tag");   
-                span.className = "";
-                } else {
-                span.classList.remove("underlined");
-                span.removeAttribute("data-tag");
-                span.classList.remove(`tag-${currentFilter}`); // 태그 class도 제거
-                }
-              }
-            });
-            noteView(currentFilter); // 다시 렌더링
-
-            console.log("정리뷰 항목 삭제");
-            setTimeout(()=>saveData(), 100);
+          const command = new RemoveNoteItemCommand([note.id]);
+          executeCommand(command);
         });
 
         noteItem.appendChild(noteText);
         noteItem.appendChild(deleteBtn);
         noteWrap.appendChild(noteItem);
-    });
-}
-
-
-
-document.querySelectorAll(".tab").forEach((tab)=>{ //탭 클릭 > active 클래스 부여 
-    tab.addEventListener("click", ()=>{
-        document.querySelectorAll(".tab").forEach((t)=>t.classList.remove("active"));
-
-        tab.classList.add("active");
-
-        const tag = tab.dataset.tag;
-        currentFilter = tag;
-
-        if(tag === "all"){
-            noteView();
-        } else {
-            noteView(tag);
-        }
-    });
-})
-
-const tagBtn = document.getElementById("tag-btn");
-const dropdown =document.getElementById("dropdown");
-
-tagBtn.addEventListener("click", ()=> {
-    dropdown.classList.toggle("show");
-});
-
-document.querySelectorAll("#dropdown button").forEach(button => {
-    button.addEventListener("click", ()=> {
-        selectTag = button.textContent.trim(); //공백 없이 태그그키워드 담음
-        isTag = true;
-
-        dropdown.classList.remove("show");
-        tagBtn.classList.add("active");
-    });
-});
-
-document.addEventListener("click", (e)=> {
-    if (!isTag || !selectTag) return;
-
-    if (isTag) {
-        isPenActive = false;
-        isEraserActive = false;
-        penBtn1.classList.remove("active");
-        eraserBtn.classList.remove("active");
-    };
-
-    const span = e.target;
-    if(span.tagName !== "SPAN") return;
-    if(!span.classList.contains("underlined")) return;
-
-    const currentPage = span.closest(".page");
-    const underlinedSpans = currentPage.querySelectorAll("span.underlined");
-
-    underlinedSpans.forEach(s => {
-        s.dataset.tag = selectTag;
-        s.classList.add(`tag-${selectTag}`);
-    });
-
-    selectTag =null;
-    isTag = false;
-
-    tagBtn.classList.remove("active");
-
-    noteView(currentFilter);
-
-    console.log("태그 지정됨, 자동 저장")
-    setTimeout(()=>saveData(), 100);
-});
-
-
-function saveData() {
-    console.log("저장 함수 실행");
-
-    const underlined =  document.querySelectorAll("span.underlined");
-    console.log("밑줄 친 요소 개수:", underlined.length);
-
-    if (underlined.length === 0) {
-        console.log("저장할 밑줄이 없음");
-        return;
+      });
     }
 
-    const saveList = [];
-    underlined.forEach((span, index) => {
-        const pageElement = span.closest(".page");
-        const rect = span.getBoundingClientRect();
-        const pageRect = pageElement.getBoundingClientRect();
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        const tag = tab.dataset.tag;
+        currentFilter = tag;
+        if (tag === "all") {
+          noteView();
+        } else {
+          noteView(tag);
+        }
+      });
+    });
 
-        const textnode = [...span.childNodes].find(n => n.nodeType === Node.TEXT_NODE);
+    tagBtn.addEventListener("click", function () {
+      isTag = !isTag;
+      if (isTag) {
+        isPenActive = false;
+        isEraserActive = false;
+        tagBtn.classList.add("active");
+        penBtn1.classList.remove("active");
+        eraserBtn.classList.remove("active");
+        dropdown.classList.add("show");
+      } else {
+        tagBtn.classList.remove("active");
+        dropdown.classList.remove("show");
+      }
+    });
 
+    // ▼ 드롭다운 버튼 클릭 시 dataset.tag 사용
+    dropdown.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        const tag = btn.dataset.tag; // 중요/암기/참고
+        console.log("드롭다운 태그 버튼 클릭됨:", tag);
+        if (lastSelectedHighlightId) {
+          const command = new AddTagCommand(lastSelectedHighlightId, tag);
+          executeCommand(command);
+          lastSelectedHighlightId = null;
+          dropdown.classList.remove("show");
+        } else {
+          console.warn("선택된 하이라이트가 없습니다!");
+        }
+      });
+    });
+
+    function saveData() {
+      try {
         const data = {
-            text: span.textContent,
-            tag: span.dataset.tag,
-            page: pageElement.dataset.pageNumber,
-            offset: textnode ? textnode.nodeValue.indexOf(span.textContent) : 0,
-            position: { //위치정보추가(페이지 기준 상대 좌표)
-                left: Math.round(rect.left - pageRect.left),
-                top: Math.round(rect.top - pageRect.top),
-                width: Math.round(rect.width),
-                height: Math.round(rect.height),
-            },
-            id: `highlight_${Date.now()}_${index}` // 고유 id
+          highlights,
+          undoStack: undoStack.map((cmd) => ({
+            action: cmd.action,
+            data: cmd,
+          })),
+          redoStack: redoStack.map((cmd) => ({
+            action: cmd.action,
+            data: cmd,
+          })),
         };
-        console.log("저장할 항목:", data);
-        saveList.push(data);
-    });
+        localStorage.setItem("pdfHighlightsData", JSON.stringify(data));
+        console.log("하이라이트 및 명령 기록 저장 완료");
+      } catch (error) {
+        console.error("데이터 저장 중 오류 발생:", error);
+      }
+    }
 
-    console.log("최종 저장 데이터:", saveList);
-    localStorage.setItem("mybook_data", JSON.stringify(saveList));
-
-}
-
-function clearHighlights() {
-    const highs = document.querySelectorAll(".textLayer span.underlined");
-    highs.forEach(hl => {
-        const parent = hl.parentNode;
-        hl.replaceWith(document.createTextNode(hl.textContent)); //요소제거, 텍스트만 제거
-        if (parent) parent.normalize(); // 인접한 텍스트 노드 병합
-    });
-}
-
-function loadData() {
-    console.log("불러오기 함수 실행");
-    
-    const savedData = localStorage.getItem("mybook_data");
-    
-    if (!savedData) return;
-
-    const dataList = JSON.parse(savedData);
-    
-    clearHighlights();
-    
-    // 밑줄 다시 적용
-    dataList.forEach(item => {
-    const page = document.querySelector(`.page[data-page-number="${item.page}"]`);
-    if (!page) return;
-
-    const spans = page.querySelectorAll(".textLayer span");
-    spans.forEach(span => {
-        const rect = span.getBoundingClientRect();
-        const pageRect = page.getBoundingClientRect();
-
-        const spanPos = {
-            left: Math.round(rect.left - pageRect.left),
-            top: Math.round(rect.top - pageRect.top)
-        };
-
-        // 좌표 + 텍스트 매칭
-        const nearX = Math.abs(item.position.left - spanPos.left) <= 20;
-        const nearY = Math.abs(item.position.top - spanPos.top) <= 20;
-
-        if (!(nearX && nearY)) return;
-        if (!span.textContent || !span.textContent.includes(item.text)) return;
-
-        let textnode = Array.from(span.childNodes).find(n => n.nodeType === Node.TEXT_NODE);
-        if (!textnode) {
-            span.textContent = span.textContent;
-            span.normalize();
-            textnode = Array.from(span.childNodes).find(n => n.nodeType === Node.TEXT_NODE);
-            if (!textnode) return;
+    function loadData() {
+      try {
+        const saved = localStorage.getItem("pdfHighlightsData");
+        if (saved) {
+          const data = JSON.parse(saved);
+          highlights = data.highlights || [];
+          renderHighlights();
+          noteView(currentFilter);
+          console.log("하이라이트 및 명령 기록 불러오기 완료");
         }
-
-
-            
-        const idx = textnode.nodeValue.indexOf(item.text);
-        if (idx !== -1) {
-            const before = textnode.nodeValue.slice(0, idx);
-            const match = textnode.nodeValue.slice(idx, idx + item.text.length);
-            const after = textnode.nodeValue.slice(idx + item.text.length);
-
-            const beforeNode = document.createTextNode(before);
-            const matchNode = document.createElement("span");
-            matchNode.className = "underlined";
-            matchNode.textContent = match;
-
-            if (item.tag) {
-                matchNode.dataset.tag = item.tag;
-                matchNode.classList.add(`tag-${item.tag}`);
-            }
-
-            const afterNode = document.createTextNode(after);
-
-            span.replaceChildren(beforeNode, matchNode, afterNode);
-        }
-    });
-});
-    // 정리본 자동 출력
-    currentFilter = "all";
-    requestAnimationFrame(() => noteView());
-
-    // 탭 UI도 "all" 활성화
-    const allTab = document.querySelector('.tab[data-tag="all"]');
-    if (allTab) {
-        document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-        allTab.classList.add("active");
-    } 
-    console.log("불러오기 완료!");
-} 
+      } catch (error) {
+        console.error("데이터 불러오기 중 오류 발생:", error);
+      }
+    }

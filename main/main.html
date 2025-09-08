@@ -13,10 +13,22 @@
     <header>
         <div class="header_box">
             <div class="header">
+                <button id="undo-btn"><i class="fa-solid fa-arrow-rotate-left fa-xl"></i></button>
+                <button id="redo-btn"><i class="fa-solid fa-arrow-rotate-right fa-xl"></i></button>
                 <div id="pens"><div id="pen1"><i class="fa-solid fa-pen fa-xl"></i></div></div>
-                <button class="tag-btn" id="tag-btn"><i class="fa-solid fa-tag fa-2xl"></i></i></button>
-                <div class="dropdown" id="dropdown"><ul><li><button>중요</button></li><li><button>암기</button></li><li><button>참고</button></li></ul></div>
-                <div class="eraser"><div id="eraser-btn"><i class="fa-solid fa-eraser fa-xl"></i></div></div>
+                <button class="tag-btn" id="tag-btn"><i class="fa-solid fa-tag fa-2xl"></i></button>
+                
+                <div class="dropdown" id="dropdown">
+                    <ul>
+                        <li><button data-tag="중요">중요</button></li>
+                        <li><button data-tag="암기">암기</button></li>
+                        <li><button data-tag="참고">참고</button></li>
+                    </ul>
+                </div>
+                
+                <div class="eraser">
+                    <div id="eraser-btn"><i class="fa-solid fa-eraser fa-xl"></i></div>
+                </div>
             </div>
             <div class="header">
                 <label for="file-btn" class="icon"><i class="fa-regular fa-plus fa-2xl" id="plus-icon"></i></label><input type="file" accept="application/pdf" id="file-btn">
