@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyBook</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="main.css"> </head>
+<body>
+    <header>
+        <div class="header_box">
+            <div class="header">
+                <div id="auth-status">
+                    <div id="auth-loading" style="display: none;">로딩 중...</div>
+                    <button id="login-btn">Login with Google</button>
+                    <div id="user-info" style="display: none;">
+                        <span id="user-email"></span>
+                        <button id="logout-btn">Logout</button>
+                    </div>
+                </div>
+            </div>
+            <div class="header">
+                 <button id="undo-btn" disabled><i class="fa-solid fa-arrow-rotate-left fa-xl"></i></button>
+                <button id="redo-btn" disabled><i class="fa-solid fa-arrow-rotate-right fa-xl"></i></button>
+                <button id="pen1"><i class="fa-solid fa-pen fa-xl"></i></button>
+                <button class="tag-btn" id="tag-btn"><i class="fa-solid fa-tag fa-2xl"></i></button>
+                <div class="dropdown" id="dropdown">
+                    <ul>
+                        <li><button data-tag="중요">중요</button></li>
+                        <li><button data-tag="암기">암기</button></li>
+                        <li><button data-tag="참고">참고</button></li>
+                    </ul>
+                </div>
+                <button id="eraser-btn"><i class="fa-solid fa-eraser fa-xl"></i></button>
+            </div>
+            <div class="header">
+                <label for="file-btn" class="icon"><i class="fa-regular fa-plus fa-2xl" id="plus-icon"></i></label>
+                <input type="file" accept="application/pdf" id="file-btn" style="display: none;">
+
+                <button id="run-ocr-btn" class="icon"><i class="fa-solid fa-robot fa-xl"></i> OCR</button>
+                <div class="icon"><i class="fa-solid fa-magnifying-glass fa-xl"></i></div>
+            </div>
+        </div>
+    </header>
+
+    <section class="viewer-box">
+        <div id="chalkboard" class="chalkboard"><p>로그인 후, PDF 파일을 추가해주세요</p></div>
+
+        <div id="book-layout" class="book hidden">
+            <div id="pdf-container" class="Allpage left-page"></div>
+            <div class="center-line"></div>
+            <div id="note-container" class="Allpage right-page">
+                <div class="tabs">
+                    <div class="tab active" data-tag="all">전체</div>
+                    <div class="tab" data-tag="중요">중요</div>
+                    <div class="tab" data-tag="암기">암기</div>
+                    <div class="tab" data-tag="참고">참고</div>
+                </div>
+                <div id="ocr-results-container" class="note-wrap">
+                    </div>
+                <hr>
+                <div id="highlight-results-container" class="note-wrap">
+                    <h4>📝 나의 밑줄 노트</h4>
+                    </div>
+            </div>
+        </div>
+    </section>
+    
+    <script src="main.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# Firebase
+.firebase
+firebase-debug.log
+firebase-debug.*.log
+
+# Functions-specific ignores
+functions/venv
+functions/__pycache__
+functions/.pytest_cache

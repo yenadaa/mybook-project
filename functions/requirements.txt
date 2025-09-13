@@ -1,0 +1,6 @@
+firebase-functions
+firebase-admin
+google-cloud-vision
+google-cloud-storage
+PyMuPDF
+Pillow
