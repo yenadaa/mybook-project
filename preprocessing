@@ -1,34 +1,41 @@
-# 설치
-!pip install kss pykospacing symspellpy regex openai
-
 # -*- coding: utf-8 -*-
 """
-하이브리드 전처리 파이프라인 (무료 모델 중심 + 필요시 LLM 보정)
-- 규칙: 정규화/하이픈/줄바꿈/헤더-푸터 제거
-- 무료: kss 문장 분리, pykospacing 띄어쓰기(옵션), symspellpy 철자(옵션)
-- 휴리스틱: 섹션 라벨(h2/h3/body/caption) 추정
-- 게이팅: 저신뢰/이상치만 LLM 보정(Optional; OPENAI_API_KEY 필요)
-- 출력: 청크 JSON + 메타데이터(section_path, neighbors, anchors)
+MyBook 자동 전처리 파이프라인 (FULL AUTO)
+- 입력: OCR JSON (--input), 출력: 전처리 결과 JSON (--output)
+- 자동 판단:
+  * KSS(문장분리): 설치됨 + 한국어 비율이 일정 이상이면 자동 사용
+  * 띄어쓰기(pykospacing): 설치됨 + 한국어 비율이 높으면 사용
+  * 철자(symspell): 설치됨 + 사전 경로가 자동 탐지되면 사용(없으면 비활성)
+  * LLM 보정(OpenAI): OPENAI_API_KEY가 있고, conf↓ 또는 이상치↑면만 사용
+- 포함 기능:
+  1) 정규화/헤더·푸터 제거/페이지번호 제거
+  2) 챕터 구간화(TOC 우선 or 패턴) + page→chapter 맵
+  3) 문장 분리 + OCR span 느슨한 정합(sent_spans: bbox 포함)
+  4) 토큰(근사) 기반 청킹 + 오버랩
+  5) 품질 게이트(빈/짧은/좌표 sanity)
+  6) (조건부) LLM 재청크
+  7) 프런트 태그에 chapter_id 자동 부여 함수 제공
 """
 
-import os, json, argparse, unicodedata
-from typing import Any, Dict, List, Optional
-import regex as re
+import os, re, json, argparse, unicodedata
+from typing import Any, Dict, List, Optional, Tuple
 
-# --- 옵션 의존성 로딩 (없으면 자동 비활성) ---
+# -------------------------
+# 의존성 감지
+# -------------------------
 try:
     import kss
     HAS_KSS = True
-except ImportError:
+except Exception:
     HAS_KSS = False
 
 try:
     from pykospacing import Spacing
-    SPACING = Spacing()
+    _SPACING = Spacing()
     HAS_SPACING = True
 except Exception:
     HAS_SPACING = False
-    SPACING = None
+    _SPACING = None
 
 try:
     from symspellpy import SymSpell, Verbosity
@@ -36,47 +43,87 @@ try:
 except Exception:
     HAS_SYMSPELL = False
 
-# --- LLM (선택) ---
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 try:
     from openai import OpenAI
     HAS_OPENAI = bool(OPENAI_API_KEY)
 except Exception:
     HAS_OPENAI = False
 
+# -------------------------
+# 유틸
+# -------------------------
+def _norm(s: str) -> str:
+    if s is None: return ""
+    s = unicodedata.normalize("NFC", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
-# -------------------------
-# 규칙 기반 유틸
-# -------------------------
+def _approx_tokens(txt: str) -> int:
+    return max(1, len(txt)//3)
+
+def _jaccard_like(a: str, b: str) -> float:
+    aw = set(_norm(a).split()); bw = set(_norm(b).split())
+    return (len(aw & bw) / len(aw | bw)) if (aw and bw) else 0.0
+
 def normalize_nfc(t: str) -> str:
     t = unicodedata.normalize("NFKC", t)
-    # 스마트 따옴표 통일
     t = t.replace("“","\"").replace("”","\"").replace("‘","'").replace("’","'")
-    # 연속 공백/탭 정리
     t = re.sub(r"[ \t]{2,}", " ", t)
     return t.strip()
 
 def unhyphenate_linebreak(t: str) -> str:
-    # wor-\nking -> working (줄 끝 하이픈)
     return re.sub(r"(\w)-\n(\w)", r"\1\2", t)
 
 def flatten_soft(t: str) -> str:
-    # 문단 내부 줄바꿈은 공백으로(빈 줄 유지)
     t = re.sub(r"([^\n])\n(?!\n)", r"\1 ", t)
     t = re.sub(r"\n{3,}", "\n\n", t)
     return t
 
-def collect_lines_by_page(ocr: Dict[str, Any]) -> Dict[int, List[str]]:
-    out = {}
+def korean_ratio(text: str) -> float:
+    if not text: return 0.0
+    ko = sum(1 for ch in text if '가' <= ch <= '힣')
+    return ko / max(1, len(text))
+
+def anomaly_score(text: str) -> float:
+    if not text: return 0.0
+    length = len(text)
+    weird = len(re.findall(r"[^\w\s가-힣.,;:!?“”\"\'\-\(\)\[\]…]", text))
+    long_tokens = sum(1 for tok in text.split() if len(tok) > 30)
+    return min(1.0, (weird*0.01) + (long_tokens*0.1) + (0.0005*max(0,length-1200)))
+
+# -------------------------
+# 입력 수집/정리
+# -------------------------
+def collect_lines_and_spans(ocr: Dict[str, Any]) -> Tuple[Dict[int, List[str]], Dict[int, List[Dict[str, Any]]], Dict[int, Optional[float]]]:
+    pages_text: Dict[int, List[str]] = {}
+    pages_spans: Dict[int, List[Dict[str, Any]]] = {}
+    page_conf: Dict[int, Optional[float]] = {}
     for pg in ocr.get("pages", []):
-        pno = pg["page"]
-        lines = []
+        pno = int(pg["page"])
+        lines, spans, confs = [], [], []
         for sp in pg.get("spans", []):
-            txt = sp.get("text", "")
+            txt = _norm(sp.get("text",""))
             if not txt: continue
-            lines.append(normalize_nfc(txt))
-        out[pno] = [l for l in lines if l]
-    return out
+            bbox = sp.get("bbox") or {}
+            spans.append({
+                "text": txt,
+                "bbox": {
+                    "left": float(bbox.get("left", 0.0)),
+                    "top": float(bbox.get("top", 0.0)),
+                    "width": float(bbox.get("width", 0.0)),
+                    "height": float(bbox.get("height", 0.0)),
+                },
+                "conf": sp.get("conf", None),
+                "line_id": sp.get("line_id", None),
+            })
+            lines.append(normalize_nfc(sp.get("text","")))
+            if sp.get("conf") is not None:
+                confs.append(float(sp["conf"]))
+        pages_text[pno] = [l for l in lines if l]
+        pages_spans[pno] = spans
+        page_conf[pno] = (sum(confs)/len(confs)) if confs else None
+    return pages_text, pages_spans, page_conf
 
 def remove_repeated_edges(lines_by_page: Dict[int, List[str]], ratio=0.6) -> Dict[int, List[str]]:
     total = len(lines_by_page) or 1
@@ -87,121 +134,115 @@ def remove_repeated_edges(lines_by_page: Dict[int, List[str]], ratio=0.6) -> Dic
         ftr_cnt[lines[-1]] = ftr_cnt.get(lines[-1], 0) + 1
     hdr = {k for k,v in hdr_cnt.items() if v/total >= ratio}
     ftr = {k for k,v in ftr_cnt.items() if v/total >= ratio}
-
     cleaned = {}
     for p, lines in lines_by_page.items():
         out = []
         for i, ln in enumerate(lines):
             s = ln.strip()
-            if (i==0 and s in hdr) or (i==len(lines)-1 and s in ftr):
-                continue
-            if re.fullmatch(r"\d{1,4}", s):  # 단독 페이지번호 제거
-                continue
+            if (i==0 and s in hdr) or (i==len(lines)-1 and s in ftr): continue
+            if re.fullmatch(r"\d{1,4}", s): continue  # 단독 페이지번호 제거
             out.append(ln)
-        cleaned[p] = out
+        # 연속 중복 제거
+        deduped, prev = [], None
+        for li in out:
+            if li != prev: deduped.append(li)
+            prev = li
+        cleaned[p] = deduped
     return cleaned
 
 # -------------------------
-# 무료 모델 단계
+# 챕터 구간화
 # -------------------------
-def sent_split(text: str) -> List[str]:
-    if HAS_KSS:
-        # 문단 단위로 kss 분할
-        sents: List[str] = []
+_HEADING_PAT = re.compile(r"^\s*(\d+(?:\.\d+)*)\s+[^\n]{2,}$")
+
+def analyze_chapters(pages_text: Dict[int, List[str]], toc: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    if toc:
+        return [{
+            "chapter_id": str(x.get("chapter_id", i+1)),
+            "title": _norm(x.get("title", f"Chapter {i+1}")),
+            "page_start": int(x["page_start"]),
+            "page_end": int(x["page_end"])
+        } for i,x in enumerate(toc)]
+    page_ids = sorted(pages_text.keys())
+    candidates = []
+    for p in page_ids:
+        head = pages_text[p][:5]
+        for line in head:
+            m = _HEADING_PAT.match(line)
+            if m:
+                chap_id = m.group(1).replace(".", "-")
+                candidates.append((p, chap_id, line.strip()))
+                break
+    chapters = []
+    if candidates:
+        candidates.sort(key=lambda x: x[0])
+        for i,(p, chap_id, title) in enumerate(candidates):
+            start = p
+            end = candidates[i+1][0]-1 if i+1 < len(candidates) else page_ids[-1]
+            chapters.append({"chapter_id": chap_id, "title": title, "page_start": start, "page_end": end})
+    else:
+        chapters = [{"chapter_id":"1","title":"Document","page_start":page_ids[0],"page_end":page_ids[-1]}]
+    return chapters
+
+def page_to_chapter_map(chapters: List[Dict[str, Any]]) -> Dict[int, str]:
+    mapping = {}
+    for ch in chapters:
+        for p in range(int(ch["page_start"]), int(ch["page_end"])+1):
+            mapping[p] = str(ch["chapter_id"])
+    return mapping
+
+# -------------------------
+# 한국어 보정 (자동)
+# -------------------------
+def sent_split_kor(text: str, use_kss: bool) -> List[str]:
+    if use_kss and HAS_KSS:
+        sents = []
         for para in re.split(r"\n{2,}", text):
             para = para.strip()
             if not para: continue
             sents += kss.split_sentences(para)
         return [s.strip() for s in sents if s.strip()]
-    # fallback: 마침표/물음표/느낌표/줄임표 기준
+    # fallback
+    text = re.sub(r"([.!?…])([^\s])", r"\1 \2", text)
     return [s.strip() for s in re.split(r"(?<=[.!?…])\s+", text) if s.strip()]
 
-def spacing_fix(text: str) -> str:
-    if HAS_SPACING:
-        try:
-            return SPACING(text)
-        except Exception:
-            return text
+def spacing_fix(text: str, use_spacing: bool) -> str:
+    if use_spacing and HAS_SPACING:
+        try: return _SPACING(text)
+        except Exception: return text
     return text
 
-def build_symspell(dict_path: Optional[str] = None) -> Optional[SymSpell]:
-    if not HAS_SYMSPELL:
-        return None
-    try:
-        sym = SymSpell(max_dictionary_edit_distance=2, prefix_length=7)
-        # 기본 한국어 사전이 없다면, 사용자가 제공(옵션). 없으면 비활성.
-        dict_path = dict_path or ""
-        if dict_path and os.path.exists(dict_path):
-            sym.load_dictionary(dict_path, term_index=0, count_index=1, separator=" ")
-            return sym
-    except Exception:
-        return None
+def build_symspell_auto() -> Optional[Any]:
+    """symspell 사전 자동 탐지: 환경에 맞게 필요시 수정."""
+    if not HAS_SYMSPELL: return None
+    # 자동 탐지 실패 시 비활성 (원한다면 사용자 사전 경로를 여기에 하드코딩/환경변수로 지정)
     return None
 
 def symspell_fix(text: str, sym: Optional[Any]) -> str:
-    if not sym:
-        return text
-    # 너무 공격적으로 교정하지 않도록 단어 길이/숫자/기호 필터
+    if not sym: return text
     tokens = re.findall(r"[가-힣A-Za-z]+|\d+|[^\s\w]", text)
     out = []
     for tok in tokens:
         if re.fullmatch(r"[가-힣A-Za-z]{3,}", tok):
             sug = sym.lookup(tok, Verbosity.CLOSEST, max_edit_distance=2)
-            if sug and sug[0].term:
-                out.append(sug[0].term)
-            else:
-                out.append(tok)
+            out.append(sug[0].term if (sug and sug[0].term) else tok)
         else:
             out.append(tok)
     return "".join(out)
 
 # -------------------------
-# 라벨링 휴리스틱
+# LLM 보정 (조건부)
 # -------------------------
-def label_line(s: str) -> str:
-    t = s.strip()
-    if not t:
-        return "blank"
-    # 번호 패턴으로 시작 + 마침표 없음 + 짧음 => 제목 가능
-    if re.match(r"^(\d+(\.\d+)*|[IVXLCDM]+|[가-힣]\))\s", t) and not t.endswith('.'):
-        return "h2"
-    if len(t) <= 15 and not t.endswith('.'):
-        return "h2"
-    if re.match(r"^(표|그림)\s*\d+[:\.\)]", t):
-        return "caption"
-    if re.search(r"\d+\)$", t) and len(t) < 20:
-        return "h3"
-    return "body"
-
-# -------------------------
-# 게이팅(품질 점검)
-# -------------------------
-def anomaly_score(text: str) -> float:
-    # 단순 이상치 점수: 너무 긴 토큰/기호 비율/깨진문자 비율
-    if not text:
-        return 0.0
-    length = len(text)
-    weird = len(re.findall(r"[^\w\s가-힣.,;:!?“”\"\'\-\(\)\[\]…]", text))
-    long_tokens = sum(1 for tok in text.split() if len(tok) > 30)
-    return min(1.0, (weird*0.01) + (long_tokens*0.1) + (0.0005*max(0,length-1200)))
-
-def need_llm_boost(page_text: str, avg_conf: Optional[float], threshold_conf=0.85) -> bool:
-    bad_conf = (avg_conf is not None) and (avg_conf < threshold_conf)
+def need_llm_boost(page_text: str, avg_conf: Optional[float]) -> bool:
+    bad_conf = (avg_conf is not None) and (avg_conf < 0.85)
     bad_text = anomaly_score(page_text) > 0.2
     return bool(bad_conf or bad_text)
 
-# -------------------------
-# LLM 보정 (선택)
-# -------------------------
 def llm_refine_chunks(page_text: str, max_chars: int) -> List[Dict[str, Any]]:
-    if not HAS_OPENAI:
-        return []
+    if not HAS_OPENAI: return []
     try:
         client = OpenAI(api_key=OPENAI_API_KEY)
-        sys = (
-            "너는 OCR 텍스트를 학습용 청크로 재구성하는 조력자다. "
-            "출력은 반드시 JSON 배열. 설명 금지."
-        )
+        sys = "너는 OCR 텍스트를 학습용 청크로 재구성하는 조력자다. 출력은 반드시 JSON 배열. 설명 금지."
         user = f"""
 아래 텍스트를 {max_chars}자 이하 청크들로 나누고, 각 청크에 다음 키를 넣어 JSON 배열로 출력:
 - section: "h2" | "h3" | "Body" 중 하나
@@ -210,8 +251,7 @@ def llm_refine_chunks(page_text: str, max_chars: int) -> List[Dict[str, Any]]:
 규칙: 원문 순서 유지, 표/그림 캡션은 제외
 
 텍스트:
-\"\"\"{page_text}\"\"\"
-"""
+\"\"\"{page_text}\"\"\""""
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
             temperature=0.2,
@@ -229,116 +269,200 @@ def llm_refine_chunks(page_text: str, max_chars: int) -> List[Dict[str, Any]]:
     return []
 
 # -------------------------
-# 청크화
+# 문장화 + 스팬 정합
 # -------------------------
-def chunk_by_length(sents: List[str], max_chars=900) -> List[str]:
-    chunks, buf = [], ""
-    for s in sents:
-        if len(buf) + len(s) + 1 <= max_chars:
-            buf = (buf + " " + s).strip()
-        else:
-            if buf: chunks.append(buf)
-            buf = s
-    if buf: chunks.append(buf)
-    return chunks
-
-# -------------------------
-# 메인 파이프라인
-# -------------------------
-def run(ocr_json: Dict[str, Any],
-        max_chars: int = 900,
-        use_spacing: bool = True,
-        use_symspell: bool = False,
-        symspell_dict: Optional[str] = None,
-        use_llm: bool = True) -> Dict[str, Any]:
-
-    lines_map = collect_lines_by_page(ocr_json)
-    lines_map = remove_repeated_edges(lines_map)
-
-    sym = build_symspell(symspell_dict) if use_symspell else None
-
-    all_chunks: List[Dict[str, Any]] = []
-    prev_id = None
-    idx = 0
-
-    # OCR 평균 conf가 입력에 있을 수도, 없을 수도 있음: 페이지 단위로 추정
-    conf_map: Dict[int, float] = {}
-    for pg in ocr_json.get("pages", []):
-        pno = pg["page"]
-        confs = [float(sp.get("conf", 1.0)) for sp in pg.get("spans", []) if sp.get("conf") is not None]
-        conf_map[pno] = sum(confs)/len(confs) if confs else None
-
-    for p in sorted(lines_map.keys()):
-        raw = "\n".join(lines_map[p])
+def sentencize_and_align_auto(pages_text: Dict[int, List[str]],
+                              pages_spans: Dict[int, List[Dict[str, Any]]],
+                              auto_use_kss: bool,
+                              auto_use_spacing: bool,
+                              symspell_obj: Optional[Any]) -> List[Dict[str, Any]]:
+    structured: List[Dict[str, Any]] = []
+    for p in sorted(pages_text.keys()):
+        raw = "\n".join(pages_text[p])
         txt = unhyphenate_linebreak(raw)
         txt = flatten_soft(txt)
 
-        # 무료 모델 보정
-        if use_spacing and HAS_SPACING:
-            txt = spacing_fix(txt)
-        if use_symspell and sym:
-            txt = symspell_fix(txt, sym)
+        if auto_use_spacing: txt = spacing_fix(txt, use_spacing=True)
+        if symspell_obj: txt = symspell_fix(txt, symspell_obj)
 
-        # LLM 게이팅
-        refined = []
-        if use_llm and need_llm_boost(txt, conf_map.get(p)):
-            refined = llm_refine_chunks(txt, max_chars=max_chars)
+        sents = sent_split_kor(txt, use_kss=auto_use_kss)
+        sentences = [{"text": s, "spans": []} for s in sents]
 
-        if refined:  # LLM이 성공적으로 구조화
-            for ch in refined:
-                idx += 1
-                cid = f"c_{idx:05d}"
-                item = {
-                    "chunk_id": cid,
-                    "page": p,
-                    "section_path": [ch.get("section","Body")],
-                    "text": ch.get("chunk_text",""),
-                    "avg_conf": conf_map.get(p),
-                    "flags": {"model_structured": True, "llm_refined": True},
-                    "anchors": {"key_sents": ch.get("sentences", [])},
-                    "neighbors": {"prev": prev_id, "next": None},
-                    "source_span_ids": []
-                }
-                if prev_id:
-                    all_chunks[-1]["neighbors"]["next"] = cid
-                all_chunks.append(item)
-                prev_id = cid
-            continue
+        spans = pages_spans.get(p, [])
+        for s in sentences:
+            for sp in spans:
+                if _jaccard_like(s["text"], sp["text"]) >= 0.3:
+                    s["spans"].append(sp)
 
-        # LLM을 쓰지 않거나 실패했으면: 휴리스틱 라벨 + 길이 청크
-        sents = sent_split(txt)
-        chunks = chunk_by_length(sents, max_chars=max_chars)
+        structured.append({"page": p, "sentences": sentences, "spans": spans, "page_text": txt})
+    return structured
 
-        # 페이지의 대표 라벨(간단): 첫문장 라벨 or 분포 기준
-        def_section = "Body"
-        if sents:
-            lb = label_line(sents[0])
-            def_section = "Body" if lb in ("body","blank","caption") else lb
+# -------------------------
+# 청킹 + 오버랩
+# -------------------------
+def chunk_and_overlap(structured: List[Dict[str, Any]],
+                      page2chapter: Dict[int, str],
+                      doc_id: str,
+                      max_tokens:int=1000,
+                      overlap_sents:int=2) -> List[Dict[str, Any]]:
+    chunks: List[Dict[str, Any]] = []
+    cur_sents: List[Dict[str, Any]] = []
+    cur_tokens = 0
 
-        for c in chunks:
-            # 핵심 문장(간단): 청크 앞쪽 2~5문장
-            key_sents = sent_split(c)[:5] if len(c) < max_chars*1.2 else sents[:5]
+    def flush_chunk():
+        nonlocal cur_sents, cur_tokens
+        if not cur_sents: return
+        text = " ".join(s["text"] for s in cur_sents)
+        pages = [s["_page"] for s in cur_sents]
+        page_start, page_end = min(pages), max(pages)
 
-            idx += 1
-            cid = f"c_{idx:05d}"
-            item = {
-                "chunk_id": cid,
-                "page": p,
-                "section_path": [def_section],
-                "text": c,
-                "avg_conf": conf_map.get(p),
-                "flags": {"model_structured": False, "llm_refined": False},
-                "anchors": {"key_sents": key_sents},
-                "neighbors": {"prev": prev_id, "next": None},
-                "source_span_ids": []
-            }
-            if prev_id:
-                all_chunks[-1]["neighbors"]["next"] = cid
-            all_chunks.append(item)
-            prev_id = cid
+        # 대표 chapter
+        chapter_counts: Dict[str, int] = {}
+        for pg in pages:
+            ch = page2chapter.get(pg, "1")
+            chapter_counts[ch] = chapter_counts.get(ch, 0) + 1
+        chapter_id = sorted(chapter_counts.items(), key=lambda x: x[1], reverse=True)[0][0]
 
-    return {"doc_id": ocr_json.get("doc_id", "doc"), "chunks": all_chunks}
+        sent_spans, char_cursor = [], 0
+        for s in cur_sents:
+            st = s["text"]; start, end = char_cursor, char_cursor+len(st); char_cursor = end+1
+            for sp in s.get("spans", []):
+                sent_spans.append({"page": s["_page"], "bbox": sp["bbox"], "char_start": start, "char_end": end})
 
+        chunks.append({
+            "chunk_id": f"chunk_{page_start}_{page_end}_{abs(hash(text))%10_000_000}",
+            "doc_id": doc_id,
+            "chapter_id": chapter_id,
+            "page_start": page_start,
+            "page_end": page_end,
+            "text": text,
+            "sent_spans": sent_spans,
+            "tokens": _approx_tokens(text),
+        })
+        # 오버랩
+        cur_sents = cur_sents[-overlap_sents:]
+        cur_tokens = sum(_approx_tokens(s["text"]) for s in cur_sents)
+
+    for page_obj in structured:
+        p = page_obj["page"]
+        for sent in page_obj["sentences"]:
+            t = _approx_tokens(sent["text"])
+            if cur_sents and cur_tokens + t > max_tokens:
+                flush_chunk()
+            cur_sents.append({"_page": p, **sent})
+            cur_tokens += t
+    if cur_sents: flush_chunk()
+    return chunks
+
+# -------------------------
+# 품질 게이트
+# -------------------------
+def quality_gate(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out = []
+    for c in chunks:
+        if not c.get("text") or len(_norm(c["text"])) < 5: continue
+        good_spans = []
+        for sp in c.get("sent_spans", []):
+            b = sp.get("bbox", {})
+            if not all(k in b for k in ("left","top","width","height")): continue
+            if b["width"] < 0 or b["height"] < 0: continue
+            good_spans.append(sp)
+        c["sent_spans"] = good_spans
+        out.append(c)
+    return out
+
+# -------------------------
+# 태그에 chapter_id 자동 부여
+# -------------------------
+def attach_chapter_to_tags(tag_items: List[Dict[str, Any]], page2chapter: Dict[int, str]) -> List[Dict[str, Any]]:
+    out = []
+    for it in tag_items:
+        page = int(it.get("page", 1))
+        it = dict(it)
+        it["chapter_id"] = page2chapter.get(page, "1")
+        out.append(it)
+    return out
+
+# -------------------------
+# 메인 (FULL AUTO)
+# -------------------------
+def run_auto(ocr_data: Dict[str, Any]) -> Dict[str, Any]:
+    # 1) 수집/정리
+    pages_text, pages_spans, page_conf = collect_lines_and_spans(ocr_data)
+    pages_text = remove_repeated_edges(pages_text)
+
+    # 문서 전반 특성 스캔
+    all_text = []
+    confs = []
+    for pg in ocr_data.get("pages", []):
+        for sp in pg.get("spans", []):
+            all_text.append(sp.get("text") or "")
+            if sp.get("conf") is not None:
+                confs.append(float(sp["conf"]))
+    sample = " ".join(all_text[:5000])
+    ko_ratio = korean_ratio(sample)
+    avg_conf_all = (sum(confs)/len(confs)) if confs else None
+
+    # 2) 챕터 구간화 & 매핑
+    chapters = analyze_chapters(pages_text, ocr_data.get("toc"))
+    p2c = page_to_chapter_map(chapters)
+
+    # 3) 자동 옵션 결정
+    auto_use_kss = HAS_KSS and ko_ratio > 0.25
+    auto_use_spacing = HAS_SPACING and ko_ratio > 0.5
+    sym = build_symspell_auto() if HAS_SYMSPELL else None
+    auto_use_llm = HAS_OPENAI and ( (avg_conf_all is not None and avg_conf_all < 0.85) or anomaly_score(sample) > 0.2 )
+
+    # 4) 문장화 + 스팬 정합
+    structured = sentencize_and_align_auto(
+        pages_text, pages_spans,
+        auto_use_kss, auto_use_spacing, sym
+    )
+
+    # 5) (조건부) LLM 재청크
+    refined_chunks = []
+    if auto_use_llm:
+        MAX_CHARS = 900
+        for page_obj in structured:
+            pg = page_obj["page"]; txt = page_obj["page_text"]
+            if need_llm_boost(txt, page_conf.get(pg)):
+                refined = llm_refine_chunks(txt, max_chars=MAX_CHARS)
+                for ch in refined:
+                    refined_chunks.append({
+                        "chunk_id": f"llm_{pg}_{abs(hash(ch.get('chunk_text','')))%10_000_000}",
+                        "doc_id": ocr_data["doc_id"],
+                        "chapter_id": p2c.get(pg, "1"),
+                        "page_start": pg, "page_end": pg,
+                        "text": ch.get("chunk_text",""),
+                        "sent_spans": [],
+                        "tokens": _approx_tokens(ch.get("chunk_text",""))
+                    })
+
+    # 6) 청킹 + 오버랩 (자동 기준값)
+    chunks = chunk_and_overlap(
+        structured, p2c, ocr_data["doc_id"],
+        max_tokens=1000, overlap_sents=2
+    )
+
+    # 7) 품질 게이트 + LLM 병합
+    chunks = quality_gate(chunks)
+    if refined_chunks:
+        chunks.extend(quality_gate(refined_chunks))
+
+    return {
+        "doc_id": ocr_data["doc_id"],
+        "chapters": chapters,
+        "page2chapter": p2c,
+        "chunks": chunks,
+        "auto": {
+            "use_kss": auto_use_kss,
+            "use_spacing": auto_use_spacing,
+            "use_symspell": bool(sym),
+            "use_llm": auto_use_llm,
+            "korean_ratio": ko_ratio,
+            "avg_conf_all": avg_conf_all
+        }
+    }
 
 # -------------------------
 # CLI
@@ -347,32 +471,14 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
     ap.add_argument("--output", required=True)
-    ap.add_argument("--max-chars", type=int, default=900)
-    ap.add_argument("--use-spacing", type=str, default="true")
-    ap.add_argument("--use-symspell", type=str, default="false")
-    ap.add_argument("--symspell-dict", type=str, default="")
-    ap.add_argument("--llm", type=str, default="true")
     args = ap.parse_args()
 
-    use_spacing = args.use_spacing.lower() == "true"
-    use_symspell = args.use_symspell.lower() == "true"
-    use_llm = args.llm.lower() == "true"
-
     with open(args.input, "r", encoding="utf-8") as f:
-        data = json.load(f)
+        ocr_json = json.load(f)
 
-    out = run(
-        data,
-        max_chars=args.max_chars,
-        use_spacing=use_spacing,
-        use_symspell=use_symspell,
-        symspell_dict=args.symspell_dict or None,
-        use_llm=use_llm
-    )
+    result = run_auto(ocr_json)
 
     with open(args.output, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
+        json.dump(result, f, ensure_ascii=False, indent=2)
 
     print(f"[OK] wrote {args.output}")
-
-
