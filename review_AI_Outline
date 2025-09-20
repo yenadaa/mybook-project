@@ -10,7 +10,7 @@ MyBook Review API (Firebase 백엔드/Cloud Run용)
   3) 문항 수는 적당한 범위에서 임의 자동 배분(엔드포인트별 파라미터로 조절 가능)
 
 배포:
-- Firebase Hosting ↔ Cloud Run 라우팅(권장) 또는 GCF(Gen2)에서도 ASGI 지원 가능.
+- python 백엔드용 코드
 - 환경변수 OPENAI_API_KEY 필요.
 """
 
