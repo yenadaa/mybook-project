@@ -95,3 +95,14 @@ li>button:hover{background: rgb(180, 180, 180);}
     pointer-events: none; /* 밑줄이 클릭되지 않도록 설정 */
     border-radius: 2px;
 }
+
+#selection-box {
+  position: absolute; /* 뷰어 내에서 절대 위치를 가짐 */
+  border: 2px dashed #007bff; /* 파란색 점선 테두리 */
+  background-color: rgba(0, 123, 255, 0.2); /* 반투명한 파란색 배경 */
+  z-index: 10; /* 다른 요소들 위에 보이도록 함 */
+
+  /* (가장 중요) 마우스 이벤트가 통과되도록 하여, 
+     사각형 아래의 PDF 뷰어가 계속 마우스 움직임을 감지하게 함 */
+  pointer-events: none; 
+}

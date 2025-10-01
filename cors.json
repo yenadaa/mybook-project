@@ -1,8 +1,8 @@
 [
   {
-    "origin": ["*"],
-    "method": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    "responseHeader": ["*"],
+    "origin": ["https://mybook-d143d.web.app"],
+    "method": ["GET", "POST", "PUT"],
+    "responseHeader": ["Content-Type", "access-control-allow-origin"],
     "maxAgeSeconds": 3600
   }
 ]
