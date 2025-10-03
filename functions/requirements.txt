@@ -4,3 +4,6 @@ google-cloud-vision
 google-cloud-storage
 PyMuPDF
 Pillow
+openai
+certifi
+requests

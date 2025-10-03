@@ -1,35 +1,198 @@
 import base64
+import json
+import os
+import re
 from firebase_functions import https_fn, options
-from firebase_admin import initialize_app
+from firebase_admin import initialize_app, firestore, storage
 from google.cloud import vision
+import openai
+import certifi
+import requests
 
+
+
+# --- 초기화 ---
 initialize_app()
-options.set_global_options(region="asia-northeast3", memory=options.MemoryOption.MB_256)
+#gpt
+options.set_global_options(
+    region="asia-northeast3",
+    memory=options.MemoryOption.MB_512,
+    timeout_sec=300,
+    secrets=["OPENAI_API_KEY"]  # 실제 키 값이 아닌, Secret의 이름을 사용합니다.
+)
 
+db = None
+vision_client = None
+storage_client = None
+
+# --- OCR 펜 함수 (수정 불필요) ---
 @https_fn.on_call()
 def runOcrOnSelection(req: https_fn.CallableRequest) -> https_fn.Response:
+    global vision_client
+    if vision_client is None:
+        vision_client = vision.ImageAnnotatorClient()
+
+    # ... (기존 코드와 동일) ...
     if req.auth is None:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
-
-    # 1. 프론트엔드에서 보낸 Base64 이미지 데이터 받기
+    
     base64_image = req.data.get("imageData")
     if not base64_image:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="이미지 데이터가 필요합니다.")
 
     try:
-        # 2. Base64 데이터를 이미지 바이트로 디코딩
         image_bytes = base64.b64decode(base64_image)
-        
-        # 3. Vision API 클라이언트 초기화 및 호출
-        client = vision.ImageAnnotatorClient()
         image = vision.Image(content=image_bytes)
-        response = client.text_detection(image=image)
-        
-        # 4. 결과 텍스트 추출 및 반환
+        response = vision_client.text_detection(image=image)
         detected_text = response.text_annotations[0].description if response.text_annotations else ""
-        
         return {"text": detected_text}
-
     except Exception as e:
         print(f"OCR 처리 중 오류 발생: {e}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message="OCR 처리 중 서버에서 오류가 발생했습니다.")
+
+
+# --- ✨ PDF 전체 분석 함수 (최종 수정본) ---
+@https_fn.on_call()
+def runOcrOnDemand(req: https_fn.CallableRequest) -> https_fn.Response:
+    global db, vision_client, storage_client
+
+    if db is None:
+        db = firestore.client()
+    if vision_client is None:
+        vision_client = vision.ImageAnnotatorClient()
+    if storage_client is None:
+        storage_client = storage.bucket()
+
+    if req.auth is None:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
+
+    file_path = req.data.get("filePath")
+    if not file_path:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="파일 경로가 필요합니다.")
+
+    user_id = req.auth.uid
+    file_name = os.path.basename(file_path)
+
+    try:
+        bucket_name = os.environ.get('GCP_PROJECT') + ".appspot.com"
+        gcs_source_uri = f"gs://{bucket_name}/{file_path}"
+        gcs_destination_uri = f"gs://{bucket_name}/{file_path}_ocr_results/"
+
+        # 1. Vision API로 PDF OCR 분석 요청
+        gcs_source = vision.GcsSource(uri=gcs_source_uri)
+        feature = vision.Feature(type_=vision.Feature.Type.DOCUMENT_TEXT_DETECTION)
+        input_config = vision.InputConfig(gcs_source=gcs_source, mime_type='application/pdf')
+        
+        gcs_destination = vision.GcsDestination(uri=gcs_destination_uri)
+        output_config = vision.OutputConfig(gcs_destination=gcs_destination, batch_size=100)
+
+        async_request = vision.AsyncAnnotateFileRequest(
+            features=[feature], input_config=input_config, output_config=output_config
+        )
+        operation = vision_client.async_batch_annotate_files(requests=[async_request])
+        print(f"OCR 작업 대기 중: {operation.operation.name}")
+        operation.result(timeout=420)
+        print("OCR 작업 완료.")
+
+        # 2. Storage에 저장된 OCR 결과(JSON 파일) 목록 가져오기
+        destination_prefix = f"{file_path}_ocr_results/"
+        blobs = storage_client.list_blobs(prefix=destination_prefix)
+
+        # 3. 각 JSON 파일을 읽어서 Firestore에 저장
+        for blob in blobs:
+            if not blob.name.endswith('.json'):
+                continue
+            
+            print(f"결과 파일 처리 중: {blob.name}")
+            json_string = blob.download_as_string()
+            response = json.loads(json_string)
+            
+            for page_response in response['responses']:
+                page_annotation = page_response['fullTextAnnotation']
+                page_number_match = re.search(r'output-(\d+)-to-', blob.name)
+                page_number = int(page_number_match.group(1)) if page_number_match else 0
+
+                # ✨ 여기에 userId와 bookId를 포함하여 저장합니다!
+                ocr_data = {
+                    'userId': user_id,
+                    'bookId': file_name,
+                    'sourceFile': file_path,
+                    'pageNumber': page_number + 1, # 페이지 번호는 1부터 시작
+                    'text': page_annotation['text'],
+                }
+                db.collection('ocr_results').add(ocr_data)
+                print(f"{page_number + 1} 페이지 결과 저장 완료")
+
+        return {"status": "success", "message": "OCR 분석 및 결과 저장이 완료되었습니다."}
+
+    except Exception as e:
+        print(f"전체 OCR 처리 중 오류 발생: {e}")
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message="전체 OCR 처리 중 오류가 발생했습니다.")
+    
+@https_fn.on_call(secrets=["OPENAI_API_KEY"])
+def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
+    global db
+    if db is None:
+        db = firestore.client()
+
+    if req.auth is None:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
+
+    user_id = req.auth.uid
+    book_id = req.data.get("bookId")
+
+    # Firestore에서 밑줄 텍스트 가져오기
+    highlights_ref = db.collection('highlights')
+    query = highlights_ref.where('userId', '==', user_id).where('bookId', '==', book_id)
+    docs = query.stream()
+    texts = [doc.to_dict().get('ocrText', '') for doc in docs]
+    if not texts:
+        return {"quiz": "퀴즈를 만들 밑줄이 없습니다."}
+    context = "\n".join(texts)
+
+    # 프롬프트 작성
+    prompt = f"""
+    당신은 학습 내용을 바탕으로 객관식 퀴즈를 출제하는 AI입니다.
+    아래 주어진 내용을 바탕으로, 가장 중요하다고 생각되는 내용에 대해 객관식 문제 3개를 만들어주세요.
+    요청사항:
+    - 각 문제는 질문(question), 4개의 보기(options), 정답(answer)을 포함해야 합니다.
+    - 결과는 반드시 JSON 형식으로 반환해주세요. 예: {{"quiz": [{{"question": "...", "options": ["...", "...", "...", "..."], "answer": "..."}}]}}
+    --- 학습 내용 ---
+    {context}
+    """
+
+    try:
+        # ✨ --- 수정된 부분 ---
+        api_key_raw = os.environ.get("OPENAI_API_KEY")
+        if not api_key_raw:
+            raise Exception("OPENAI_API_KEY is not set.")
+        
+        # 'api_key' 변수를 정의합니다.
+        api_key = api_key_raw.strip()
+        
+        api_url = "https://api.openai.com/v1/chat/completions"
+        
+        headers = {
+            # 정의된 'api_key' 변수를 사용합니다.
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "gpt-4-turbo",
+            "messages": [{"role": "system", "content": prompt}],
+            "response_format": {"type": "json_object"}
+        }
+
+        response = requests.post(api_url, headers=headers, json=payload)
+        response.raise_for_status()
+
+        result_json = response.json()
+        quiz_data = result_json['choices'][0]['message']['content']
+        # --- 여기까지 수정 ---
+
+        return json.loads(quiz_data)
+
+    except Exception as e:
+        print(f"GPT API 호출 오류: {e}")
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message="퀴즈 생성 중 오류가 발생했습니다.")

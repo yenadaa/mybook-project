@@ -1,10 +1,31 @@
-// ✨ Firebase SDK 모듈 임포트
+// Firebase SDK 모듈 임포트
+//  Firebase 앱 초기화 (필수)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, query, where, orderBy } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
-import { getAuth, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithPopup } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-storage.js";
-import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-functions.js";
 
+// Firebase 인증 (로그인, 사용자 관리)
+import { getAuth, GoogleAuthProvider, signOut, onAuthStateChanged, signInWithPopup } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
+// Firestore DB (데이터 읽기/쓰기/수정)
+import { 
+    getFirestore, 
+    doc, 
+    setDoc,
+    updateDoc, 
+    getDoc, 
+    getDocs, // 'getTodaysReviews' 함수에 필요
+    collection, 
+    addDoc, // 'saveHighlight' 함수에 필요
+    onSnapshot, 
+    query, 
+    where, 
+    orderBy,
+    Timestamp // 'saveHighlight', 'getTodaysReviews' 함수에 필요
+} from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
+
+// Firebase Storage (이미지, PDF 등 파일 업로드)
+import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-storage.js";
+
+// Firebase Functions (백엔드 함수 호출)
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-functions.js";
 
 // ✨ Firebase 설정 
 const firebaseConfig = {
@@ -153,13 +174,16 @@ function loadLastFile() {
 // --- PDF 렌더링 및 하이라이트 로직 ---
 function renderPDF(url) {
     viewer.innerHTML = "";
-    loadData();
+
+    // 데이터 로딩 함수 호출 (밑줄 그리기는 여기서 하지 않음)
+    if (currentUser && currentFileName) {
+        listenToHighlights(currentUser.uid, currentFileName);
+    }
 
     const loadingTask = pdfjsLib.getDocument(url);
     
     loadingTask.promise.then((pdf) => {
-        // ✨ 2. PDF 객체를 전역 변수에 저장
-        loadedPdf = pdf; 
+        loadedPdf = pdf; // 전역 변수에 PDF 객체 저장
 
         const pagePromises = [];
         for (let i = 1; i <= pdf.numPages; i++) {
@@ -202,7 +226,7 @@ function renderPDF(url) {
                 
                 viewer.appendChild(pageDiv);
             });
-            setTimeout(renderHighlights, 200);
+            // [수정] 여기서 setTimeout(renderHighlights, 200); 코드를 완전히 삭제했습니다.
         });
     });
 }
@@ -211,7 +235,8 @@ function renderHighlights() {
     document.querySelectorAll(".highlight-span").forEach((el) => el.remove());
 
     highlights.forEach((h) => {
-        const pageDiv = document.querySelector(`.page[data-page-number="${h.page}"]`);
+        const pageDiv = document.querySelector(`.page[data-page-number="${h.pageNumber}"]`);
+        
         if (pageDiv && h.rects && Array.isArray(h.rects)) {
             h.rects.forEach((rect) => {
                 const highlightSpan = document.createElement("span");
@@ -225,6 +250,8 @@ function renderHighlights() {
             });
         }
     });
+    
+    // 밑줄 그리기가 끝난 후 오른쪽 노트 뷰도 업데이트
     noteView(currentFilter);
 }
 
@@ -239,7 +266,7 @@ async function saveData() {
         console.error("데이터 저장 실패:", error);
     }
 }
-
+/*
 async function loadData() {
     if (!currentUser || !currentFileName) return;
     try {
@@ -257,7 +284,7 @@ async function loadData() {
         console.error("데이터 불러오기 실패:", error);
     }
 }
-
+*/
 
 // --- 사용자 인터랙션 로직 ---
 penBtn.addEventListener("click", () => {
@@ -285,33 +312,6 @@ document.addEventListener("click", function (e) {
     }
 });
 
-document.addEventListener("mouseup", function () {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || !isPenActive) return;
-
-    const range = selection.getRangeAt(0);
-    const selectedText = range.toString().trim();
-    if (!selectedText) return;
-
-    const pageDiv = range.startContainer.parentElement.closest(".page");
-    if (!pageDiv) return;
-
-    const pageNumber = pageDiv.dataset.pageNumber;
-    const pageRect = pageDiv.getBoundingClientRect();
-    const rects = Array.from(range.getClientRects()).map(r => ({
-        left: r.left - pageRect.left,
-        top: r.top - pageRect.top,
-        width: r.width,
-        height: r.height,
-    }));
-    
-    const newHighlight = { page: pageNumber, rects: rects, text: selectedText, id: Date.now() + Math.random(), tag: null };
-    highlights.push(newHighlight);
-    renderHighlights();
-    setTimeout(saveData, 100);
-    selection.removeAllRanges();
-});
-
 
 // --- 노트 뷰 및 태그 로직 ---
 function noteView(filterTag) {
@@ -323,10 +323,10 @@ function noteView(filterTag) {
     notes.forEach(note => {
         const noteItem = document.createElement("div");
         noteItem.className = "note-item";
-        noteItem.textContent = `[p.${note.page}] ${note.text}`;
+        noteItem.textContent = `[p.${note.pageNumber}] ${note.ocrText}`;
         noteItem.style.cursor = "pointer";
         noteItem.addEventListener("click", () => {
-            const pageEl = document.querySelector(`.page[data-page-number="${note.page}"]`);
+            const pageEl = document.querySelector(`.page[data-page-number="${note.pageNumber}"]`);
             pageEl?.scrollIntoView({ behavior: "smooth" });
         });
         noteContainer.appendChild(noteItem);
@@ -350,7 +350,7 @@ function listenToOcrResults(fileName) {
     
     const q = query(
         collection(db, "ocr_results"), 
-        where("sourceFile", "==", `uploads/${currentUser.uid}/${fileName}`), 
+        where("sourceFile", "==", `uploads/${currentUser.uid}/${fileName}`),
         orderBy("pageNumber")
     );
     
@@ -434,67 +434,106 @@ viewer.addEventListener("mousemove", (e) => {
 });
 
 viewer.addEventListener("mouseup", async (e) => {
-    if (selectionBox) {
-        selectionBox.remove();
-        selectionBox = null;
-    }
-    if (!isDrawing || !isOcrPenActive) return;
-    isDrawing = false;
-    const rect = viewer.getBoundingClientRect();
-    ocrRect.endX = e.clientX - rect.left;
-    ocrRect.endY = e.clientY - rect.top;
-
-    // 드래그한 영역의 페이지와 캔버스 찾기
-    const pageDiv = e.target.closest(".page");
-    if (!pageDiv) return;
-    const canvas = pageDiv.querySelector("canvas");
-    const pageNumber = pageDiv.dataset.pageNumber;
-
-    // 3. 선택 영역을 잘라내어 Base64 이미지로 변환
-    const left = Math.min(ocrRect.startX, ocrRect.endX);
-    const top = Math.min(ocrRect.startY, ocrRect.endY);
-    const width = Math.abs(ocrRect.startX - ocrRect.endX);
-    const height = Math.abs(ocrRect.startY - ocrRect.endY);
-
-    if (width < 10 || height < 10) return; // 너무 작은 영역은 무시
-
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext("2d");
-    tempCtx.drawImage(canvas, left, top, width, height, 0, 0, width, height);
-    
-    // data:image/png;base64,... 형태의 이미지 데이터
-    const imageDataUrl = tempCanvas.toDataURL("image/png");
-    // "data:image/png;base64," 부분을 제거
-    const base64ImageData = imageDataUrl.split(',')[1]; 
-
-    // 4. 새로운 Cloud Function 호출
-    ocrPenBtn.textContent = "인식 중...";
-    ocrPenBtn.disabled = true;
-
-    try {
-        const runOcrOnSelection = httpsCallable(functions, 'runOcrOnSelection');
-        const result = await runOcrOnSelection({ imageData: base64ImageData });
-        const ocrText = result.data.text;
+    // --- OCR 펜 로직 (드래그 종료 처리) ---
+    if (isOcrPenActive) {
+        if (selectionBox) {
+            selectionBox.remove();
+            selectionBox = null;
+        }
+        if (!isDrawing) return;
+        isDrawing = false;
         
-        if (ocrText) {
-            // 인식된 텍스트를 밑줄 노트에 추가 (기존 하이라이트 기능 재활용)
-             const newHighlight = { page: pageNumber, text: ocrText.trim(), id: Date.now(), rects: [] }; // rects는 시각적 표시가 아니므로 비워둠
-             highlights.push(newHighlight);
-             noteView(currentFilter); // 노트 뷰 업데이트
-             setTimeout(saveData, 100); // Firestore에 저장
-            alert("텍스트 인식 성공!");
-        } else {
-            alert("인식된 텍스트가 없습니다.");
+        const rect = viewer.getBoundingClientRect();
+        ocrRect.endX = e.clientX - rect.left;
+        ocrRect.endY = e.clientY - rect.top;
+
+        const pageDiv = e.target.closest(".page");
+        if (!pageDiv) return;
+        const canvas = pageDiv.querySelector("canvas");
+        const pageNumber = pageDiv.dataset.pageNumber;
+
+        const left = Math.min(ocrRect.startX, ocrRect.endX);
+        const top = Math.min(ocrRect.startY, ocrRect.endY);
+        const width = Math.abs(ocrRect.startX - ocrRect.endX);
+        const height = Math.abs(ocrRect.startY - ocrRect.endY);
+
+        if (width < 10 || height < 10) return;
+
+        const rects = [{ left, top, width, height }];
+
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = width;
+        tempCanvas.height = height;
+        const tempCtx = tempCanvas.getContext("2d");
+        
+        const canvasRect = canvas.getBoundingClientRect();
+        const viewerRect = viewer.getBoundingClientRect();
+        const canvasLeftInViewer = canvasRect.left - viewerRect.left;
+        const canvasTopInViewer = canvasRect.top - viewerRect.top;
+
+        tempCtx.drawImage(canvas, left - canvasLeftInViewer, top - canvasTopInViewer, width, height, 0, 0, width, height);
+        
+        const imageDataUrl = tempCanvas.toDataURL("image/png");
+        const base64ImageData = imageDataUrl.split(',')[1]; 
+
+        ocrPenBtn.textContent = "인식 중...";
+        ocrPenBtn.disabled = true;
+
+        try {
+            const runOcrOnSelection = httpsCallable(functions, 'runOcrOnSelection');
+            const result = await runOcrOnSelection({ imageData: base64ImageData });
+            const ocrText = result.data.text;
+            
+            if (ocrText && ocrText.trim()) {
+                // 수정된 부분: 새로운 saveHighlight 함수를 호출하여 개별 문서로 저장합니다.
+                await saveHighlight(ocrText.trim(), [], "", currentUser.uid, currentFileName, pageNumber, rects);
+                alert("텍스트 인식 및 저장 성공!");
+            } else {
+                alert("인식된 텍스트가 없습니다.");
+            }
+        } catch (error) {
+            console.error("OCR 인식 실패:", error);
+            alert("OCR 인식에 실패했습니다.");
+        } finally {
+            ocrPenBtn.textContent = "OCR 펜";
+            ocrPenBtn.disabled = false;
+        }
+        return; // OCR 펜 로직이 실행되었으면 여기서 종료
+    }
+    // --- 일반 밑줄 펜 로직 ---
+// --- 일반 밑줄 펜 로직 ---
+    if (isPenActive) {
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed) return;
+
+        const range = selection.getRangeAt(0);
+        const selectedText = range.toString().trim();
+        if (!selectedText) {
+            selection.removeAllRanges();
+            return;
         }
 
-    } catch (error) {
-        console.error("OCR 인식 실패:", error);
-        alert("OCR 인식에 실패했습니다.");
-    } finally {
-        ocrPenBtn.textContent = "OCR 펜";
-        ocrPenBtn.disabled = false;
+        const pageDiv = range.startContainer.parentElement.closest(".page");
+        if (!pageDiv) {
+            selection.removeAllRanges();
+            return;
+        }
+        const pageNumber = pageDiv.dataset.pageNumber;
+        
+        // 1. 먼저 좌표(rects)를 계산합니다.
+        const pageRect = pageDiv.getBoundingClientRect();
+        const rects = Array.from(range.getClientRects()).map(r => ({
+            left: r.left - pageRect.left,
+            top: r.top - pageRect.top,
+            width: r.width,
+            height: r.height,
+        }));
+
+        // 2. 계산된 모든 정보(selectedText, pageNumber, rects)를 함께 저장합니다.
+        await saveHighlight(selectedText, [], "", currentUser.uid, currentFileName, pageNumber, rects);
+        
+        // 3. 마지막으로 선택 영역을 해제합니다.
+        selection.removeAllRanges();
     }
 });
 
@@ -595,3 +634,174 @@ runOcrBtn.addEventListener('click', async () => {
 
 
 });
+
+// '저장' 버튼 클릭 시 실행될 함수
+async function saveHighlight(ocrText, tags, memo, userId, bookId, pageNumber, rects) {
+  try {
+    // 1. 망각 곡선 계산 (1단계: 1시간 후 복습)
+    const now = new Date();
+    const nextReviewDate = new Date(now.getTime() + 60 * 60 * 1000); // 1시간 뒤(수정 예정)
+
+    // 2. Firestore에 저장할 데이터 객체를 만듭니다. (DB 설계 그대로)
+    const highlightData = {
+      userId: userId, //사용자 고유 id
+      bookId: bookId, //이 밑줄이 어떤 책에 속해있나요
+      ocrText: ocrText, //ocr 추출된 텍스트 내용
+      pageNumber: pageNumber,
+      rects: rects,
+      tags: tags, //사용자가 선택한 태그 목록
+      memo: memo,
+      createdAt: Timestamp.fromDate(now), //최초 학습일
+      lastReviewedAt: Timestamp.fromDate(now), //마지막 복습한 시간
+      reviewStage: 0, //몇번째 복습인지?
+      nextReviewDate: Timestamp.fromDate(nextReviewDate) //다음 복습일
+    };
+
+    // 3. 'highlights' 컬렉션에 새로운 문서를 추가합니다.
+    const docRef = await addDoc(collection(db, "highlights"), highlightData);
+    
+    console.log("하이라이트 저장 성공! 문서 ID: ", docRef.id);
+    //alert("저장되었습니다!");
+
+  } catch (error) {
+    console.error("하이라이트 저장 실패: ", error);
+    alert("저장에 실패했습니다.");
+  }
+}
+
+//오늘 복습할 내용 불러오기
+async function getTodaysReviews(userId) {
+  try {
+    const highlightsRef = collection(db, "highlights");
+
+    // 1. 쿼리를 만듭니다.
+    // - userId가 내 ID와 같고,
+    // - nextReviewDate가 지금 이 시간보다 이전(<=)인 문서들을 찾습니다.
+    const q = query(
+      highlightsRef,
+      where("userId", "==", userId),
+      where("nextReviewDate", "<=", Timestamp.now())
+    );
+
+    // 2. 쿼리를 실행하여 문서들을 가져옵니다.
+    const querySnapshot = await getDocs(q);
+    const reviews = [];
+    querySnapshot.forEach((doc) => {
+      reviews.push({ id: doc.id, ...doc.data() });
+    });
+
+    console.log("오늘 복습할 내용:", reviews);
+    return reviews; // 이 데이터를 화면에 표시해주면 됩니다.
+
+  } catch (error) {
+    console.error("복습 데이터 로딩 실패: ", error);
+    return [];
+  }
+}
+
+// --- 실시간 데이터 불러오기 로직 ---
+function listenToHighlights(userId, bookId) {
+  const highlightsRef = collection(db, "highlights");
+  const q = query(
+    highlightsRef, 
+    where("userId", "==", userId), 
+    where("bookId", "==", bookId)
+  );
+
+  onSnapshot(q, (snapshot) => {
+    const loadedHighlights = [];
+    snapshot.forEach((doc) => {
+      loadedHighlights.push({ id: doc.id, ...doc.data() });
+    });
+    
+    highlights = loadedHighlights; 
+    
+    // ✨ [수정] 이 함수가 반드시 호출되어야 밑줄이 그려집니다.
+    renderHighlights();
+    
+    console.log("✅ 실시간 밑줄 데이터 로딩 및 그리기 완료:", highlights);
+
+  }, (error) => {
+    console.error("🔥 실시간 데이터 로딩 실패:", error);
+  });
+
+const quizBtn = document.getElementById("quiz-btn");
+
+quizBtn.addEventListener('click', async () => {
+    if (!currentUser || !currentFileName) {
+        alert("먼저 책을 선택해주세요.");
+        return;
+    }
+
+    quizBtn.disabled = true;
+    quizBtn.textContent = "퀴즈 생성 중...";
+
+    try {
+        const generateQuiz = httpsCallable(functions, 'generateQuiz');
+        const result = await generateQuiz({ bookId: currentFileName });
+
+        // 결과를 화면에 예쁘게 표시하는 로직
+        displayQuiz(result.data.quiz);
+
+    } catch (error) {
+        console.error("퀴즈 생성 실패:", error);
+        alert("퀴즈 생성에 실패했습니다.");
+    } finally {
+        quizBtn.disabled = false;
+        quizBtn.textContent = "퀴즈 만들기";
+    }
+});
+
+function displayQuiz(quizArray) {
+    const quizContainer = document.getElementById("quiz-container"); // 퀴즈를 표시할 div
+    quizContainer.innerHTML = ""; // 이전 퀴즈 내용 삭제
+
+    quizArray.forEach((q, index) => {
+        const questionDiv = document.createElement('div');
+        questionDiv.innerHTML = `
+            <h4>${index + 1}. ${q.question}</h4>
+            <ul>
+                ${q.options.map(opt => `<li>${opt}</li>`).join('')}
+            </ul>
+            <p><b>정답:</b> ${q.answer}</p>
+        `;
+        quizContainer.appendChild(questionDiv);
+    });
+}
+
+
+// '복습 완료' 버튼 클릭 시 실행될 함수
+async function completeReview(highlightId, currentStage) {
+    const docRef = doc(db, "highlights", highlightId);
+
+    // 1. 다음 복습 단계 및 날짜 계산
+    const nextStage = currentStage + 1;
+    const nextReviewDate = calculateNextReviewDate(nextStage);
+
+    // 2. Firestore 문서 업데이트
+    await updateDoc(docRef, {
+        reviewStage: nextStage,
+        lastReviewedAt: Timestamp.now(),
+        nextReviewDate: Timestamp.fromDate(nextReviewDate)
+    });
+
+    console.log(`${highlightId} 복습 완료! 다음 단계: ${nextStage}`);
+}
+
+function calculateNextReviewDate(stage) {
+    const now = new Date();
+    switch (stage) {
+        case 1: // 1차 복습 후 (1일 뒤)
+            return new Date(now.setDate(now.getDate() + 1));
+        case 2: // 2차 복습 후 (7일 뒤)
+            return new Date(now.setDate(now.getDate() + 7));
+        case 3: // 3차 복습 후 (16일 뒤)
+            return new Date(now.setDate(now.getDate() + 16));
+        case 4: // 4차 복습 후 (35일 뒤)
+            return new Date(now.setDate(now.getDate() + 35));
+        default: // 5차 이상 (무한)
+            return new Date(now.setFullYear(now.getFullYear() + 10));
+    }
+}
+
+}

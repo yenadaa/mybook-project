@@ -1,10 +1,21 @@
 {
+  "functions": {
+    "source": "functions"
+  },
   "hosting": {
-    "public": ".",
+    "public": "public",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
     ]
+  },
+  "emulators": {
+    "functions": {
+      "port": 8082
+    },
+    "ui": {
+      "enabled": true
+    }
   }
 }
