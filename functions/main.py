@@ -2,8 +2,9 @@ import base64
 import json
 import os
 import re
-from firebase_functions import https_fn, options
-from firebase_admin import initialize_app, firestore, storage
+from firebase_functions import https_fn, options,scheduler_fn
+from firebase_admin import initialize_app, firestore, storage,messaging
+from datetime import datetime, timezone
 from google.cloud import vision
 import openai
 import certifi
@@ -196,3 +197,87 @@ def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
     except Exception as e:
         print(f"GPT API 호출 오류: {e}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message="퀴즈 생성 중 오류가 발생했습니다.")
+
+@scheduler_fn.on_schedule(schedule="every day 09:00", timezone="Asia/Seoul")
+def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
+    global db
+    if db is None:
+        db = firestore.client()
+
+    print("매일 복습 알림 함수 실행 시작.")
+    now = datetime.now(timezone.utc)
+
+    try:
+        query = db.collection('highlights').where('nextReviewDate', '<=', now)
+        docs = query.stream()
+
+        users_to_notify = {}
+        for doc in docs:
+            item = doc.to_dict()
+            user_id = item.get('userId')
+            if user_id:
+                users_to_notify[user_id] = users_to_notify.get(user_id, 0) + 1
+        
+        if not users_to_notify:
+            print("알림을 보낼 사용자가 없습니다.")
+            return
+
+        for user_id, count in users_to_notify.items():
+            try:
+                user_doc = db.collection('users').document(user_id).get()
+                if not user_doc.exists: continue
+                
+                token = user_doc.to_dict().get('fcmToken')
+                if not token: continue
+
+                message = messaging.Message(
+                    notification=messaging.Notification(
+                        title="MyBook 복습 시간입니다! 📚",
+                        body=f"오늘 복습할 {count}개의 밑줄이 기다리고 있어요.",
+                    ),
+                    token=token,
+                )
+                messaging.send(message)
+                print(f"{user_id}에게 복습 알림 전송 완료 ({count}개 항목)")
+            except Exception as e:
+                print(f"{user_id}에게 알림 전송 중 오류 발생: {e}")
+
+    except Exception as e:
+        print(f"복습 알림 함수 실행 중 전체 오류 발생: {e}")
+
+    print("매일 복습 알림 함수 실행 종료.")
+
+@https_fn.on_call()
+def testSendNotification(req: https_fn.CallableRequest) -> https_fn.Response:
+    """현재 로그인한 사용자에게 테스트 알림을 즉시 보냅니다."""
+    global db
+    if db is None:
+        db = firestore.client()
+
+    if req.auth is None:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
+
+    user_id = req.auth.uid
+    try:
+        user_doc = db.collection('users').document(user_id).get()
+        if not user_doc.exists:
+            return {"status": "error", "message": "사용자 문서를 찾을 수 없습니다."}
+        
+        token = user_doc.to_dict().get('fcmToken')
+        if not token:
+            return {"status": "error", "message": "FCM 토큰이 없습니다."}
+
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title="테스트 알림 🔔",
+                body="이 메시지가 보인다면 푸시 알림 기능이 정상적으로 동작하는 것입니다!",
+            ),
+            token=token,
+        )
+        messaging.send(message)
+        print(f"{user_id}에게 테스트 알림 전송 완료")
+        return {"status": "success"}
+
+    except Exception as e:
+        print(f"테스트 알림 전송 실패: {e}")
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message="알림 전송 중 오류 발생")

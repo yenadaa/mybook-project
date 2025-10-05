@@ -27,6 +27,9 @@ import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstati
 // Firebase Functions (백엔드 함수 호출)
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-functions.js";
 
+import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging.js";
+
+
 // ✨ Firebase 설정 
 const firebaseConfig = {
     apiKey: "AIzaSyAeWQaegsc3H01i8qkNoyFZX6CcaW-iJ2g",
@@ -88,6 +91,11 @@ onAuthStateChanged(auth, (user) => {
         userInfo.style.display = 'block';
         userEmail.textContent = user.email;
         loadLastFile();
+
+        // 1. 오늘의 복습 목록 표시
+        displayTodaysReviews();
+        // 2. 알림 권한 팝업 띄우기
+        requestNotificationPermission();
     } else {
         currentUser = null;
         loginBtn.style.display = 'block';
@@ -638,30 +646,27 @@ runOcrBtn.addEventListener('click', async () => {
 // '저장' 버튼 클릭 시 실행될 함수
 async function saveHighlight(ocrText, tags, memo, userId, bookId, pageNumber, rects) {
   try {
-    // 1. 망각 곡선 계산 (1단계: 1시간 후 복습)
     const now = new Date();
-    const nextReviewDate = new Date(now.getTime() + 60 * 60 * 1000); // 1시간 뒤(수정 예정)
+    const nextReviewDate = new Date(now.getTime() +1 *60 * 1000); //1분
 
-    // 2. Firestore에 저장할 데이터 객체를 만듭니다. (DB 설계 그대로)
     const highlightData = {
-      userId: userId, //사용자 고유 id
-      bookId: bookId, //이 밑줄이 어떤 책에 속해있나요
-      ocrText: ocrText, //ocr 추출된 텍스트 내용
+      userId: userId,
+      bookId: bookId,
+      ocrText: ocrText,
       pageNumber: pageNumber,
       rects: rects,
-      tags: tags, //사용자가 선택한 태그 목록
+      tags: tags,
       memo: memo,
-      createdAt: Timestamp.fromDate(now), //최초 학습일
-      lastReviewedAt: Timestamp.fromDate(now), //마지막 복습한 시간
-      reviewStage: 0, //몇번째 복습인지?
-      nextReviewDate: Timestamp.fromDate(nextReviewDate) //다음 복습일
+      createdAt: Timestamp.fromDate(now),
+      lastReviewedAt: Timestamp.fromDate(now),
+      reviewStage: 0,
+      nextReviewDate: Timestamp.fromDate(nextReviewDate)
     };
 
-    // 3. 'highlights' 컬렉션에 새로운 문서를 추가합니다.
     const docRef = await addDoc(collection(db, "highlights"), highlightData);
     
     console.log("하이라이트 저장 성공! 문서 ID: ", docRef.id);
-    //alert("저장되었습니다!");
+    // "저장되었습니다" 알림창은 제거된 상태입니다.
 
   } catch (error) {
     console.error("하이라이트 저장 실패: ", error);
@@ -680,7 +685,8 @@ async function getTodaysReviews(userId) {
     const q = query(
       highlightsRef,
       where("userId", "==", userId),
-      where("nextReviewDate", "<=", Timestamp.now())
+      where("nextReviewDate", "<=", Timestamp.now()),
+      orderBy("nextReviewDate") 
     );
 
     // 2. 쿼리를 실행하여 문서들을 가져옵니다.
@@ -715,8 +721,6 @@ function listenToHighlights(userId, bookId) {
     });
     
     highlights = loadedHighlights; 
-    
-    // ✨ [수정] 이 함수가 반드시 호출되어야 밑줄이 그려집니다.
     renderHighlights();
     
     console.log("✅ 실시간 밑줄 데이터 로딩 및 그리기 완료:", highlights);
@@ -724,37 +728,49 @@ function listenToHighlights(userId, bookId) {
   }, (error) => {
     console.error("🔥 실시간 데이터 로딩 실패:", error);
   });
+} // listenToHighlights 함수는 여기서 끝납니다.
 
+
+// --- 퀴즈 버튼 이벤트 리스너 ---
 const quizBtn = document.getElementById("quiz-btn");
 
-quizBtn.addEventListener('click', async () => {
-    if (!currentUser || !currentFileName) {
-        alert("먼저 책을 선택해주세요.");
+if(quizBtn) { // 버튼이 없을 수도 있으니 안전장치 추가
+    quizBtn.addEventListener('click', async () => {
+        if (!currentUser || !currentFileName) {
+            alert("먼저 책을 선택해주세요.");
+            return;
+        }
+
+        quizBtn.disabled = true;
+        quizBtn.textContent = "퀴즈 생성 중...";
+
+        try {
+            const generateQuiz = httpsCallable(functions, 'generateQuiz');
+            const result = await generateQuiz({ bookId: currentFileName });
+
+            displayQuiz(result.data.quiz);
+
+        } catch (error) {
+            console.error("퀴즈 생성 실패:", error);
+            alert("퀴즈 생성에 실패했습니다.");
+        } finally {
+            quizBtn.disabled = false;
+            quizBtn.textContent = "퀴즈 만들기";
+        }
+    });
+}
+
+
+// --- 퀴즈 표시 함수 ---
+function displayQuiz(quizArray) {
+    const quizContainer = document.getElementById("quiz-container");
+    if (!quizContainer) return;
+    quizContainer.innerHTML = "";
+
+    if (!quizArray || !Array.isArray(quizArray)) {
+        quizContainer.innerHTML = `<p>${quizArray || "퀴즈를 생성할 수 없습니다."}</p>`;
         return;
     }
-
-    quizBtn.disabled = true;
-    quizBtn.textContent = "퀴즈 생성 중...";
-
-    try {
-        const generateQuiz = httpsCallable(functions, 'generateQuiz');
-        const result = await generateQuiz({ bookId: currentFileName });
-
-        // 결과를 화면에 예쁘게 표시하는 로직
-        displayQuiz(result.data.quiz);
-
-    } catch (error) {
-        console.error("퀴즈 생성 실패:", error);
-        alert("퀴즈 생성에 실패했습니다.");
-    } finally {
-        quizBtn.disabled = false;
-        quizBtn.textContent = "퀴즈 만들기";
-    }
-});
-
-function displayQuiz(quizArray) {
-    const quizContainer = document.getElementById("quiz-container"); // 퀴즈를 표시할 div
-    quizContainer.innerHTML = ""; // 이전 퀴즈 내용 삭제
 
     quizArray.forEach((q, index) => {
         const questionDiv = document.createElement('div');
@@ -770,15 +786,12 @@ function displayQuiz(quizArray) {
 }
 
 
-// '복습 완료' 버튼 클릭 시 실행될 함수
+// --- 복습 관련 함수들 ---
 async function completeReview(highlightId, currentStage) {
     const docRef = doc(db, "highlights", highlightId);
-
-    // 1. 다음 복습 단계 및 날짜 계산
     const nextStage = currentStage + 1;
     const nextReviewDate = calculateNextReviewDate(nextStage);
 
-    // 2. Firestore 문서 업데이트
     await updateDoc(docRef, {
         reviewStage: nextStage,
         lastReviewedAt: Timestamp.now(),
@@ -786,22 +799,124 @@ async function completeReview(highlightId, currentStage) {
     });
 
     console.log(`${highlightId} 복습 완료! 다음 단계: ${nextStage}`);
+    // 복습 완료 후 목록을 바로 갱신
+    displayTodaysReviews();
 }
 
 function calculateNextReviewDate(stage) {
     const now = new Date();
     switch (stage) {
-        case 1: // 1차 복습 후 (1일 뒤)
-            return new Date(now.setDate(now.getDate() + 1));
-        case 2: // 2차 복습 후 (7일 뒤)
-            return new Date(now.setDate(now.getDate() + 7));
-        case 3: // 3차 복습 후 (16일 뒤)
-            return new Date(now.setDate(now.getDate() + 16));
-        case 4: // 4차 복습 후 (35일 뒤)
-            return new Date(now.setDate(now.getDate() + 35));
-        default: // 5차 이상 (무한)
-            return new Date(now.setFullYear(now.getFullYear() + 10));
+        case 1: return new Date(now.setDate(now.getDate() + 1));
+        case 2: return new Date(now.setDate(now.getDate() + 7));
+        case 3: return new Date(now.setDate(now.getDate() + 16));
+        case 4: return new Date(now.setDate(now.getDate() + 35));
+        default: return new Date(now.setFullYear(now.getFullYear() + 10));
     }
 }
 
+async function displayTodaysReviews() {
+    console.log("1. displayTodaysReviews 함수 실행 시작");
+    if (!currentUser) {
+        console.log("사용자 정보가 없어서 중단합니다.");
+        return;
+    }
+
+    const reviewContainer = document.getElementById("review-container");
+    if(!reviewContainer) {
+        console.error("오류: id='review-container'인 HTML 요소를 찾을 수 없습니다!");
+        return;
+    }
+    console.log("2. review-container 요소를 찾았습니다.");
+
+    try {
+        const reviews = await getTodaysReviews(currentUser.uid);
+        console.log("3. getTodaysReviews 함수로부터 받은 데이터:", reviews);
+
+        reviewContainer.innerHTML = "";
+
+        if (reviews.length === 0) {
+            console.log("4-1. 복습할 항목이 없어서 메시지를 표시합니다.");
+            reviewContainer.innerHTML = "<p>오늘 복습할 항목이 없습니다. ✨</p>";
+            return;
+        }
+
+        console.log("4-2. 복습할 항목이 있어서 목록을 생성합니다.");
+        reviews.forEach(item => {
+            const reviewItem = document.createElement("div");
+            reviewItem.className = "review-item";
+            reviewItem.innerHTML = `
+                <p>${item.ocrText}</p>
+                <button class="review-done-btn">복습 완료</button>
+            `;
+
+            reviewItem.querySelector('.review-done-btn').addEventListener('click', () => {
+                completeReview(item.id, item.reviewStage);
+            });
+
+            reviewContainer.appendChild(reviewItem);
+        });
+
+    } catch (error) {
+        console.error("displayTodaysReviews 함수 실행 중 오류 발생:", error);
+    }
+}
+
+// --- 알림 권한 요청 함수 ---
+async function requestNotificationPermission() {
+    if (!currentUser) return;
+
+    console.log('알림 권한을 요청합니다...');
+    try {
+        const permission = await Notification.requestPermission();
+
+        if (permission === 'granted') {
+            console.log('알림 권한이 허용되었습니다.');
+            const messaging = getMessaging();
+            const vapidKey = "BJUxXLJCZi0NhC-HHQwAx3zYgTpPsoD5smYhRSOQw81-_Ciiw_r_yJRyPuYNHItyfLjIXlQkHcxo7pyXsb-YVHg";
+            
+            // ✨ 수정된 부분: 서비스 워커가 준비될 때까지 기다립니다.
+            console.log("서비스 워커 준비를 기다립니다...");
+            const registration = await navigator.serviceWorker.ready;
+            console.log("서비스 워커가 준비되었습니다:", registration);
+
+            // 준비된 서비스 워커를 사용하여 토큰을 요청합니다.
+            const fcmToken = await getToken(messaging, { 
+                vapidKey: vapidKey,
+                serviceWorkerRegistration: registration // registration 객체를 명시적으로 전달
+            });
+
+            if (fcmToken) {
+                console.log('FCM 토큰:', fcmToken);
+                const userDocRef = doc(db, "users", currentUser.uid);
+                await setDoc(userDocRef, { fcmToken: fcmToken }, { merge: true });
+                console.log("FCM 토큰이 Firestore에 저장되었습니다.");
+            } else {
+                console.log('FCM 토큰을 발급받을 수 없습니다.');
+            }
+        } else {
+            console.log('알림 권한이 거부되었습니다.');
+        }
+    } catch (error) {
+        console.error('알림 권한 요청 또는 토큰 발급 중 오류 발생:', error);
+    }
+}
+
+// --- 버튼 이벤트 리스너들 ---
+const refreshBtn = document.getElementById("refresh-reviews-btn");
+if (refreshBtn) {
+    refreshBtn.addEventListener('click', displayTodaysReviews);
+}
+
+const testBtn = document.getElementById("test-notification-btn");
+if (testBtn) {
+    testBtn.addEventListener('click', async () => {
+        try {
+            const testSend = httpsCallable(functions, 'testSendNotification');
+            await testSend();
+            alert("테스트 알림을 요청했습니다! 잠시 후 알림을 확인하세요.");
+        } catch (error) {
+            console.error("테스트 알림 요청 실패:", error);
+            alert("테스트 알림 요청에 실패했습니다.");
+        }
+    });
 }

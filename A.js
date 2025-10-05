@@ -64,11 +64,12 @@ const ocrPenBtn = document.getElementById("ocr-pen-btn");       // OCR 펜 버�
  */
 onAuthStateChanged(auth, (user) => {
     if (user) {
-        // 사용자가 로그인한 경우
         currentUser = user;
         loginBtn.style.display = 'none';
         userInfo.style.display = 'block';
         userEmail.textContent = user.email;
+        loadLastFile();
+        displayTodaysReviews();
     } else {
         // 사용자가 로그아웃한 경우
         currentUser = null;
