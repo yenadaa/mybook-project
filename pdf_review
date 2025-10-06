@@ -1,0 +1,390 @@
+# (필요 시) 라이브러리 설치
+# 이미 설치되어 있으면 이 셀은 건너뛰어도 됩니다.
+!pip -q install --upgrade openai pydantic
+# (필요 시) 라이브러리 설치
+# 이미 설치되어 있으면 이 셀은 건너뛰어도 됩니다.
+!pip -q install --upgrade openai pydantic
+
+# OPENAI_API_KEY 설정 (반드시 본인 키로 넣으세요)
+import os
+os.environ["OPENAI_API_KEY"] = "^^" # <- 여기에 키 입력
+
+from __future__ import annotations
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass
+import re
+from PyPDF2 import PdfReader
+
+def _normalize_text(s: str) -> str:
+    # 공백·개행 정리 (필요하면 더 추가 가능)
+    s = s.replace("\u00a0", " ")
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+def load_pdf_text_by_page(pdf_path: str) -> List[str]:
+    """텍스트 기반 PDF에서 페이지별 문자열을 추출."""
+    reader = PdfReader(pdf_path)
+    pages = []
+    for i, page in enumerate(reader.pages):
+        try:
+            t = page.extract_text() or ""
+        except Exception:
+            t = ""
+        pages.append(_normalize_text(t))
+    return pages
+
+def chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> List[str]:
+    """
+    긴 페이지 텍스트를 max_chars 기준으로 슬라이스.
+    overlap은 청크 경계 손실을 줄이기 위한 겹침 글자수.
+    """
+    text = text.strip()
+    if not text:
+        return []
+    chunks = []
+    start = 0
+    n = len(text)
+    while start < n:
+        end = min(start + max_chars, n)
+        # 문단 경계 우선(가까운 줄바꿈으로 커팅 시도)
+        cut = end
+        if end < n:
+            nl = text.rfind("\n", start + int(max_chars*0.7), end)
+            if nl != -1 and nl > start + int(max_chars*0.3):
+                cut = nl
+        chunks.append(text[start:cut].strip())
+        if cut >= n:
+            break
+        start = max(cut - overlap, 0)
+        if start == 0 and cut == 0:  # 안전장치
+            break
+    return [c for c in chunks if c]
+
+def pdf_to_preprocessed_doc(
+    pdf_path: str,
+    doc_id: Optional[str] = None,
+    page_max_chars: int = 1200,
+    overlap: int = 150,
+) -> Dict[str, Any]:
+    """
+    PDF를 전처리 산출(JSON 스키마) 형태로 변환.
+    - anchors는 비워두되, 이후 모델이 기본 키워드로 대체 사용.
+    """
+    pages = load_pdf_text_by_page(pdf_path)
+    chunks = []
+    cid = 0
+    for pno, page_text in enumerate(pages, start=1):
+        if not page_text.strip():
+            continue
+        page_chunks = chunk_text(page_text, max_chars=page_max_chars, overlap=overlap)
+        for j, ch in enumerate(page_chunks, start=1):
+            chunks.append({
+                "id": f"c{cid}",
+                "text": ch,
+                "section_path": [f"p{pno}", f"seg{j}"],  # 페이지/세그먼트 정보
+                "anchors": [],  # 비움(없어도 동작)
+            })
+            cid += 1
+    return {"doc_id": doc_id or pdf_path, "chunks": chunks}
+
+
+import os, json, random, textwrap
+from typing import Any, Dict, List, Optional, Tuple
+from pydantic import BaseModel
+from openai import OpenAI
+
+# ---------------- OpenAI client ----------------
+def _get_client() -> "OpenAI":
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("환경변수 OPENAI_API_KEY가 필요합니다.")
+    return OpenAI(api_key=api_key)
+
+def _ask_gpt_json(prompt: str, model: str, temperature: float, max_tokens: int) -> Any:
+    client = _get_client()
+    rsp = client.responses.create(
+        model=model,
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+        input=[
+            {"role": "system", "content": _system_prompt()},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+    )
+    return json.loads(rsp.output_text)
+
+# ---------------- 데이터 모델 ----------------
+class Chunk(BaseModel):
+    id: Optional[str] = None
+    text: str
+    section_path: Optional[List[str]] = None
+    anchors: Optional[List[str]] = None
+
+class PreprocessedDoc(BaseModel):
+    doc_id: Optional[str] = None
+    chunks: List[Chunk]
+
+class SummaryOut(BaseModel):
+    summary_300: str
+    summary_half: str
+    summary_full: str
+    sources: List[str]
+
+class ReviewOut(BaseModel):
+    ox: List[Dict[str, Any]]            # {"q","answer"(bool),"why","sources","tags","confused"}
+    short: List[Dict[str, Any]]         # {"q","answer"(str),"sources","tags","confused"}
+    discussion: List[Dict[str, Any]]    # {"q","hint","sources","tags"}
+
+class Output(BaseModel):
+    summaries: SummaryOut
+    review: ReviewOut
+    meta: Dict[str, Any]
+
+# ---------------- 유틸 ----------------
+def _system_prompt() -> str:
+    return (
+        "당신은 교재 기반 학습 도우미입니다. 제공된 텍스트만을 근거로 요약과 문제를 생성합니다. "
+        "각 결과에는 가능한 한 출처(chunk id)를 포함하세요."
+    )
+
+def _normalize_ids(doc: PreprocessedDoc) -> List[str]:
+    for i, ch in enumerate(doc.chunks):
+        if not ch.id:
+            ch.id = f"c{i}"
+    return [c.id for c in doc.chunks]
+
+def _select_scope(
+    doc: PreprocessedDoc,
+    section_contains: Optional[str],
+    chunk_ids: Optional[List[str]],
+    auto_chars: int = 4000,
+) -> Tuple[str, List[str]]:
+    chunks = doc.chunks
+    if section_contains:
+        sel = [c for c in chunks if section_contains in " / ".join(c.section_path or [])]
+    elif chunk_ids:
+        s = set(chunk_ids)
+        sel = [c for c in chunks if c.id in s]
+    else:
+        sel, total = [], 0
+        for c in chunks:
+            t = (c.text or "").strip()
+            if not t: 
+                continue
+            if total + len(t) > auto_chars and total > 0:
+                break
+            sel.append(c)
+            total += len(t)
+    if not sel:
+        raise ValueError("선택된 범위가 비었습니다. section 또는 chunk_ids를 확인하세요.")
+    joined, ids = [], []
+    for c in sel:
+        ids.append(c.id)
+        sp = c.section_path or []
+        header = f"[# {' › '.join(sp)}]\n" if sp else ""
+        joined.append(header + (c.text or ""))
+    return "\n\n".join(joined), ids
+
+def _fix_sources(candidate: List[str], valid_ids: List[str], fallback: List[str]) -> List[str]:
+    valid = set(valid_ids)
+    out = [s for s in (candidate or []) if s in valid]
+    return out or (fallback if fallback else (valid_ids[:1] if valid_ids else []))
+
+def _default_keywords(doc: PreprocessedDoc, k: int = 5) -> List[str]:
+    bag: List[str] = []
+    for c in doc.chunks:
+        if c.anchors:
+            bag.extend([a for a in c.anchors if isinstance(a, str) and a.strip()])
+    if not bag:
+        return ["핵심 개념", "정의", "관계", "예시", "의의"][:k]
+    seen, out = set(), []
+    for a in bag:
+        if a not in seen:
+            out.append(a); seen.add(a)
+    return out[:k]
+
+# ---------------- 프롬프트 ----------------
+def _prompt_summaries(text: str) -> str:
+    return textwrap.dedent(f"""
+    [과제]
+    아래 텍스트를 근거로 세 가지 길이의 요약을 만드세요.
+    - 요약A(약 300자 이내): 핵심만 1문단.
+    - 요약B(약 A4 반쪽=600~800자): 핵심 논지+핵심 근거. 중요한 개념은 굵게(별표) 표기: *개념*.
+    - 요약C(약 A4 한쪽=1200~1600자): 구조적 요약(배경→핵심 주장→근거/예시→시사점).
+
+    [출처 표기]
+    - 각 요약 끝에 참고한 chunk id를 대괄호로 나열: [c1,c2,...]
+
+    [텍스트]
+    {text}
+
+    [출력(JSON)]
+    {{
+      "summary_300": "...",
+      "summary_half": "...",
+      "summary_full": "...",
+      "sources": ["c1","c2","..."]
+    }}
+    """).strip()
+
+def _prompt_review(text: str, keywords: List[str], counts: Dict[str, int]) -> str:
+    kws = ", ".join(keywords)
+    # counts: {"ox": int, "short": int, "discussion": int}
+    return textwrap.dedent(f"""
+    [과제]
+    아래 텍스트와 키워드를 근거로 학습용 문제를 생성하세요.
+    - 간단퀴즈: OX {counts['ox']}문항, 단답 {counts['short']}문항
+    - 서술형: 토론 {counts['discussion']}문항
+
+    [키워드]
+    {kws}
+
+    [형식]
+    - OX: "q", 정답 "answer"(true/false), 근거 한 줄 "why"
+    - 단답: "q", 정답 "answer"(핵심 키워드 중심)
+    - 토론: "q", 짧은 힌트 "hint"
+    - 각 항목에 최소 1개 이상의 출처 chunk id 포함("sources": ["c1", ...])
+    - 텍스트 밖 지식 금지, 간결하고 명료하게
+
+    [출력(JSON)]
+    {{
+      "review": {{
+        "ox":    [{{"q":"...","answer":true,"why":"...","sources":["c1"],"tags":["OX"],"confused":false}}],
+        "short": [{{"q":"...","answer":"...","sources":["c2"],"tags":["단답"],"confused":false}}],
+        "discussion": [{{"q":"...","hint":"...","sources":["c3"],"tags":["토론"]}}]
+      }}
+    }}
+
+    [텍스트]
+    {text}
+    """).strip()
+
+# ---------------- 실행 함수 ----------------
+def generate_summaries(
+    doc: PreprocessedDoc,
+    section: Optional[str] = None,
+    chunk_ids: Optional[List[str]] = None,
+    model: str = "gpt-4.1-mini",
+) -> SummaryOut:
+    all_ids = _normalize_ids(doc)
+    text, used_ids = _select_scope(doc, section, chunk_ids)
+    data = _ask_gpt_json(_prompt_summaries(text), model=model, temperature=0.2, max_tokens=1600)
+    data["sources"] = _fix_sources(data.get("sources", []), all_ids, used_ids)
+    return SummaryOut(**data)
+
+def generate_review(
+    doc: PreprocessedDoc,
+    section: Optional[str] = None,
+    chunk_ids: Optional[List[str]] = None,
+    keywords: Optional[List[str]] = None,
+    model: str = "gpt-4.1-mini",
+    seed: Optional[int] = None,
+    counts_override: Optional[Dict[str, int]] = None,  # {"ox":3,"short":4,"discussion":2}
+) -> ReviewOut:
+    _normalize_ids(doc)
+    all_ids = [c.id for c in doc.chunks]
+    text, used_ids = _select_scope(doc, section, chunk_ids)
+    kws = keywords or _default_keywords(doc)
+
+    rnd = random.Random(seed)
+    counts = counts_override or {
+        "ox": rnd.randint(3, 5),
+        "short": rnd.randint(3, 6),
+        "discussion": rnd.randint(2, 3),
+    }
+
+    raw = _ask_gpt_json(
+        _prompt_review(text, kws, counts),
+        model=model, temperature=0.4, max_tokens=1200
+    )
+
+    rv = raw.get("review", {}) or {}
+    def _fix_item(it: Dict[str, Any], t: str) -> Dict[str, Any]:
+        it["sources"] = _fix_sources(it.get("sources", []), all_ids, used_ids[:1])
+        tags = it.get("tags") or []
+        if t not in tags:
+            tags.append(t)
+        it["tags"] = tags
+        if t in ("OX", "단답"):
+            it.setdefault("confused", False)
+        return it
+
+    ox = [_fix_item(it, "OX") for it in (rv.get("ox") or [])]
+    short = [_fix_item(it, "단답") for it in (rv.get("short") or [])]
+    discussion = [_fix_item(it, "토론") for it in (rv.get("discussion") or [])]
+    return ReviewOut(ox=ox, short=short, discussion=discussion)
+
+def generate_all(
+    doc: PreprocessedDoc,
+    section: Optional[str] = None,
+    chunk_ids: Optional[List[str]] = None,
+    keywords: Optional[List[str]] = None,
+    model: str = "gpt-4.1-mini",
+    seed: Optional[int] = None,
+    counts_override: Optional[Dict[str, int]] = None,
+) -> Output:
+    summaries = generate_summaries(doc, section, chunk_ids, model=model)
+    review = generate_review(doc, section, chunk_ids, keywords, model=model, seed=seed, counts_override=counts_override)
+    return Output(summaries=summaries, review=review, meta={"model": model, "doc_id": doc.doc_id})
+
+# 기존 _ask_gpt_json 을 Chat Completions API 기반으로 교체합니다.
+# - 대부분의 openai 파이썬 버전과 호환
+# - JSON 강제 출력(response_format={"type":"json_object"}) 사용
+
+import json
+from openai import OpenAI
+
+def _ask_gpt_json(prompt: str, model: str, temperature: float, max_tokens: int):
+    client = _get_client()
+
+    # 1) 우선 chat.completions 경로 사용 (호환성 최상)
+    try:
+        rsp = client.chat.completions.create(
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": _system_prompt()},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        text = rsp.choices[0].message.content
+        return json.loads(text)
+    except Exception as e1:
+        # 2) (옵션) Responses API로 폴백 — 일부 최신 버전에서만 동작
+        try:
+            rsp = client.responses.create(
+                model=model,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+                input=[
+                    {"role": "system", "content": _system_prompt()},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            return json.loads(rsp.output_text)
+        except Exception as e2:
+            raise RuntimeError(
+                f"OpenAI 호출 실패. chat.completions 에러: {e1}\n"
+                f"responses.create 폴백 에러: {e2}"
+            )
+
+
+PDF_PATH = "F:\\Joseph\\4-2\\윤리학\\알기_쉬운_윤리학_1장.pdf"  # 여기에 실제 PDF 파일 경로 입력 (예: "C:/Users/FINALLY/Desktop/mytext.pdf")
+
+pre_json = pdf_to_preprocessed_doc(
+    PDF_PATH,
+    doc_id="demo_pdf",
+    page_max_chars=1200,
+    overlap=150,
+)
+
+doc = PreprocessedDoc(**pre_json)
+
+out = generate_all(doc, seed=42)
+
+print(out.summaries.summary_300, "\n")
+print(out.model_dump_json(indent=2))
