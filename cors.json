@@ -1,8 +1,11 @@
 [
   {
-    "origin": ["https://mybook-d143d.web.app"],
-    "method": ["GET", "POST", "PUT"],
-    "responseHeader": ["Content-Type", "access-control-allow-origin"],
+    "origin": [
+      "https://mybook-d143d.web.app",
+      "gs://mybook-d143d.firebasestorage.app"
+    ],
+    "method": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "responseHeader": ["*"],
     "maxAgeSeconds": 3600
   }
 ]

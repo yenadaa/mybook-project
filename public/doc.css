@@ -1,0 +1,96 @@
+.doc-layout{
+    background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent background */
+    width: 100%; 
+    height: 100%; 
+    position: absolute; 
+    top: 0; 
+    left: 0;
+    z-index: 1000; /* Ensure it's on top */
+    display: flex;
+    justify-content: flex-start;
+}
+
+.doc-drawer {
+    width: 350px;
+    height: 100%;
+    background-color: white;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.5);
+    display: flex;
+    flex-direction: column;
+}
+
+.doc-header{
+    display:flex; 
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid #eee;
+}
+
+.doc-header h3 {
+    margin: 0;
+    font-size: 1.2em;
+}
+
+#doc-close {
+    background: none;
+    border: none;
+    font-size: 1.5em;
+    cursor: pointer;
+}
+
+.doc-list {
+    overflow-y: auto;
+    flex-grow: 1;
+}
+
+.doc-newbtn {
+    border-bottom: 1px solid #eee;
+}
+.doc-newbtn:hover{
+    background-color: #f8f8f8;
+}
+.doc-add {
+    width: 100%;
+    padding: 15px 20px;
+    background: none;
+    border: none;
+    text-align: left;
+    font-size: 1em;
+    cursor: pointer;
+}
+
+
+.doc-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+}
+.doc-row:hover{ 
+    background-color: #f0f0f0;
+}
+
+.row-actions button {
+    margin-left: 5px;
+    padding: 3px 8px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    cursor: pointer;
+    background-color: #fff;
+}
+.row-actions button:hover {
+    background-color: #e9e9e9;
+}
+
+
+.hidden { 
+    display: none; 
+}
+
+/* pdf 텍스트/하이라이트는 드로어 아래로 */
+.textLayer, .highlight-span { z-index: 0; }
+
+#doc-btn.active i{color:yellow;}

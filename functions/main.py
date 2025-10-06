@@ -19,21 +19,20 @@ options.set_global_options(
     region="asia-northeast3",
     memory=options.MemoryOption.MB_512,
     timeout_sec=300,
-    secrets=["OPENAI_API_KEY"]  # 실제 키 값이 아닌, Secret의 이름을 사용합니다.
+    secrets=["OPENAI_API_KEY"]
 )
 
 db = None
 vision_client = None
 storage_client = None
 
-# --- OCR 펜 함수 (수정 불필요) ---
+# --- OCR 펜 함수 ---
 @https_fn.on_call()
 def runOcrOnSelection(req: https_fn.CallableRequest) -> https_fn.Response:
     global vision_client
     if vision_client is None:
         vision_client = vision.ImageAnnotatorClient()
 
-    # ... (기존 코드와 동일) ...
     if req.auth is None:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
     
@@ -52,7 +51,7 @@ def runOcrOnSelection(req: https_fn.CallableRequest) -> https_fn.Response:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message="OCR 처리 중 서버에서 오류가 발생했습니다.")
 
 
-# --- ✨ PDF 전체 분석 함수 (최종 수정본) ---
+# --- PDF 전체 분석 함수 ---
 @https_fn.on_call()
 def runOcrOnDemand(req: https_fn.CallableRequest) -> https_fn.Response:
     global db, vision_client, storage_client
@@ -79,7 +78,6 @@ def runOcrOnDemand(req: https_fn.CallableRequest) -> https_fn.Response:
         gcs_source_uri = f"gs://{bucket_name}/{file_path}"
         gcs_destination_uri = f"gs://{bucket_name}/{file_path}_ocr_results/"
 
-        # 1. Vision API로 PDF OCR 분석 요청
         gcs_source = vision.GcsSource(uri=gcs_source_uri)
         feature = vision.Feature(type_=vision.Feature.Type.DOCUMENT_TEXT_DETECTION)
         input_config = vision.InputConfig(gcs_source=gcs_source, mime_type='application/pdf')
@@ -95,16 +93,13 @@ def runOcrOnDemand(req: https_fn.CallableRequest) -> https_fn.Response:
         operation.result(timeout=420)
         print("OCR 작업 완료.")
 
-        # 2. Storage에 저장된 OCR 결과(JSON 파일) 목록 가져오기
         destination_prefix = f"{file_path}_ocr_results/"
         blobs = storage_client.list_blobs(prefix=destination_prefix)
 
-        # 3. 각 JSON 파일을 읽어서 Firestore에 저장
         for blob in blobs:
             if not blob.name.endswith('.json'):
                 continue
             
-            print(f"결과 파일 처리 중: {blob.name}")
             json_string = blob.download_as_string()
             response = json.loads(json_string)
             
@@ -113,16 +108,18 @@ def runOcrOnDemand(req: https_fn.CallableRequest) -> https_fn.Response:
                 page_number_match = re.search(r'output-(\d+)-to-', blob.name)
                 page_number = int(page_number_match.group(1)) if page_number_match else 0
 
-                # ✨ 여기에 userId와 bookId를 포함하여 저장합니다!
                 ocr_data = {
                     'userId': user_id,
                     'bookId': file_name,
                     'sourceFile': file_path,
-                    'pageNumber': page_number + 1, # 페이지 번호는 1부터 시작
+                    'pageNumber': page_number + 1,
                     'text': page_annotation['text'],
                 }
                 db.collection('ocr_results').add(ocr_data)
-                print(f"{page_number + 1} 페이지 결과 저장 완료")
+        
+        # Clean up the results folder
+        for blob in storage_client.list_blobs(prefix=destination_prefix):
+            blob.delete()
 
         return {"status": "success", "message": "OCR 분석 및 결과 저장이 완료되었습니다."}
 
@@ -142,20 +139,22 @@ def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
     user_id = req.auth.uid
     book_id = req.data.get("bookId")
 
-    # Firestore에서 밑줄 텍스트 가져오기
     highlights_ref = db.collection('highlights')
     query = highlights_ref.where('userId', '==', user_id).where('bookId', '==', book_id)
     docs = query.stream()
-    texts = [doc.to_dict().get('ocrText', '') for doc in docs]
+    
+    # ✨ [수정] 'ocrText'가 아닌 'text' 필드를 올바르게 참조합니다.
+    texts = [doc.to_dict().get('text', '') for doc in docs if doc.to_dict().get('text')]
     if not texts:
-        return {"quiz": "퀴즈를 만들 밑줄이 없습니다."}
+        return {"quiz": []} # 내용이 없을 때 빈 배열 반환
     context = "\n".join(texts)
 
-    # 프롬프트 작성
+    # ✨ [수정] 프롬프트에 한국어로 작성하라는 명확한 지시를 추가합니다.
     prompt = f"""
     당신은 학습 내용을 바탕으로 객관식 퀴즈를 출제하는 AI입니다.
     아래 주어진 내용을 바탕으로, 가장 중요하다고 생각되는 내용에 대해 객관식 문제 3개를 만들어주세요.
     요청사항:
+    - 퀴즈는 반드시 한국어로 작성해주세요.
     - 각 문제는 질문(question), 4개의 보기(options), 정답(answer)을 포함해야 합니다.
     - 결과는 반드시 JSON 형식으로 반환해주세요. 예: {{"quiz": [{{"question": "...", "options": ["...", "...", "...", "..."], "answer": "..."}}]}}
     --- 학습 내용 ---
@@ -163,18 +162,14 @@ def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
     """
 
     try:
-        # ✨ --- 수정된 부분 ---
         api_key_raw = os.environ.get("OPENAI_API_KEY")
         if not api_key_raw:
             raise Exception("OPENAI_API_KEY is not set.")
         
-        # 'api_key' 변수를 정의합니다.
         api_key = api_key_raw.strip()
-        
         api_url = "https://api.openai.com/v1/chat/completions"
         
         headers = {
-            # 정의된 'api_key' 변수를 사용합니다.
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
@@ -190,7 +185,6 @@ def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
 
         result_json = response.json()
         quiz_data = result_json['choices'][0]['message']['content']
-        # --- 여기까지 수정 ---
 
         return json.loads(quiz_data)
 
@@ -249,7 +243,6 @@ def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
 
 @https_fn.on_call()
 def testSendNotification(req: https_fn.CallableRequest) -> https_fn.Response:
-    """현재 로그인한 사용자에게 테스트 알림을 즉시 보냅니다."""
     global db
     if db is None:
         db = firestore.client()
@@ -275,7 +268,6 @@ def testSendNotification(req: https_fn.CallableRequest) -> https_fn.Response:
             token=token,
         )
         messaging.send(message)
-        print(f"{user_id}에게 테스트 알림 전송 완료")
         return {"status": "success"}
 
     except Exception as e:

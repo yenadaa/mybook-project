@@ -3,30 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MyBook</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <link rel="stylesheet" href="main.css"> </head>
+    <link rel="stylesheet" href="reset.css">
+    <link rel="stylesheet" href="main.css">
+    <link rel="stylesheet" href="doc.css">
+    <title>My Book</title>
+</head>
 <body>
+    
     <header>
         <div class="header_box">
             <div class="header">
-                <div id="auth-status">
-                    <div id="auth-loading" style="display: none;">로딩 중...</div>
-                    <button id="login-btn">Login with Google</button>
-                    <div id="user-info" style="display: none;">
-                        <span id="user-email"></span>
-                        <button id="logout-btn">Logout</button>
-                        <button id="ocr-pen-btn"><i class="fa-solid fa-highlighter fa-xl"></i> OCR 펜</button>
-                        <button id="test-notification-btn">테스트 알림 보내기</button>
-                    </div>
-                </div>
-            </div>
-            <div class="header">
-                 <button id="undo-btn" disabled><i class="fa-solid fa-arrow-rotate-left fa-xl"></i></button>
-                <button id="redo-btn" disabled><i class="fa-solid fa-arrow-rotate-right fa-xl"></i></button>
-                <button id="pen1"><i class="fa-solid fa-pen fa-xl"></i></button>
-                <button class="tag-btn" id="tag-btn"><i class="fa-solid fa-tag fa-2xl"></i></button>
+                <button id="doc-btn"><i class="fa-solid fa-list fa-xl"></i></button>
+                <button id="undo-btn"><i class="fa-solid fa-arrow-rotate-left fa-xl"></i></button>
+                <button id="redo-btn"><i class="fa-solid fa-arrow-rotate-right fa-xl"></i></button>
+                <button id="pen1" class="tool-btn"><i class="fa-solid fa-pen fa-xl"></i></button>
+                <button class="tag-btn tool-btn" id="tag-btn"><i class="fa-solid fa-tag fa-2xl"></i></button>
+                
                 <div class="dropdown" id="dropdown">
                     <ul>
                         <li><button data-tag="중요">중요</button></li>
@@ -34,50 +27,69 @@
                         <li><button data-tag="참고">참고</button></li>
                     </ul>
                 </div>
-                <button id="eraser-btn"><i class="fa-solid fa-eraser fa-xl"></i></button>
+                
+                <div class="eraser">
+                    <button id="eraser-btn" class="tool-btn"><i class="fa-solid fa-eraser fa-xl"></i></button>
+                </div>
             </div>
             <div class="header">
                 <label for="file-btn" class="icon"><i class="fa-regular fa-plus fa-2xl" id="plus-icon"></i></label>
-                <input type="file" accept="application/pdf" id="file-btn" style="display: none;">
-
-                <button id="run-ocr-btn" class="icon"><i class="fa-solid fa-robot fa-xl"></i> OCR</button>
-                <div class="icon"><i class="fa-solid fa-magnifying-glass fa-xl"></i></div>
+                <input type="file" accept="application/pdf" id="file-btn" style="display:none;">
+                <button id="ocr-pen-btn" class="tool-btn">OCR</button>
+                <button id="quiz-btn">퀴즈 만들기</button>
+                <div id="auth-slot">
+                    <button id="login-btn" class="loginout-btn">로그인</button>
+                    <div id="user-info" class="hidden">
+                        <strong id="user-email"></strong>
+                        <button id="logout-btn" class="loginout-btn">로그아웃</button>
+                    </div>
+                </div>
             </div>
         </div>
     </header>
-
     <section class="viewer-box">
-        <div id="chalkboard" class="chalkboard"><p>로그인 후, PDF 파일을 추가해주세요</p></div>
+        <div id="chalkboard" class="chalkboard"><p>pdf 파일 추가 또는 목록에서 열기</p></div>
 
         <div id="book-layout" class="book hidden">
             <div id="pdf-container" class="Allpage left-page"></div>
-            <div class="center-line"></div>
+            <div class="center-line" id="line"></div>
             <div id="note-container" class="Allpage right-page">
-                <div class="tabs">
+                <div class="tabs" id="tabs">
                     <div class="tab active" data-tag="all">전체</div>
                     <div class="tab" data-tag="중요">중요</div>
                     <div class="tab" data-tag="암기">암기</div>
                     <div class="tab" data-tag="참고">참고</div>
                 </div>
-                <div id="ocr-results-container" class="note-wrap">
+                <div class="note-wrap" id="note"></div>
+            </div>
+        </div>
+
+        <div id="doc-layout" class="doc-layout hidden">
+            <div class="doc-padding">
+                <aside id="doc-drawer" class="doc-drawer hidden">
+                    <div class="doc-header">
+                        <h3>내 문서</h3>
+                        <button id="doc-close" aria-label="닫기">✕</button>
                     </div>
-                <hr>
-                <div id="highlight-results-container" class="note-wrap">
-                    <h4>📝 나의 밑줄 노트</h4>
-                    </div>
-                <div class="note-wrap">
-                    <button id="quiz-btn">퀴즈 만들기</button>
-                    <div id="quiz-container"></div>
-                <hr>
-                <div class="note-wrap">
-                    <h4>🔔 오늘의 복습 <button id="refresh-reviews-btn">🔄</button></h4>
-                    <div id="review-container"></div>
-</div>
-    </div>
+                    <div id="doc-list" class="doc-list"></div>
+                </aside>
             </div>
         </div>
     </section>
-    
-    <script src="main.js" type="module"></script>
+
+    <!-- 퀴즈 팝업창(Modal) HTML 구조 -->
+    <div id="quiz-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>AI 생성 퀴즈</h2>
+                <button id="quiz-close-btn" class="close-btn">&times;</button>
+            </div>
+            <div id="quiz-modal-body" class="modal-body">
+                <!-- 퀴즈 내용은 main.js에서 동적으로 생성됩니다. -->
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
 </body>
 </html>
