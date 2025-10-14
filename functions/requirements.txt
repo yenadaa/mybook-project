@@ -8,3 +8,6 @@ openai
 certifi
 requests
 datetime
+PyMuPDF
+pydantic
+scikit-learn

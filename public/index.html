@@ -36,9 +36,15 @@
                 <label for="file-btn" class="icon"><i class="fa-regular fa-plus fa-2xl" id="plus-icon"></i></label>
                 <input type="file" accept="application/pdf" id="file-btn" style="display:none;">
                 <button id="ocr-pen-btn" class="tool-btn">OCR</button>
-                <button id="quiz-btn">퀴즈 만들기</button>
+                <button id="create-quiz-btn">문제 만들기 🎲</button>
+                    <div id="quiz-options-modal" class="hidden">
+                    <h3>어떤 문제를 만들까요?</h3>
+                    <button id="modal-full-doc-btn">전체 문서로 꼼꼼하게</button>
+                    <button id="modal-highlights-btn">하이라이트로 빠르게</button>
+                    <button id="modal-close-btn">닫기</button>
+                    </div>
                 <div id="auth-slot">
-                    <button id="login-btn" class="loginout-btn">로그인</button>
+                    <button type="button" id="login-btn">구글 로그인</button>
                     <div id="user-info" class="hidden">
                         <strong id="user-email"></strong>
                         <button id="logout-btn" class="loginout-btn">로그아웃</button>

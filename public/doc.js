@@ -5,14 +5,12 @@ import { setAnnotationContext, updateHighlightsData, clearAnnotations } from './
 
 // DOM 요소
 const btnDocs = document.getElementById("doc-btn");
-const layout = document.getElementById("doc-layout");
 const drawer = document.getElementById("doc-drawer");
 const btnClose = document.getElementById("doc-close");
 const listEl = document.getElementById("doc-list");
 const fileInput = document.getElementById("file-btn");
 const chalkboard = document.getElementById("chalkboard");
 const bookLayout = document.getElementById("book-layout");
-const pdfContainer = document.getElementById("pdf-container");
 
 let currentBookId = null;
 let unsubscribeDocs = null;
@@ -22,9 +20,9 @@ let unsubscribeHighlights = null;
 export function initDocSystem(user) {
     if (!user) {
         console.log("사용자가 로그인하지 않아 문서 시스템을 초기화하지 않습니다.");
-        resetToHome(); // 로그아웃 상태일 때 홈으로 리셋
+        resetToHome();
         if (unsubscribeDocs) unsubscribeDocs();
-        renderDocsList([]); // 빈 목록 표시
+        renderDocsList([]);
         return;
     }
 
@@ -45,7 +43,9 @@ export async function createDocFromFile(file) {
     const user = getCurrentUser();
     if (!file || !user) return;
 
-    const storagePath = `docs/${user.uid}/${Date.now()}_${file.name}`;
+    // ✨ [수정] 파일 이름에서 공백, 대괄호, 소괄호, 하이픈을 밑줄(_)로 변경
+    const sanitizedFileName = file.name.replace(/[\s\[\]\(\)-]/g, '_');
+    const storagePath = `docs/${user.uid}/${Date.now()}_${sanitizedFileName}`;
     const storageRef = ref(storage, storagePath);
     
     console.log("업로드 시작:", storagePath);
@@ -53,12 +53,11 @@ export async function createDocFromFile(file) {
     console.log("업로드 완료");
 
     const docRef = await addDoc(collection(db, "docs", user.uid, "userDocs"), {
-        title: file.name,
-        storagePath: storagePath,
+        title: file.name, // DB에는 원래 파일 이름을 저장하여 사용자에게 보여줌
+        storagePath: storagePath, // Storage 경로는 정리된 이름 사용
         createdAt: Timestamp.now(),
     });
-
-    // ✨ [최종 수정] 파일 업로드 후, 해당 문서를 자동으로 엽니다.
+    
     openDoc(docRef.id);
 }
 
@@ -66,21 +65,16 @@ export async function createDocFromFile(file) {
 function renderDocsList(docs) {
     if (!listEl) return;
     listEl.innerHTML = `<button class="doc-add">➕ 새 문서 추가</button>`;
-    listEl.querySelector(".doc-add").addEventListener("click", () => {
-        if (getCurrentUser()) {
-            fileInput.click();
-        } else {
-            alert("로그인이 필요합니다.");
-        }
-    });
+    
+    // '새 문서 추가' 버튼 이벤트는 main.js에서 통합 관리하므로 여기서 삭제합니다.
 
     docs.forEach(doc => {
         const item = document.createElement("div");
         item.className = "doc-row";
+        // ✨ [삭제] 더 이상 사용하지 않는 OCR 버튼을 HTML에서 제거
         item.innerHTML = `
             <span class="doc-title">${doc.title}</span>
             <div class="row-actions">
-                <button data-ocr="${doc.storagePath}">OCR</button>
                 <button data-open="${doc.id}">열기</button>
                 <button data-del="${doc.id}">삭제</button>
             </div>
@@ -89,19 +83,9 @@ function renderDocsList(docs) {
     });
 }
 
-// OCR 분석 함수
-export async function analyzeDocWithOcr(storagePath) {
-    if (!storagePath) return alert("분석할 문서의 경로가 없습니다.");
-    console.log("OCR 실행 요청:", storagePath);
-    try {
-        const runOcr = httpsCallable(functions, 'runOcrOnDemand');
-        await runOcr({ filePath: storagePath });
-        alert("OCR 분석이 시작되었습니다. 완료되면 데이터가 저장됩니다.");
-    } catch (error) {
-        console.error("OCR 함수 호출 오류:", error);
-        alert("OCR 분석을 시작하는 데 실패했습니다.");
-    }
-}
+// ✨ [삭제] 더 이상 사용하지 않는 OCR 관련 함수와 이벤트 리스너를 모두 삭제합니다.
+// export async function analyzeDocWithOcr(storagePath) { ... }
+// listEl?.addEventListener("click", ...)
 
 // 문서 삭제 함수
 export async function deleteDocFromDb(docId) {
@@ -112,14 +96,6 @@ export async function deleteDocFromDb(docId) {
         if (currentBookId === docId) resetToHome();
     }
 }
-
-// 이벤트 위임: 문서 열기, 삭제, OCR
-listEl?.addEventListener("click", async (e) => {
-    const target = e.target;
-    if (target.dataset.open) openDoc(target.dataset.open);
-    else if (target.dataset.del) deleteDocFromDb(target.dataset.del);
-    else if (target.dataset.ocr) analyzeDocWithOcr(target.dataset.ocr);
-});
 
 // 문서 열기
 export function openDoc(bookId) {
