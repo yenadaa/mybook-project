@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Viewer — Extended</title>
+  <!-- pdf.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+  </script>
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <style>
+    /* ====== Reset (간단 버전) ====== */
+    html, body { height: 100%; padding: 0; margin: 0; }
+    body { -webkit-font-smoothing: antialiased; line-height: 1.5; overflow: hidden; font-family: 'Apple SD Gothic Neo', arial, sans-serif; }
+    button { color: inherit; background: transparent; border: 0; cursor: pointer; }
+    * { box-sizing: border-box; }
+
+    /* ====== Layout ====== */
+    .app { display: grid; grid-template-rows: 56px 1fr; height: 100%; }
+    .toolbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #e5e5e5; background: var(--toolbar-bg); color: var(--fg); }
+
+    :root { --bg: #f6f7fb; --fg: #111; --panel: #fff; --toolbar-bg: #fff; --accent: #3b82f6; --muted: #8a8a8a; --chip:#eef2ff; }
+    .dark { --bg: #0f1217; --fg: #f2f2f2; --panel: #171a21; --toolbar-bg: #131722; --accent: #60a5fa; --muted: #b9c0cc; --chip:#1f2937; }
+
+    .toolbar .group { display: inline-flex; align-items: center; border: 1px solid #e6e6e6; border-radius: 10px; overflow: hidden; background: var(--panel); }
+    .dark .toolbar .group { border-color: #2b2f36; }
+    .toolbar .group > * { padding: 6px 8px; border-right: 1px solid #ececec; }
+    .dark .toolbar .group > * { border-right-color: #2b2f36; }
+    .toolbar .group > *:last-child { border-right: 0; }
+
+    .file-input { display: none; }
+    .label-btn { padding: 6px 10px; border-radius: 8px; border: 1px dashed #c9c9c9; }
+
+    .page-indicator { min-width: 120px; text-align: center; font-variant-numeric: tabular-nums; }
+    .jump-input { width: 68px; padding: 6px 8px; border: 1px solid #e6e6e6; border-radius: 8px; background: var(--panel); color: var(--fg); }
+    .zoom-label { min-width: 54px; text-align: center; }
+
+    .main { display: grid; grid-template-columns: 260px 1fr 360px; height: calc(100vh - 56px); background: var(--bg); color: var(--fg); }
+    .sidebar { border-right: 1px solid #e5e5e5; background: var(--panel); overflow: hidden; display: grid; grid-template-rows: 44px 1fr; }
+    .dark .sidebar { border-right-color:#2b2f36; }
+    .sidebar-tabs { display: grid; grid-auto-flow: column; }
+    .sidebar-tabs button { border-bottom: 2px solid transparent; }
+    .sidebar-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .sidebar-content { overflow: auto; }
+
+    .thumb { padding: 8px; border-bottom: 1px dashed #eaeaea; cursor: pointer; }
+    .dark .thumb { border-bottom-color:#2b2f36; }
+    .thumb canvas { margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,.06); border-radius: 6px; }
+
+    .outline { list-style: none; margin: 0; padding: 8px; }
+    .outline li { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+    .outline li:hover { background: rgba(99,102,241,.08); }
+
+    .viewer { position: relative; overflow: auto; }
+    .pages { position: relative; padding: 20px 0 200px; display: grid; justify-content: center; gap: 18px; }
+    .page-wrap { position: relative; }
+    .page { display: block; background: white; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+    .textLayer { position: absolute; left: 0; top: 0; pointer-events: auto; } /* 선택 가능 */
+
+    .right { border-left: 1px solid #e5e5e5; background: var(--panel); display: grid; grid-template-rows: 44px 1fr 44px; }
+    .dark .right { border-left-color:#2b2f36; }
+    .right-tabs { display: grid; grid-auto-flow: column; }
+    .right-tabs button { border-bottom: 2px solid transparent; }
+    .right-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .notes { overflow: auto; padding: 8px 8px 0; }
+    .note { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 8px; border-bottom: 1px dashed #eee; }
+    .dark .note { border-bottom-color:#2b2f36; }
+    .note .meta { font-size: 12px; color: var(--muted); }
+    .note .tag { padding: 2px 8px; border-radius: 999px; font-size: 12px; background: var(--chip); display: inline-flex; align-items: center; gap: 6px; }
+    .note textarea { width: 100%; min-height: 42px; resize: vertical; border-radius: 6px; border: 1px solid #e6e6e6; background: transparent; color: var(--fg); padding: 6px; }
+
+    .notes-footer { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border-top: 1px solid #eee; }
+    .dark .notes-footer { border-top-color:#2b2f36; }
+
+    /* Highlight overlays */
+    .highlight-span { position: absolute; background: yellow; opacity: .35; pointer-events: auto; cursor: pointer; }
+    .highlight-span[data-tag="중요"] { background: #facc15; }
+    .highlight-span[data-tag="암기"] { background: #86efac; }
+    .highlight-span[data-tag="참고"] { background: #93c5fd; }
+
+    /* Chips & toggles */
+    .chip-btn { padding: 6px 10px; border-radius: 999px; background: var(--chip); }
+    .divider { width: 1px; height: 22px; background: #eaeaea; }
+    .dark .divider { background:#2b2f36; }
+
+    .empty { height: 100%; display: grid; place-items: center; color: var(--muted); }
+  
+    /* ====== Micro-interactions: hover / press / ripple ====== */
+    .toolbar .group > *, .chip-btn, .label-btn, .right-tabs button, .sidebar-tabs button {
+      position: relative; overflow: hidden; /* for ripple */
+      transition: transform .12s ease, background-color .2s ease, box-shadow .2s ease, color .2s ease;
+      outline: none;
+    }
+    .toolbar .group > *:hover, .chip-btn:hover, .label-btn:hover, .right-tabs button:hover, .sidebar-tabs button:hover {
+      background: rgba(0,0,0,.05);
+    }
+    .dark .toolbar .group > *:hover, .dark .chip-btn:hover, .dark .label-btn:hover, .dark .right-tabs button:hover, .dark .sidebar-tabs button:hover {
+      background: rgba(255,255,255,.06);
+    }
+    .toolbar .group > *:active, .chip-btn:active, .label-btn:active, .right-tabs button:active, .sidebar-tabs button:active {
+      transform: translateY(0.5px) scale(.97);
+    }
+    /* Active toggles */
+    .toolbar .group > *.active, .right-tabs button.active, .sidebar-tabs button.active {
+      box-shadow: inset 0 0 0 2px var(--accent);
+      background: rgba(99,102,241,.10);
+    }
+
+    /* Ripple */
+    .ripple {
+      position: absolute; inset: 0 auto auto 0; border-radius: 999px;
+      transform: scale(0); opacity: .25; pointer-events: none; background: currentColor;
+      animation: ripple .6s ease-out forwards;
+    }
+    @keyframes ripple { to { transform: scale(3); opacity: 0; } }
+
+    /* Focus visible */
+    .toolbar .group > *:focus-visible, .chip-btn:focus-visible, .label-btn:focus-visible, .right-tabs button:focus-visible, .sidebar-tabs button:focus-visible {
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+
+    /* Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  
+    /* ====== Calm mood overrides ====== */
+    :root { --hover-bg: rgba(0,0,0,.035); --hover-bg-dark: rgba(255,255,255,.045); --press-scale: .985; --ease: cubic-bezier(.25,.1,.25,1); }
+
+    .toolbar .group > *, .chip-btn, .label-btn, .right-tabs button, .sidebar-tabs button {
+      transition: transform .18s var(--ease), background-color .22s var(--ease), box-shadow .22s var(--ease), color .22s var(--ease), opacity .22s var(--ease);
+    }
+    .toolbar .group > *:hover, .chip-btn:hover, .label-btn:hover, .right-tabs button:hover, .sidebar-tabs button:hover {
+      background: var(--hover-bg);
+    }
+    .dark .toolbar .group > *:hover, .dark .chip-btn:hover, .dark .label-btn:hover, .dark .right-tabs button:hover, .dark .sidebar-tabs button:hover {
+      background: var(--hover-bg-dark);
+    }
+    .toolbar .group > *:active, .chip-btn:active, .label-btn:active, .right-tabs button:active, .sidebar-tabs button:active {
+      transform: scale(var(--press-scale));
+    }
+    .toolbar .group > *.active, .right-tabs button.active, .sidebar-tabs button.active {
+      box-shadow: inset 0 0 0 1.5px var(--accent);
+      background: rgba(99,102,241,.06);
+    }
+
+    /* Softer ripple */
+    .ripple { opacity: .16; animation: ripple-soft .7s var(--ease) forwards; }
+    @keyframes ripple-soft { to { transform: scale(1.6); opacity: 0; } }
+
+    /* Subtle tooltip style */
+    [title] { position: relative; }
+
+    /* ====== OCR layer ====== */
+    .ocr-layer { position:absolute; left:0; top:0; pointer-events:none; }
+    .ocr-word { position:absolute; white-space:pre; line-height:1; color:transparent; pointer-events:auto; }
+    .ocr-word.debug { color: var(--accent); background: rgba(99,102,241,.12); }
+    .ocr-status { font-size:12px; color:var(--muted); margin-left:8px; }
+
+    /* ====== MOD: 보이는 텍스트 겹침 방지 ====== */
+    /* TextLayer는 선택 전용으로 투명하게 유지 */
+    .textLayer span {
+      position: absolute;
+      white-space: pre;
+      color: transparent !important;
+      -webkit-text-stroke: 0 transparent;
+      transform-origin: 0 0;
+    }
+    .textLayer ::selection { background: rgba(180,213,255,.35); }
+  </style>
+  <!-- Tesseract.js (OCR) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <div class="toolbar">
+      <label for="file" class="label-btn"><i class="fa-regular fa-file-arrow-up"></i> 파일 열기</label>
+      <input id="file" class="file-input" type="file" accept="application/pdf" />
+
+      <span class="divider"></span>
+
+      <div class="group">
+        <button id="prevPage" title="이전 페이지"><i class="fa-solid fa-chevron-left"></i></button>
+        <div id="pageIndicator" class="page-indicator">p. - / -</div>
+        <button id="nextPage" title="다음 페이지"><i class="fa-solid fa-chevron-right"></i></button>
+        <input id="jumpInput" class="jump-input" type="number" min="1" placeholder="#" title="페이지 점프" />
+      </div>
+
+      <div class="group">
+        <button id="zoomOut" title="축소"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+        <div id="zoomLabel" class="zoom-label">100%</div>
+        <button id="zoomIn" title="확대"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+        <button id="zoomReset" title="원본 배율"><i class="fa-solid fa-minimize"></i></button>
+      </div>
+
+      <div class="group">
+        <button id="toggleDark" title="다크 모드"><i class="fa-solid fa-moon"></i></button>
+        <button id="modeContinuous" class="active" title="연속 스크롤"><i class="fa-solid fa-bars-staggered"></i></button>
+        <button id="modeSingle" title="단일 페이지"><i class="fa-regular fa-file"></i></button>
+      </div>
+
+      <div class="group">
+        <button id="undoBtn" title="되돌리기 (Ctrl+Z)"><i class="fa-solid fa-arrow-rotate-left"></i></button>
+        <button id="redoBtn" title="다시하기 (Ctrl+Y)"><i class="fa-solid fa-arrow-rotate-right"></i></button>
+        <button id="penBtn" title="하이라이트 (H)"><i class="fa-solid fa-pen"></i></button>
+        <button id="eraserBtn" title="지우개 (E)"><i class="fa-solid fa-eraser"></i></button>
+        <div class="divider"></div>
+        <button class="chip-btn tag-btn" data-tag="중요">중요</button>
+        <button class="chip-btn tag-btn" data-tag="암기">암기</button>
+        <button class="chip-btn tag-btn" data-tag="참고">참고</button>
+      </div>
+
+      <div class="group">
+        <i class="fa-solid fa-magnifying-glass" style="padding-left:8px"></i>
+        <input id="searchInput" class="jump-input" style="width:150px" placeholder="문서 검색" />
+        <button id="searchPrev" title="이전 결과"><i class="fa-solid fa-angle-up"></i></button>
+        <button id="searchNext" title="다음 결과"><i class="fa-solid fa-angle-down"></i></button>
+      </div>
+
+      <div class="group">
+        <button id="addBookmark" title="현재 페이지 북마크"><i class="fa-regular fa-bookmark"></i></button>
+        <button id="exportNotes" title="노트 내보내기 CSV"><i class="fa-solid fa-file-export"></i></button>
+        <span class="divider"></span>
+        <select id="ocrLang" title="OCR 언어" style="padding:6px 8px; background:var(--panel); color:var(--fg); border-left:1px solid #ececec">
+          <option value="eng+kor">영어+한국어</option>
+          <option value="kor+eng" selected>한국어+영어</option>
+          <option value="eng">영어</option>
+          <option value="kor">한국어</option>
+        </select>
+        <button id="ocrPage" title="현재 페이지 OCR"><i class="fa-regular fa-wand-magic-sparkles"></i></button>
+        <button id="ocrAll" title="전체 페이지 OCR"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+        <button id="ocrToggleDebug" title="OCR 경계 표시 토글"><i class="fa-regular fa-eye"></i></button>
+        <span id="ocrStatus" class="ocr-status"></span>
+      </div>
+    </div>
+
+    <div class="main">
+      <!-- Sidebar: Thumbs / Outline -->
+      <aside class="sidebar">
+        <div class="sidebar-tabs">
+          <button id="tabThumbs" class="active">썸네일</button>
+          <button id="tabOutline">목차</button>
+          <button id="tabBookmarks">북마크</button>
+        </div>
+        <div id="sidebarContent" class="sidebar-content">
+          <div id="thumbs"></div>
+          <ul id="outline" class="outline" style="display:none"></ul>
+          <ul id="bookmarks" class="outline" style="display:none"></ul>
+        </div>
+      </aside>
+
+      <!-- Viewer -->
+      <section class="viewer">
+        <div id="empty" class="empty">PDF 파일을 열어보세요</div>
+        <div id="pages" class="pages" style="display:none"></div>
+      </section>
+
+      <!-- Notes / Tags -->
+      <aside class="right">
+        <div class="right-tabs">
+          <button class="active" data-filter="all" id="tabAll">전체</button>
+          <button data-filter="중요">중요</button>
+          <button data-filter="암기">암기</button>
+          <button data-filter="참고">참고</button>
+        </div>
+        <div id="notes" class="notes"></div>
+        <div class="notes-footer">
+          <small style="color:var(--muted)">하이라이트를 클릭하면 댓글 편집 가능</small>
+          <div>
+            <button id="clearData" title="모든 데이터 초기화"><i class="fa-solid fa-trash"></i></button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    // ====== State ======
+    let pdfDoc = null;
+    let scale = 1.0;
+    let currentPage = 1;
+    let continuousMode = true;
+
+    // highlights: {id, page, rects:[{left,top,width,height}], text, tag, comment}
+    let highlights = [];
+    let undoStack = []; // {action, payload}
+    let redoStack = [];
+
+    let selectMode = 'none'; // 'pen' | 'eraser' | 'tag'
+    let selectedTag = null;
+    let lastSelectedHighlightId = null;
+
+    let searchIndex = []; // [{page, textLower}]
+    let searchHits = [];  // [{page, idx, preview}]
+    let searchCursor = -1;
+
+    let bookmarks = []; // [{page, label, time}]
+
+    // ====== OCR State & helpers ======
+    let ocrData = {}; // { [page:number]: { words:[{ text, bbox:{x0,y0,x1,y1}}] } }
+    let ocrDebugVisible = false;
+
+    const els = {
+      file: document.getElementById('file'),
+      pages: document.getElementById('pages'),
+      empty: document.getElementById('empty'),
+      pageIndicator: document.getElementById('pageIndicator'),
+      zoomLabel: document.getElementById('zoomLabel'),
+      prevPage: document.getElementById('prevPage'),
+      nextPage: document.getElementById('nextPage'),
+      jumpInput: document.getElementById('jumpInput'),
+      zoomIn: document.getElementById('zoomIn'),
+      zoomOut: document.getElementById('zoomOut'),
+      zoomReset: document.getElementById('zoomReset'),
+      toggleDark: document.getElementById('toggleDark'),
+      modeContinuous: document.getElementById('modeContinuous'),
+      modeSingle: document.getElementById('modeSingle'),
+      undoBtn: document.getElementById('undoBtn'),
+      redoBtn: document.getElementById('redoBtn'),
+      penBtn: document.getElementById('penBtn'),
+      eraserBtn: document.getElementById('eraserBtn'),
+      tagBtns: Array.from(document.querySelectorAll('.tag-btn')),
+      searchInput: document.getElementById('searchInput'),
+      searchPrev: document.getElementById('searchPrev'),
+      searchNext: document.getElementById('searchNext'),
+      thumbs: document.getElementById('thumbs'),
+      outline: document.getElementById('outline'),
+      bookmarks: document.getElementById('bookmarks'),
+      tabThumbs: document.getElementById('tabThumbs'),
+      tabOutline: document.getElementById('tabOutline'),
+      tabBookmarks: document.getElementById('tabBookmarks'),
+      sidebarContent: document.getElementById('sidebarContent'),
+      notes: document.getElementById('notes'),
+      rightFilterTabs: Array.from(document.querySelectorAll('.right-tabs button')),
+      addBookmark: document.getElementById('addBookmark'),
+      exportNotes: document.getElementById('exportNotes'),
+      clearData: document.getElementById('clearData'),
+      ocrPage: document.getElementById('ocrPage'),
+      ocrAll: document.getElementById('ocrAll'),
+      ocrLang: document.getElementById('ocrLang'),
+      ocrToggleDebug: document.getElementById('ocrToggleDebug'),
+      ocrStatus: document.getElementById('ocrStatus'),
+    };
+
+    // ====== Micro-interactions JS (ripple & bounce) ======
+    function attachRipplesTo(selector){
+      document.querySelectorAll(selector).forEach(btn => {
+        if (btn.__hasRipple) return; btn.__hasRipple = true;
+        btn.style.position = btn.style.position || 'relative';
+        btn.style.overflow = btn.style.overflow || 'hidden';
+        btn.addEventListener('click', function(e){
+          const r = this.getBoundingClientRect();
+          const d = Math.max(r.width, r.height);
+          const s = document.createElement('span');
+          s.className = 'ripple';
+          s.style.width = s.style.height = d + 'px';
+          s.style.left = (e.clientX - r.left - d/2) + 'px';
+          s.style.top  = (e.clientY - r.top  - d/2) + 'px';
+          this.appendChild(s);
+          s.addEventListener('animationend', ()=> s.remove());
+        }, { passive: true });
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', ()=> {
+      attachRipplesTo('button, .chip-btn, .label-btn, .right-tabs button, .sidebar-tabs button');
+    });
+
+    // ====== Local Storage (통합본) ======
+    function saveLocal() {
+      const data = { highlights, undoStack, redoStack, bookmarks, ocrData };
+      localStorage.setItem('pdfViewer.extended', JSON.stringify(data));
+    }
+    function loadLocal() {
+      try {
+        const raw = localStorage.getItem('pdfViewer.extended');
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        highlights = data.highlights || [];
+        undoStack = data.undoStack || [];
+        redoStack = data.redoStack || [];
+        bookmarks = data.bookmarks || [];
+        ocrData = data.ocrData || {};
+      } catch (e) {}
+    }
+    loadLocal();
+
+    // ====== OCR helpers ======
+    function applyOcrLayer(p) {
+      const wrap = document.querySelector(`.page-wrap[data-page="${p}"]`);
+      if (!wrap) return;
+      let layer = wrap.querySelector('.ocr-layer');
+      const canvas = wrap.querySelector('canvas');
+      if (!canvas) return;
+      const styleW = parseFloat(canvas.style.width);
+      const styleH = parseFloat(canvas.style.height);
+      const sx = styleW / canvas.width;
+      const sy = styleH / canvas.height;
+
+      if (!layer) {
+        layer = document.createElement('div');
+        layer.className = 'ocr-layer';
+        wrap.appendChild(layer);
+      }
+      layer.style.width = canvas.style.width;
+      layer.style.height = canvas.style.height;
+      layer.innerHTML = '';
+
+      const page = ocrData[p];
+      if (!page || !page.words) return;
+      page.words.forEach(w => {
+        const span = document.createElement('span');
+        span.className = 'ocr-word';
+        if (ocrDebugVisible) span.classList.add('debug');
+        span.textContent = w.text;
+        const x = w.bbox.x0 * sx, y = w.bbox.y0 * sy, wdt = (w.bbox.x1 - w.bbox.x0) * sx, hgt = (w.bbox.y1 - w.bbox.y0) * sy;
+        span.style.left = x + 'px';
+        span.style.top = y + 'px';
+        span.style.width = wdt + 'px';
+        span.style.height = hgt + 'px';
+        layer.appendChild(span);
+      });
+    }
+
+    async function runOcrForPage(p) {
+      if (!pdfDoc) return;
+      els.ocrStatus.textContent = `OCR 처리중… p.${p}`;
+      const wrap = document.querySelector(`.page-wrap[data-page="${p}"]`);
+      const canvas = wrap?.querySelector('canvas');
+      if (!canvas) return;
+      const dataUrl = canvas.toDataURL('image/png');
+      const worker = await Tesseract.createWorker(els.ocrLang.value || 'kor+eng');
+      const { data } = await worker.recognize(dataUrl);
+      await worker.terminate();
+      const words = (data.words || []).map(w => ({ text: w.text, bbox: w.bbox }));
+      ocrData[p] = { words };
+      applyOcrLayer(p);
+      saveLocal();
+      els.ocrStatus.textContent = `OCR 완료: p.${p} — 단어 ${words.length}개`;
+    }
+
+    async function runOcrAll() {
+      if (!pdfDoc) return;
+      const lang = els.ocrLang.value || 'kor+eng';
+      els.ocrStatus.textContent = `전체 OCR 시작 (${lang})`;
+      const worker = await Tesseract.createWorker(lang);
+
+      for (let p = 1; p <= pdfDoc.numPages; p++) {
+        const wrap = document.querySelector(`.page-wrap[data-page="${p}"]`);
+        const canvas = wrap?.querySelector('canvas');
+        if (!canvas) continue;
+        const dataUrl = canvas.toDataURL('image/png');
+        const { data } = await worker.recognize(dataUrl);
+        const words = (data.words || []).map(w => ({ text: w.text, bbox: w.bbox }));
+        ocrData[p] = { words };
+        applyOcrLayer(p);
+        els.ocrStatus.textContent = `OCR: p.${p}/${pdfDoc.numPages} — 단어 ${words.length}개`;
+      }
+      await worker.terminate();
+      saveLocal();
+      els.ocrStatus.textContent = `전체 OCR 완료`;
+    }
+
+    function toggleOcrDebug() {
+      ocrDebugVisible = !ocrDebugVisible;
+      document.querySelectorAll('.ocr-word').forEach(el => el.classList.toggle('debug', ocrDebugVisible));
+    }
+
+    function updateToolbar() {
+      if (!pdfDoc) {
+        els.pageIndicator.textContent = 'p. - / -';
+      } else {
+        els.pageIndicator.textContent = `p. ${currentPage} / ${pdfDoc.numPages}`;
+      }
+      els.zoomLabel.textContent = Math.round(scale * 100) + '%';
+    }
+
+    function clearViewer() {
+      els.pages.innerHTML = '';
+      els.thumbs.innerHTML = '';
+      els.outline.innerHTML = '';
+      els.bookmarks.innerHTML = '';
+    }
+
+    function scrollToPage(p) {
+      const el = document.querySelector(`.page-wrap[data-page="${p}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        currentPage = p;
+        updateToolbar();
+      }
+    }
+
+    function setMode(mode) {
+      selectMode = mode;
+      els.penBtn.classList.toggle('active', mode === 'pen');
+      els.eraserBtn.classList.toggle('active', mode === 'eraser');
+    }
+
+    function addCommand(cmd) {
+      undoStack.push(cmd);
+      redoStack = [];
+      saveLocal();
+    }
+
+    function execAddHighlight(h) {
+      highlights.push(h);
+      renderHighlightsForPage(h.page);
+      renderNotes();
+      saveLocal();
+    }
+    function undoAddHighlight(id) {
+      const idx = highlights.findIndex(x => x.id === id);
+      if (idx !== -1) {
+        const pg = highlights[idx].page;
+        highlights.splice(idx, 1);
+        renderHighlightsForPage(pg);
+        renderNotes();
+        saveLocal();
+      }
+    }
+
+    function removeHighlights(ids) {
+      const affectedPages = new Set();
+      const removed = [];
+      highlights = highlights.filter(h => {
+        if (ids.includes(h.id)) { affectedPages.add(h.page); removed.push(h); return false; }
+        return true;
+      });
+      affectedPages.forEach(p => renderHighlightsForPage(p));
+      renderNotes();
+      saveLocal();
+      return removed;
+    }
+
+    function setHighlightTag(id, tag) {
+      const h = highlights.find(x => x.id === id);
+      if (!h) return;
+      h.tag = tag;
+      renderHighlightsForPage(h.page);
+      renderNotes();
+      saveLocal();
+    }
+
+    function setHighlightComment(id, comment) {
+      const h = highlights.find(x => x.id === id);
+      if (!h) return;
+      h.comment = comment;
+      renderNotes();
+      saveLocal();
+    }
+
+    // ====== Rendering PDF ======
+    const pagesCache = new Map(); // pageNumber -> {viewportScale, canvas, textLayer}
+
+    async function renderDocument(arrayBuffer) {
+      clearViewer();
+      pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+      els.empty.style.display = 'none';
+      els.pages.style.display = '';
+      updateToolbar();
+
+      searchIndex = new Array(pdfDoc.numPages);
+
+      for (let p = 1; p <= pdfDoc.numPages; p++) {
+        const wrap = document.createElement('div');
+        wrap.className = 'page-wrap';
+        wrap.dataset.page = String(p);
+        const canvas = document.createElement('canvas');
+        canvas.className = 'page';
+        const textLayer = document.createElement('div');
+        textLayer.className = 'textLayer';
+        wrap.appendChild(canvas);
+        wrap.appendChild(textLayer);
+        els.pages.appendChild(wrap);
+
+        renderPage(p);
+        renderThumb(p);
+      }
+
+      renderOutline();
+      renderBookmarks();
+      renderNotes();
+
+      els.pages.addEventListener('scroll', onScrollUpdatePage, { passive: true });
+      document.querySelector('.viewer').addEventListener('scroll', onScrollUpdatePage, { passive: true });
+    }
+
+    async function renderPage(p) {
+      const page = await pdfDoc.getPage(p);
+      const desiredScale = scale * (continuousMode ? 1.0 : 1.2);
+      const viewport = page.getViewport({ scale: desiredScale });
+
+      const wrap = document.querySelector(`.page-wrap[data-page="${p}"]`);
+      const canvas = wrap.querySelector('canvas');
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+
+      canvas.width = viewport.width * dpr;
+      canvas.height = viewport.height * dpr;
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      await page.render({ canvasContext: ctx, viewport, renderInteractiveForms: true }).promise;
+
+      // TextLayer (선택 전용, 투명)
+      const textLayerDiv = wrap.querySelector('.textLayer');
+      textLayerDiv.style.width = `${viewport.width}px`;
+      textLayerDiv.style.height = `${viewport.height}px`;
+      textLayerDiv.innerHTML = '';
+      const textContent = await page.getTextContent();
+      await pdfjsLib.renderTextLayer({
+        textContent,
+        container: textLayerDiv,
+        viewport,
+        textDivs: [],
+        enhanceTextSelection: true,
+      }).promise;
+
+      // 너무 작은 span 정리
+      textLayerDiv.querySelectorAll('span').forEach((span) => {
+        const r = span.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) span.remove();
+      });
+
+      // Cache
+      pagesCache.set(p, { viewportScale: desiredScale, canvas, textLayer: textLayerDiv });
+
+      // Repaint highlights for this page
+      renderHighlightsForPage(p);
+
+      // If OCR data exists, re-apply layer
+      applyOcrLayer(p);
+
+      // Build search index
+      if (!searchIndex[p-1]) {
+        const fullText = textContent.items.map(i => i.str).join(' ');
+        searchIndex[p-1] = { page: p, textLower: fullText.toLowerCase() };
+      }
+    }
+
+    async function renderThumb(p) {
+      const page = await pdfDoc.getPage(p);
+      const viewport = page.getViewport({ scale: 0.2 });
+      const wrap = document.createElement('div');
+      wrap.className = 'thumb';
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = viewport.width * dpr;
+      canvas.height = viewport.height * dpr;
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      wrap.appendChild(canvas);
+      wrap.addEventListener('click', () => scrollToPage(p));
+      els.thumbs.appendChild(wrap);
+    }
+
+    async function renderOutline() {
+      const outline = await pdfDoc.getOutline();
+      const el = document.getElementById('outline');
+      el.innerHTML = '';
+      if (!outline) return;
+      function add(out, depth = 0) {
+        out.forEach(item => {
+          const li = document.createElement('li');
+          li.style.paddingLeft = `${depth * 14}px`;
+          li.textContent = item.title || '(제목 없음)';
+          li.addEventListener('click', async () => {
+            if (item.dest) {
+              const dest = await pdfDoc.getDestination(item.dest);
+              const ref = await pdfDoc.getPageIndex(dest[0]);
+              scrollToPage(ref + 1);
+            } else if (item.url) {
+              window.open(item.url, '_blank');
+            }
+          });
+          el.appendChild(li);
+          if (item.items && item.items.length) add(item.items, depth + 1);
+        });
+      }
+      add(outline, 0);
+    }
+
+    function renderBookmarks() {
+      const list = document.getElementById('bookmarks');
+      list.innerHTML = '';
+      bookmarks.forEach((b, idx) => {
+        const li = document.createElement('li');
+        li.textContent = `p.${b.page} — ${b.label || '북마크'}`;
+        li.title = new Date(b.time).toLocaleString();
+        li.addEventListener('click', () => scrollToPage(b.page));
+        const del = document.createElement('button');
+        del.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        del.style.float = 'right';
+        del.addEventListener('click', (e) => { e.stopPropagation(); bookmarks.splice(idx,1); renderBookmarks(); saveLocal(); });
+        li.appendChild(del);
+        list.appendChild(li);
+      });
+    }
+
+    function renderHighlightsForPage(p) {
+      const wrap = document.querySelector(`.page-wrap[data-page="${p}"]`);
+      if (!wrap) return;
+      wrap.querySelectorAll('.highlight-span').forEach((el) => el.remove());
+      const pageHighlights = highlights.filter(h => h.page === p);
+      pageHighlights.forEach(h => {
+        h.rects.forEach(rect => {
+          const span = document.createElement('span');
+          span.className = 'highlight-span';
+          span.style.left = rect.left + 'px';
+          span.style.top = rect.top + 'px';
+          span.style.width = rect.width + 'px';
+          span.style.height = rect.height + 'px';
+          if (h.tag) span.dataset.tag = h.tag;
+          span.dataset.id = String(h.id);
+          span.title = (h.tag?`[${h.tag}] `:'') + (h.comment || h.text);
+          span.addEventListener('click', () => {
+            lastSelectedHighlightId = h.id;
+            const note = document.querySelector(`.note[data-id="${h.id}"] textarea`);
+            if (note) note.focus();
+          });
+          wrap.appendChild(span);
+        });
+      });
+    }
+
+    function noteFilterActive() {
+      const btn = document.querySelector('.right-tabs button.active');
+      return btn ? btn.dataset.filter : 'all';
+    }
+
+    function renderNotes() {
+      const filter = noteFilterActive();
+      els.notes.innerHTML = '';
+      const items = highlights.filter(h => filter === 'all' || h.tag === filter);
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = '하이라이트가 없습니다';
+        els.notes.appendChild(empty);
+        return;
+      }
+      items.sort((a,b)=> a.page - b.page);
+      items.forEach(h => {
+        const div = document.createElement('div');
+        div.className = 'note';
+        div.dataset.id = String(h.id);
+        const left = document.createElement('div');
+        const topRow = document.createElement('div');
+        topRow.innerHTML = `<span class="meta">p.${h.page}</span> · <span class="tag">${h.tag || '태그 없음'}</span>`;
+        const text = document.createElement('div');
+        text.textContent = h.text;
+        text.style.cursor = 'pointer';
+        text.addEventListener('click', ()=> scrollToPage(h.page));
+        const textarea = document.createElement('textarea');
+        textarea.placeholder = '댓글을 입력하세요 (예: 해설, 암기 포인트)';
+        textarea.value = h.comment || '';
+        textarea.addEventListener('change', ()=> setHighlightComment(h.id, textarea.value));
+        left.appendChild(topRow); left.appendChild(text); left.appendChild(textarea);
+
+        const right = document.createElement('div');
+        const del = document.createElement('button'); del.title = '삭제'; del.innerHTML = '<i class="fa-regular fa-trash-can"></i>';
+        del.addEventListener('click', ()=> {
+          const removed = removeHighlights([h.id]);
+          addCommand({ action:'remove', payload:{ ids:[h.id], removed } });
+        });
+        const cycle = document.createElement('button'); cycle.title = '태그 변경'; cycle.innerHTML = '<i class="fa-solid fa-tag"></i>';
+        cycle.addEventListener('click', ()=> {
+          const order = [null,'중요','암기','참고'];
+          const next = order[(order.indexOf(h.tag) + 1) % order.length];
+          const prev = h.tag || null;
+          setHighlightTag(h.id, next);
+          addCommand({ action:'setTag', payload:{ id:h.id, prev, next } });
+        });
+        right.appendChild(cycle); right.appendChild(del);
+
+        div.appendChild(left); div.appendChild(right);
+        els.notes.appendChild(div);
+      });
+    }
+
+    // ====== Interaction: Selection -> Highlight ======
+    document.addEventListener('mouseup', (e) => {
+      if (!pdfDoc) return;
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return;
+      const range = sel.getRangeAt(0);
+      const text = sel.toString().trim();
+      if (!text) return;
+
+      const start = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer;
+      const pageWrap = start.closest('.page-wrap');
+      if (!pageWrap) return;
+      const page = Number(pageWrap.dataset.page);
+      const rects = Array.from(range.getClientRects()).map(r => {
+        const base = pageWrap.getBoundingClientRect();
+        return { left: r.left - base.left, top: r.top - base.top, width: r.width, height: r.height };
+      });
+
+      if (selectMode === 'pen') {
+        const id = Date.now() + Math.random();
+        const h = { id, page, rects, text, tag: selectedTag, comment: '' };
+        execAddHighlight(h);
+        addCommand({ action:'add', payload:{ id } });
+      } else if (selectMode === 'eraser') {
+        const pageHs = highlights.filter(h => h.page === page);
+        const overlaps = pageHs.filter(h => h.rects.some(hr => rects.some(sr => hr.left < sr.left+sr.width && hr.left+hr.width > sr.left && hr.top < sr.top+sr.height && hr.top+hr.height > sr.top)));
+        if (overlaps.length) {
+          const ids = overlaps.map(o => o.id);
+          const removed = removeHighlights(ids);
+          addCommand({ action:'remove', payload:{ ids, removed } });
+        }
+      }
+
+      sel.removeAllRanges();
+    });
+
+    // ====== Undo / Redo ======
+    function undo() {
+      const cmd = undoStack.pop();
+      if (!cmd) return;
+      redoStack.push(cmd);
+      switch (cmd.action) {
+        case 'add':
+          undoAddHighlight(cmd.payload.id); break;
+        case 'remove':
+          highlights.push(...cmd.payload.removed);
+          cmd.payload.removed.forEach(h => renderHighlightsForPage(h.page));
+          renderNotes(); saveLocal();
+          break;
+        case 'setTag':
+          setHighlightTag(cmd.payload.id, cmd.payload.prev); break;
+        case 'comment':
+          setHighlightComment(cmd.payload.id, cmd.payload.prev); break;
+      }
+    }
+    function redo() {
+      const cmd = redoStack.pop();
+      if (!cmd) return;
+      undoStack.push(cmd);
+      switch (cmd.action) {
+        case 'add':
+          break;
+        case 'remove':
+          removeHighlights(cmd.payload.ids); break;
+        case 'setTag':
+          setHighlightTag(cmd.payload.id, cmd.payload.next); break;
+        case 'comment':
+          setHighlightComment(cmd.payload.id, cmd.payload.next); break;
+      }
+    }
+
+    // ====== Toolbar events ======
+    els.file.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const ab = await file.arrayBuffer();
+      localStorage.setItem('pdfViewer.extended.file', await fileToDataURL(file));
+      currentPage = 1; scale = 1.0; continuousMode = true;
+      await renderDocument(ab);
+      updateToolbar();
+    });
+
+    async function fileToDataURL(file) {
+      return new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(fr.result);
+        fr.onerror = rej;
+        fr.readAsDataURL(file);
+      });
+    }
+
+    els.prevPage.addEventListener('click', () => { if (!pdfDoc) return; currentPage = Math.max(1, currentPage - 1); scrollToPage(currentPage); });
+    els.nextPage.addEventListener('click', () => { if (!pdfDoc) return; currentPage = Math.min(pdfDoc.numPages, currentPage + 1); scrollToPage(currentPage); });
+    els.jumpInput.addEventListener('keydown', (e)=> { if (e.key==='Enter' && pdfDoc) { const p = Math.max(1, Math.min(pdfDoc.numPages, Number(els.jumpInput.value||1))); scrollToPage(p); els.jumpInput.value=''; }});
+
+    els.zoomIn.addEventListener('click', ()=> { if (!pdfDoc) return; scale = Math.min(3, scale + 0.1); rerenderAll(); });
+    els.zoomOut.addEventListener('click', ()=> { if (!pdfDoc) return; scale = Math.max(0.3, scale - 0.1); rerenderAll(); });
+    els.zoomReset.addEventListener('click', ()=> { if (!pdfDoc) return; scale = 1.0; rerenderAll(); });
+
+    els.toggleDark.addEventListener('click', ()=> { document.body.classList.toggle('dark'); });
+
+    els.modeContinuous.addEventListener('click', ()=> { continuousMode = true; els.modeContinuous.classList.add('active'); els.modeSingle.classList.remove('active'); rerenderAll(); });
+    els.modeSingle.addEventListener('click', ()=> { continuousMode = false; els.modeSingle.classList.add('active'); els.modeContinuous.classList.remove('active'); rerenderAll(); });
+
+    els.undoBtn.addEventListener('click', undo);
+    els.redoBtn.addEventListener('click', redo);
+
+    els.penBtn.addEventListener('click', ()=> setMode(selectMode==='pen'?'none':'pen'));
+    els.eraserBtn.addEventListener('click', ()=> setMode(selectMode==='eraser'?'none':'eraser'));
+    els.tagBtns.forEach(btn => btn.addEventListener('click', ()=> { selectedTag = btn.dataset.tag; setMode('pen'); }));
+
+    els.searchPrev.addEventListener('click', ()=> moveSearchCursor(-1));
+    els.searchNext.addEventListener('click', ()=> moveSearchCursor(+1));
+    els.searchInput.addEventListener('keydown', (e)=> { if (e.key==='Enter') performSearch(); });
+
+    els.tabThumbs.addEventListener('click', ()=> switchSidebar('thumbs'));
+    els.tabOutline.addEventListener('click', ()=> switchSidebar('outline'));
+    els.tabBookmarks.addEventListener('click', ()=> switchSidebar('bookmarks'));
+
+    els.rightFilterTabs.forEach(b => b.addEventListener('click', () => {
+      els.rightFilterTabs.forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      renderNotes();
+    }));
+
+    els.addBookmark.addEventListener('click', () => {
+      if (!pdfDoc) return;
+      const label = prompt('북마크 이름을 입력하세요 (선택)') || '';
+      bookmarks.push({ page: currentPage, label, time: Date.now() });
+      renderBookmarks(); saveLocal();
+    });
+
+    els.exportNotes.addEventListener('click', () => {
+      if (!highlights.length) { alert('내보낼 노트가 없습니다'); return; }
+      const rows = [['id','page','tag','text','comment']];
+      highlights.forEach(h => rows.push([
+        h.id,
+        h.page,
+        h.tag || '',
+        escapeCsv(h.text),
+        escapeCsv(h.comment || '')
+      ]));
+      const csv = rows.map(r => r.join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'notes.csv'; a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    els.clearData.addEventListener('click', ()=> {
+      if (confirm('모든 하이라이트/북마크를 삭제할까요?')) {
+        highlights = []; bookmarks = []; undoStack=[]; redoStack=[];
+        saveLocal();
+        rerenderAll(); renderBookmarks(); renderNotes();
+      }
+    });
+
+    els.ocrPage.addEventListener('click', () => { if (pdfDoc) runOcrForPage(currentPage); });
+    els.ocrAll.addEventListener('click', runOcrAll);
+    els.ocrToggleDebug.addEventListener('click', toggleOcrDebug);
+
+    function escapeCsv(s){
+      const t = String(s).replaceAll('"','""');
+      return '"'+t+'"';
+    }
+
+    function rerenderAll() {
+      if (!pdfDoc) return;
+      updateToolbar();
+      for (let p = 1; p <= pdfDoc.numPages; p++) renderPage(p);
+    }
+
+    function onScrollUpdatePage() {
+      const wraps = Array.from(document.querySelectorAll('.page-wrap'));
+      let best = 1, bestTop = Infinity;
+      wraps.forEach(w => { const r = w.getBoundingClientRect(); if (r.top >= 0 && r.top < bestTop) { bestTop = r.top; best = Number(w.dataset.page); } });
+      if (best !== currentPage) { currentPage = best; updateToolbar(); }
+    }
+
+    function switchSidebar(which) {
+      els.tabThumbs.classList.toggle('active', which==='thumbs');
+      els.tabOutline.classList.toggle('active', which==='outline');
+      els.tabBookmarks.classList.toggle('active', which==='bookmarks');
+      els.thumbs.style.display = which==='thumbs'? 'block':'none';
+      els.outline.style.display = which==='outline'? 'block':'none';
+      els.bookmarks.style.display = which==='bookmarks'? 'block':'none';
+    }
+
+    // ====== Search ======
+    function performSearch() {
+      if (!pdfDoc) return;
+      const q = (els.searchInput.value || '').trim().toLowerCase();
+      searchHits = []; searchCursor = -1;
+      if (!q) return;
+      searchIndex.forEach(item => {
+        if (!item) return;
+        const idx = item.textLower.indexOf(q);
+        if (idx !== -1) {
+          const preview = item.textLower.slice(Math.max(0, idx-20), idx+q.length+20);
+          searchHits.push({ page:item.page, idx, preview });
+        }
+      });
+      if (searchHits.length) moveSearchCursor(+1); else alert('검색 결과가 없습니다');
+    }
+    function moveSearchCursor(dir) {
+      if (!searchHits.length) return;
+      searchCursor = (searchCursor + dir + searchHits.length) % searchHits.length;
+      const hit = searchHits[searchCursor];
+      scrollToPage(hit.page);
+      const wrap = document.querySelector(`.page-wrap[data-page="${hit.page}"]`);
+      if (!wrap) return;
+      wrap.style.outline = `2px solid var(--accent)`;
+      setTimeout(()=> wrap.style.outline = 'none', 600);
+    }
+
+    // ====== Shortcuts ======
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+      if (e.ctrlKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+      if (e.key.toLowerCase() === 'h') { setMode(selectMode==='pen'?'none':'pen'); }
+      if (e.key.toLowerCase() === 'e') { setMode(selectMode==='eraser'?'none':'eraser'); }
+      if (e.key === '+') { if (pdfDoc) { scale = Math.min(3, scale+0.1); rerenderAll(); } }
+      if (e.key === '-') { if (pdfDoc) { scale = Math.max(0.3, scale-0.1); rerenderAll(); } }
+      if (e.key === 'PageDown' || e.key === 'ArrowRight') { if (pdfDoc) { currentPage = Math.min(pdfDoc.numPages, currentPage+1); scrollToPage(currentPage); } }
+      if (e.key === 'PageUp' || e.key === 'ArrowLeft') { if (pdfDoc) { currentPage = Math.max(1, currentPage-1); scrollToPage(currentPage); } }
+    });
+
+    // ====== Restore last opened file (optional) ======
+    (async function restoreFile(){
+      const dataUrl = localStorage.getItem('pdfViewer.extended.file');
+      if (!dataUrl) return;
+      const ab = await (await fetch(dataUrl)).arrayBuffer();
+      await renderDocument(ab);
+    })();
+  </script>
+</body>
+</html>

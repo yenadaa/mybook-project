@@ -1,0 +1,68 @@
+@font-face {
+    font-family: 'Eulyoo1945';/*저작권 확인*/
+    src: url('../fonts/Eulyoo1945-SemiBold.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+  }
+
+* {font-family: 'Eulyoo1945', sans-serif;}  
+body{background-color: #2d3241; caret-color: transparent;}
+.header_box{display: flex; justify-content: space-between; padding: 18px 150px 5px;}
+.header{display: flex; gap: 40px;}
+#pens img{width: 50px; height: 17px;}
+#pen1.active i{color: yellow;}
+#eraser-btn.active i{color: yellow;}
+i{color:white; cursor: pointer;}
+input{display: none;}
+hr{text-align: center; height: 1px; background: rgb(193, 193, 193); border:0; background-image: linear-gradient(to right, rgba(255, 255, 255, 0), rgba(123, 123, 123, 0.71), rgba(255, 255, 255, 0))}
+
+.viewer-box{display: flex; justify-content: center; padding: 10px 0;}
+.chalkboard{display: flex; align-items: center; justify-content: center;border-radius: 30px; border: solid 10px  rgb(156, 120, 34); width: 1400px; height: 580px; background-color:#18672e;}
+.chalkboard>p{font-size: 55px; color: rgba(239, 239, 239, 0.923); }
+
+
+.book{position: relative; display: flex; align-items: center; justify-content: center; padding: 0px 0px 22px 0px;  border-radius: 30px; border: solid 13px  rgb(156, 120, 34); width: 1400px; height: 580px; background: linear-gradient(222deg, transparent 46px, rgb(243, 242, 235) 0); background-color:rgb(243 242 235); box-shadow: inset -1px -15px 5px 7px rgba(0, 0, 0, 0.318);}
+.book::before{top:0; right:10px; position: absolute; content: ''; width: 63px; height: 53px; box-shadow: -4px 4px 12px 1px #808080a3; background: linear-gradient(to left bottom, transparent 50%, rgba(0,0,0,.09) 0, rgba(0,0,0,.05)) no-repeat 100% 0; border-bottom-left-radius: 6px; }
+.hidden{display:none;}
+.Allpage{padding: 0px 10px 0px 15px;}
+.left-page{flex: 2; overflow: hidden; margin-left: 14px;}
+.right-page{flex: 1.7; overflow: visible;}
+#pdf-container{height: 100%; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;}
+#pdf-container::-webkit-scrollbar {display: none;}
+.center-line{transform: translateX(-0.5px); width: 1px; height: 570px; background-color: #00000047; box-shadow: -20px 0px 20px 20px rgb(32 28 18 / 15%), 20px 0px 20px 20px rgb(32 28 18 / 15%), 1px -1px 20px 11px rgb(32 28 18 / 12%);}
+
+/* textLayer는 항상 투명(겹쳐 보여 보이지 않도록) */
+.textLayer, 
+.textLayer span {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important; /* 크롬 */
+}
+
+/* 텍스트 선택 시 하이라이트만 보이게 */
+.textLayer ::selection {
+  background: rgba(180, 213, 255, .35);
+}
+
+.textLayer > span {position: absolute; white-space: pre; transform-origin: 0 0; line-height: 1; pointer-events: auto; color: transparent;}
+.textLayer span::selection{background: rgba(0, 123, 255, 0.4); color:transparent;}
+.wrap{position: relative; margin: 10px 0;}
+.underlined {text-underline-offset: 2px;text-decoration: underline;text-decoration-thickness: 2px;box-shadow: inset 0 -0.4em 0 rgba(255, 255, 0, 0.423);}
+
+
+.tabs{display: flex; gap: 10px; margin-left: 35px; position:fixed; top: 40px; z-index: 10;}
+.tab{padding: 5px 10px; border-radius: 6px 6px 0 0; border: 1px solid #d3d3d3; border-bottom: none; background-color: rgb(243, 242, 235); font-size: 14px; cursor: pointer;}
+.tab.active{background-color: white; font-weight: bold;}
+
+#note-container{position: relative; width: 100%; height: 510px; margin:50px 0 15px; overflow-y: auto; }
+#note-container::-webkit-scrollbar {display: none;}
+.note-wrap{padding: 0px 70px 0px 40px;}
+.note-item{margin-bottom: 20px;}
+
+.tag-btn{position: relative;}
+.tag-btn.active > i{color:yellow;}
+.dropdown{visibility: hidden; z-index: 999; position: absolute; background: white; border-radius: 5px; left:250px; box-shadow: 0px 3px 4px 1px #6a6a6a7d;}
+.dropdown.show{visibility: visible; opacity: 1;} 
+li{list-style: none; margin: 10px 0;}
+li>button{width: 100px; height: 23px;}
+li>button:hover{background: rgb(180, 180, 180);}
+
