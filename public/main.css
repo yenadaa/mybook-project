@@ -1,127 +1,133 @@
-  @font-face {
-      font-family: 'Eulyoo1945';/*저작권 확인*/
-      src: url('../fonts/Eulyoo1945-SemiBold.ttf') format('truetype');
-      font-weight: normal;
-      font-style: normal;
-    }
-
-  * {font-family: 'Eulyoo1945', sans-serif;}  
-  body{background-color: #2d3241; caret-color: transparent;}
-  .header_box{display: flex; justify-content: space-between; padding: 18px 80px 5px;}
-  .header{display: flex; gap: 40px;}
-  #pens img{width: 50px; height: 17px;}
-  #pen1.active i{color: yellow;}
-  #eraser-btn.active i{color: yellow;}
-  i{color:white; cursor: pointer;}
-  input{display: none;}
-  hr{text-align: center; height: 1px; background: rgb(193, 193, 193); border:0; background-image: linear-gradient(to right, rgba(255, 255, 255, 0), rgba(123, 123, 123, 0.71), rgba(255, 255, 255, 0))}
-
-  .viewer-box{display: flex; justify-content: center; padding: 10px 0;}
-  .chalkboard{display: flex; align-items: center; justify-content: center;border-radius: 30px; border: solid 10px  rgb(156, 120, 34); width: 91%; height: 580px; background-color:#18672e;}
-  .chalkboard>p{font-size: 55px; color: rgba(239, 239, 239, 0.923); }
-
-
-  .book{position: relative; display: flex; align-items: center; justify-content: center; padding: 0px 0px 22px 0px;  border-radius: 30px; border: solid 13px  rgb(156, 120, 34); width: 91%; height: 580px; background: linear-gradient(222deg, transparent 46px, rgb(243, 242, 235) 0); background-color:rgb(243 242 235); box-shadow: inset -1px -15px 5px 7px rgba(0, 0, 0, 0.318);}
-  .book::before{top:0; right:10px; position: absolute; content: ''; width: 63px; height: 53px; box-shadow: -4px 4px 12px 1px #808080a3; background: linear-gradient(to left bottom, transparent 50%, rgba(0,0,0,.09) 0, rgba(0,0,0,.05)) no-repeat 100% 0; border-bottom-left-radius: 6px; }
-  .hidden{display:none;}
-  .Allpage{padding: 0px 10px 0px 15px;}
-  .left-page{flex: 2; overflow: hidden; margin-left: 14px;}
-  .right-page{flex: 1.7; overflow: visible;}
-  #pdf-container{height: 100%; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;}
-  #pdf-container::-webkit-scrollbar {display: none;}
-  .center-line{transform: translateX(-0.5px); width: 1px; height: 570px; background-color: #00000047; box-shadow: -20px 0px 20px 20px rgb(32 28 18 / 15%), 20px 0px 20px 20px rgb(32 28 18 / 15%), 1px -1px 20px 11px rgb(32 28 18 / 12%);}
-
-  .textLayer > span {position: absolute; white-space: pre; transform-origin: 0 0; line-height: 1; pointer-events: auto; color: transparent;}
-  .textLayer span::selection{background: rgba(0, 123, 255, 0.4); color:transparent;}
-  .wrap{position: relative; margin: 10px 0;}
-  .underlined {text-underline-offset: 2px;text-decoration: underline;text-decoration-thickness: 2px;box-shadow: inset 0 -0.4em 0 rgba(255, 255, 0, 0.423);}
-
-
-  .tabs{display: flex; gap: 10px; margin-left: 35px; position:fixed; top: 40px; z-index: 10;}
-  .tab{padding: 5px 10px; border-radius: 6px 6px 0 0; border: 1px solid #d3d3d3; border-bottom: none; background-color: rgb(243, 242, 235); font-size: 14px; cursor: pointer;}
-  .tab.active{background-color: white; font-weight: bold;}
-
-  #note-container{position: relative; width: 100%; height: 510px; margin:50px 0 15px; overflow-y: auto; }
-  #note-container::-webkit-scrollbar {display: none;}
-  .note-wrap{padding: 0px 70px 0px 40px;}
-  .note-item{margin-bottom: 20px;}
-
-  .tag-btn{position: relative;}
-  .tag-btn.active > i{color:yellow;}
-  .dropdown{visibility: hidden; z-index: 999; position: absolute; background: white; border-radius: 5px; left:250px; box-shadow: 0px 3px 4px 1px #6a6a6a7d;}
-  .dropdown.show{visibility: visible; opacity: 1;} 
-  li{list-style: none; margin: 10px 0;}
-  li>button{width: 100px; height: 23px;}
-  li>button:hover{background: rgb(180, 180, 180);}
-
-  i:hover{color: yellow;}
-
-  .loginout-btn{border-radius: 10px; background-color: whitesmoke; color: black; font-size: 13px;}
-  .loginout-btn:hover{border-radius: 10px; background-color: gray; color: white; font-size: 13px;}
-  #user-email{color:white; font-size: 14px;}
-  #ocr-pen-btn{border-radius: 12px; background-color: whitesmoke; color: black; font-size: 11px;}
-  #ocr-pen-btn:hover{border-radius: 12px; background-color: gray; color: white; font-size: 11px;}
-/* --- AI 분석 결과 UI --- */
-.summary-section {
-    line-height: 1.6;
-}
-.quiz-modal-body h1, .quiz-modal-body h2, .quiz-modal-body h3 {
-    margin-top: 20px;
-    margin-bottom: 15px;
-}
-hr {
-    border: none;
-    border-top: 1px solid #eee;
-    margin: 20px 0;
+@font-face {
+    font-family: 'Eulyoo1945';/*저작권 확인*/
+    src: url('fonts/Eulyoo1945-SemiBold.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
 }
 
-/* --- 단답형 퀴즈 스타일 --- */
-.short-answer-container {
+* {font-family: 'Eulyoo1945', sans-serif;}  
+body{background-color: #2d3241; caret-color: transparent;}
+.header_box{display: flex; justify-content: space-between; padding: 18px 80px 5px;}
+.header{display: flex; align-items: center; gap: 40px;}
+#pens img{width: 50px; height: 17px;}
+.tool-btn.active i, #pen1.active i, #eraser-btn.active i, #tag-btn.active i, #ocr-pen-btn.active {color: yellow;}
+i{color:white; cursor: pointer;}
+input{display: none;}
+hr{text-align: center; height: 1px; background: rgb(193, 193, 193); border:0; background-image: linear-gradient(to right, rgba(255, 255, 255, 0), rgba(123, 123, 123, 0.71), rgba(255, 255, 255, 0))}
+
+.viewer-box{display: flex; justify-content: center; padding: 10px 0;}
+.chalkboard{display: flex; align-items: center; justify-content: center;border-radius: 30px; border: solid 10px  rgb(156, 120, 34); width: 91%; height: 580px; background-color:#18672e;}
+.chalkboard>p{font-size: 55px; color: rgba(239, 239, 239, 0.923); }
+
+
+.book{position: relative; display: flex; align-items: center; justify-content: center; padding: 0px 0px 22px 0px;  border-radius: 30px; border: solid 13px  rgb(156, 120, 34); width: 91%; height: 580px; background: linear-gradient(222deg, transparent 46px, rgb(243, 242, 235) 0); background-color:rgb(243 242 235); box-shadow: inset -1px -15px 5px 7px rgba(0, 0, 0, 0.318);}
+.book::before{top:0; right:10px; position: absolute; content: ''; width: 63px; height: 53px; box-shadow: -4px 4px 12px 1px #808080a3; background: linear-gradient(to left bottom, transparent 50%, rgba(0,0,0,.09) 0, rgba(0,0,0,.05)) no-repeat 100% 0; border-bottom-left-radius: 6px; }
+.hidden{display:none;}
+.Allpage{padding: 0px 10px 0px 15px;}
+.left-page{flex: 2; overflow: hidden; margin-left: 14px;}
+.right-page{flex: 1.7; overflow: visible;}
+#pdf-container{height: 100%; overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;}
+#pdf-container::-webkit-scrollbar {display: none;}
+.center-line{transform: translateX(-0.5px); width: 1px; height: 570px; background-color: #00000047; box-shadow: -20px 0px 20px 20px rgb(32 28 18 / 15%), 20px 0px 20px 20px rgb(32 28 18 / 15%), 1px -1px 20px 11px rgb(32 28 18 / 12%);}
+
+.textLayer > span {position: absolute; white-space: pre; transform-origin: 0 0; line-height: 1; pointer-events: auto; color: transparent;}
+.textLayer span::selection{background: rgba(0, 123, 255, 0.4); color:transparent;}
+.wrap{position: relative; margin: 10px 0;}
+.page { position: relative; }
+
+
+.tabs {
+    position: absolute; 
+    top: 10px;
+    left: 25px;
     display: flex;
     gap: 10px;
-    margin-top: 10px;
+    z-index: 10;
 }
-.short-answer-input {
-    flex-grow: 1;
-    padding: 8px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-}
-.check-answer-btn {
-    padding: 8px 12px;
-    border: 1px solid #007bff;
-    background-color: #007bff;
-    color: white;
-    border-radius: 4px;
-    cursor: pointer;
-}
-.check-answer-btn:disabled {
-    background-color: #aaa;
-    border-color: #aaa;
-    cursor: not-allowed;
-}
-.answer-feedback {
-    margin-top: 10px;
-    padding: 10px;
-    background-color: #f0f0f0;
-    border-radius: 4px;
-    font-size: 0.9em;
-}
-.short-answer-input.correct {
-    background-color: #d4edda;
-    border-color: #c3e6cb;
-}
-.short-answer-input.incorrect {
-    background-color: #f8d7da;
-    border-color: #f5c6cb;
-}
-.hidden {
-    display: none;
+.tab{padding: 5px 10px; border-radius: 6px 6px 0 0; border: 1px solid #d3d3d3; border-bottom: none; background-color: rgb(243, 242, 235); font-size: 14px; cursor: pointer;}
+.tab.active{background-color: white; font-weight: bold;}
+
+#note-container{position: relative; width: 100%; height: 100%; margin: 0; overflow-y: auto; }
+#note-container::-webkit-scrollbar {display: none;}
+.note-wrap{padding: 60px 40px 20px 40px;} 
+.note-item{margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;}
+.note-text{ cursor: pointer; }
+.delete-btn { background: none; border: none; cursor: pointer; }
+
+.tag-btn{position: relative;}
+.dropdown{visibility: hidden; z-index: 999; position: absolute; background: white; border-radius: 5px; left:250px; box-shadow: 0px 3px 4px 1px #6a6a6a7d;}
+.dropdown.show{visibility: visible; opacity: 1;} 
+li{list-style: none; margin: 10px 0;}
+li>button{width: 100px; height: 23px; border: 1px solid #ccc; background: #fff; cursor: pointer;}
+li>button:hover{background: rgb(220, 220, 220);}
+
+i:hover{color: yellow;}
+
+.loginout-btn{border: 1px solid #ccc; border-radius: 10px; background-color: whitesmokew; color: black; font-size: 13px; padding: 5px 10px; cursor: pointer;}
+.loginout-btn:hover{background-color: gray; color: white;}
+#user-email{color:white; font-size: 14px; margin-right: 10px;}
+#quiz-btn, #ocr-pen-btn { border: 1px solid #ccc; border-radius: 12px; background-color: whitesmoke; color: black; font-size: 11px; padding: 5px 10px; cursor: pointer;}
+#quiz-btn:hover, #ocr-pen-btn:hover{background-color: gray; color: white;}
+
+.tool-btn {
+    background: none;
+    border: none;
+    padding: 0;
 }
 
-/* --- 토론 퀴즈 스타일 --- */
-.discussion-hint {
-    font-style: italic;
-    color: #666;
-    margin-top: 10px;
+
+/* --- 퀴즈 팝업창(Modal) 스타일 --- */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background-color: rgba(0, 0, 0, 0.6);
+    display: flex; justify-content: center; align-items: center;
+    z-index: 1000; font-family: sans-serif;
 }
+.modal-overlay.hidden { display: none; }
+.modal-content {
+    background-color: #fff; padding: 20px 30px; border-radius: 10px;
+    width: 90%; max-width: 600px; max-height: 80vh;
+    overflow-y: auto; box-shadow: 0 5px 15px rgba(0,0,0,.3);
+}
+.modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px;
+}
+.modal-header h2 { font-size: 20px; color: #333; }
+.close-btn {
+    background: none; border: none; font-size: 28px;
+    cursor: pointer; color: #888; line-height: 1;
+}
+.close-btn:hover { color: #333; }
+.modal-body .loading {
+    text-align: center; padding: 40px 20px; font-size: 18px; color: #555;
+}
+.quiz-item {
+    margin-bottom: 25px; border-bottom: 1px dashed #ddd; padding-bottom: 20px;
+}
+.quiz-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 5px; }
+.quiz-question {
+    font-weight: bold; margin-bottom: 15px; font-size: 17px;
+    line-height: 1.5; color: #333;
+}
+.quiz-options { list-style-type: none; padding: 0; margin: 0; }
+
+/* --- ✨ 대화형 퀴즈 스타일 추가 --- */
+.quiz-options li {
+    padding: 10px 12px; border: 1px solid #e0e0e0; background-color: #fafafa;
+    margin-bottom: 8px; border-radius: 5px; font-size: 15px; color: #555;
+    cursor: pointer; transition: background-color 0.2s;
+}
+.quiz-item:not(.answered) .quiz-options li:hover {
+    background-color: #f0f0f0;
+}
+.quiz-options li.correct {
+    background-color: #d4edda; border-color: #c3e6cb; color: #155724; font-weight: bold;
+}
+.quiz-options li.incorrect {
+    background-color: #f8d7da; border-color: #f5c6cb; color: #721c24;
+}
+.quiz-options li.disabled {
+    cursor: default;
+}
+

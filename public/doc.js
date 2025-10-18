@@ -43,22 +43,37 @@ export async function createDocFromFile(file) {
     const user = getCurrentUser();
     if (!file || !user) return;
 
-    // ✨ [수정] 파일 이름에서 공백, 대괄호, 소괄호, 하이픈을 밑줄(_)로 변경
-    const sanitizedFileName = file.name.replace(/[\s\[\]\(\)-]/g, '_');
-    const storagePath = `docs/${user.uid}/${Date.now()}_${sanitizedFileName}`;
+    // ✨ 1단계: Firestore에 문서를 "먼저" 생성해서 고유 ID (bookId)를 확보합니다.
+    const docRef = await addDoc(collection(db, "docs", user.uid, "userDocs"), {
+        title: file.name,
+        createdAt: Timestamp.now(),
+        // storagePath는 아직 비워둡니다.
+    });
+    const bookId = docRef.id;
+
+    // ✨ 2단계: 확보한 bookId를 파일 이름으로 사용해서 Storage 경로를 만듭니다.
+    const storagePath = `docs/${user.uid}/${bookId}.pdf`;
     const storageRef = ref(storage, storagePath);
     
-    console.log("업로드 시작:", storagePath);
-    await uploadBytes(storageRef, file);
-    console.log("업로드 완료");
+    console.log(`업로드 시작: ${storagePath}`);
 
-    const docRef = await addDoc(collection(db, "docs", user.uid, "userDocs"), {
-        title: file.name, // DB에는 원래 파일 이름을 저장하여 사용자에게 보여줌
-        storagePath: storagePath, // Storage 경로는 정리된 이름 사용
-        createdAt: Timestamp.now(),
-    });
-    
-    openDoc(docRef.id);
+    try {
+        // ✨ 3단계: 이 경로로 파일을 업로드합니다.
+        await uploadBytes(storageRef, file);
+        console.log("업로드 완료");
+
+        // ✨ 4단계 (가장 중요!): 업로드 성공 후, Firestore 문서에 최종 경로를 업데이트합니다.
+        await setDoc(docRef, { storagePath: storagePath }, { merge: true });
+
+        // 이제 모든 것이 완벽하게 연결되었으므로 문서를 엽니다.
+        openDoc(bookId);
+
+    } catch (error) {
+        console.error("파일 업로드 또는 문서 업데이트 실패:", error);
+        // 실패 시 방금 만든 Firestore 문서를 삭제해서 데이터를 깨끗하게 유지합니다.
+        await deleteDoc(docRef);
+        alert("파일 업로드에 실패했습니다. 다시 시도해 주세요.");
+    }
 }
 
 // 문서 목록 렌더링
@@ -98,7 +113,7 @@ export async function deleteDocFromDb(docId) {
 }
 
 // 문서 열기
-export function openDoc(bookId) {
+export async function openDoc(bookId) {
     const user = getCurrentUser();
     if (!user) return;
 
@@ -106,25 +121,41 @@ export function openDoc(bookId) {
     currentBookId = bookId;
     
     const docRef = doc(db, "docs", user.uid, "userDocs", bookId);
-    getDoc(docRef).then(docSnap => {
+    
+    try {
+        const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
             const docData = docSnap.data();
+
+            // storagePath가 없으면 PDF를 로드할 수 없습니다.
+            if (!docData.storagePath) {
+                throw new Error(`Firestore 문서 [${bookId}]에 storagePath 정보가 없습니다!`);
+            }
+
             const storageRef = ref(storage, docData.storagePath);
             
             chalkboard.classList.add("hidden");
             bookLayout.classList.remove("hidden");
             drawer.classList.add('hidden');
 
-            renderPDF(storageRef);
+            renderPDF(storageRef); // PDF 렌더링
             setAnnotationContext(user.uid, bookId);
 
+            // 하이라이트 리스너 설정
             const highlightsQuery = query(collection(db, "highlights"), where("bookId", "==", bookId), where("userId", "==", user.uid));
             unsubscribeHighlights = onSnapshot(highlightsQuery, (snapshot) => {
                 const highlights = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
                 updateHighlightsData(highlights);
             });
+
+        } else {
+            throw new Error("Firestore에서 문서를 찾을 수 없습니다.");
         }
-    });
+    } catch (error) {
+        console.error("문서 열기 실패:", error);
+        alert(`문서를 여는 데 실패했습니다: ${error.message}`);
+        resetToHome();
+    }
 }
 
 // 홈으로 리셋

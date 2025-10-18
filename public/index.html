@@ -10,7 +10,18 @@
     <title>My Book</title>
 </head>
 <body>
-    
+
+    <div id="quiz-modal-overlay" class="modal-overlay hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 id="quiz-modal-title">AI 생성 퀴즈</h2>
+          <button id="quiz-close-btn" class="close-btn">&times;</button>
+        </div>
+        <div id="quiz-modal-body" class="modal-body">
+          </div>
+      </div>
+    </div>
+
     <header>
         <div class="header_box">
             <div class="header">
@@ -19,7 +30,6 @@
                 <button id="redo-btn"><i class="fa-solid fa-arrow-rotate-right fa-xl"></i></button>
                 <button id="pen1" class="tool-btn"><i class="fa-solid fa-pen fa-xl"></i></button>
                 <button class="tag-btn tool-btn" id="tag-btn"><i class="fa-solid fa-tag fa-2xl"></i></button>
-                
                 <div class="dropdown" id="dropdown">
                     <ul>
                         <li><button data-tag="중요">중요</button></li>
@@ -27,7 +37,6 @@
                         <li><button data-tag="참고">참고</button></li>
                     </ul>
                 </div>
-                
                 <div class="eraser">
                     <button id="eraser-btn" class="tool-btn"><i class="fa-solid fa-eraser fa-xl"></i></button>
                 </div>
@@ -37,12 +46,12 @@
                 <input type="file" accept="application/pdf" id="file-btn" style="display:none;">
                 <button id="ocr-pen-btn" class="tool-btn">OCR</button>
                 <button id="create-quiz-btn">문제 만들기 🎲</button>
-                    <div id="quiz-options-modal" class="hidden">
+                <div id="quiz-options-modal" class="hidden">
                     <h3>어떤 문제를 만들까요?</h3>
                     <button id="modal-full-doc-btn">전체 문서로 꼼꼼하게</button>
                     <button id="modal-highlights-btn">하이라이트로 빠르게</button>
                     <button id="modal-close-btn">닫기</button>
-                    </div>
+                </div>
                 <div id="auth-slot">
                     <button type="button" id="login-btn">구글 로그인</button>
                     <div id="user-info" class="hidden">
@@ -53,9 +62,9 @@
             </div>
         </div>
     </header>
+
     <section class="viewer-box">
         <div id="chalkboard" class="chalkboard"><p>pdf 파일 추가 또는 목록에서 열기</p></div>
-
         <div id="book-layout" class="book hidden">
             <div id="pdf-container" class="Allpage left-page"></div>
             <div class="center-line" id="line"></div>
@@ -69,7 +78,6 @@
                 <div class="note-wrap" id="note"></div>
             </div>
         </div>
-
         <div id="doc-layout" class="doc-layout hidden">
             <div class="doc-padding">
                 <aside id="doc-drawer" class="doc-drawer hidden">
@@ -82,19 +90,6 @@
             </div>
         </div>
     </section>
-
-    <!-- 퀴즈 팝업창(Modal) HTML 구조 -->
-    <div id="quiz-modal-overlay" class="modal-overlay hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>AI 생성 퀴즈</h2>
-                <button id="quiz-close-btn" class="close-btn">&times;</button>
-            </div>
-            <div id="quiz-modal-body" class="modal-body">
-                <!-- 퀴즈 내용은 main.js에서 동적으로 생성됩니다. -->
-            </div>
-        </div>
-    </div>
 
     <script type="module" src="main.js"></script>
 </body>

@@ -1,19 +1,15 @@
+# quiz_generator.py
+
 from __future__ import annotations
 import os
 from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
-import re
 from pydantic import BaseModel
-from openai import OpenAI
-from sklearn.feature_extraction.text import TfidfVectorizer
-import json
-from json.decoder import JSONDecodeError
-import random
-import textwrap
-
-# ----------------- PDF 전처리 유틸리티 -----------------
+import random  # [수정] NameError 방지를 위해 random 모듈을 추가합니다.
+import textwrap # [수정] 프롬프트 함수에서 사용하기 위해 textwrap 모듈을 추가합니다.
 # ----------------- OpenAI 클라이언트 및 유틸리티 -----------------
 def _get_client() -> "OpenAI":
+    # ✅ [수정] OpenAI 라이브러리를 이 함수가 호출될 때만 로드합니다.
+    from openai import OpenAI
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("환경변수 OPENAI_API_KEY가 필요합니다.")
@@ -26,6 +22,10 @@ def _system_prompt() -> str:
     )
 
 def _ask_gpt_json(prompt: str, model: str, temperature: float, max_tokens: int) -> Any:
+    # ✅ [수정] json 관련 라이브러리도 필요할 때만 로드합니다.
+    import json
+    from json.decoder import JSONDecodeError
+
     client = _get_client()
     try:
         rsp = client.chat.completions.create(
@@ -42,11 +42,11 @@ def _ask_gpt_json(prompt: str, model: str, temperature: float, max_tokens: int) 
         try:
             return json.loads(text)
         except JSONDecodeError as e:
-            print(f"JSON 디코딩 오류 발생: {e}. 유효하지 않은 JSON 응답입니다.")
-            return {}  # 빈 딕셔너리를 반환하여 프로그램이 멈추지 않도록 함
+            print(f"JSON 디코딩 오류 발생: {e}. 유효하지 않은 JSON 응답입니다: {text}")
+            return {}
     except Exception as e1:
         print(f"API 호출 중 오류 발생: {e1}")
-        return {} # API 호출 실패 시에도 빈 딕셔너리를 반환
+        return {}
 
 def _normalize_ids(doc: PreprocessedDoc) -> List[str]:
     for i, ch in enumerate(doc.chunks):
@@ -78,6 +78,7 @@ def _select_scope(
             total += len(t)
     if not sel:
         raise ValueError("선택된 범위가 비었습니다. section 또는 chunk_ids를 확인하세요.")
+    
     joined, ids = [], []
     for c in sel:
         ids.append(c.id)
@@ -91,15 +92,21 @@ def _fix_sources(candidate: List[str], valid_ids: List[str], fallback: List[str]
     out = [s for s in (candidate or []) if s in valid]
     return out or (fallback if fallback else (valid_ids[:1] if valid_ids else []))
 
-def generate_embeddings(texts: List[str]) -> np.ndarray:
-    if SentenceTransformer is None:
-        raise RuntimeError("sentence-transformers 라이브러리가 설치되지 않았습니다.")
+def generate_embeddings(texts: List[str]):
+    # 이 함수는 현재 호출되지 않지만, 나중에 사용될 경우를 대비해 수정합니다.
+    # ✅ [수정] 무거운 ML 라이브러리들을 함수 내부에서 로드합니다.
+    try:
+        from sentence_transformers import SentenceTransformer
+        import numpy as np
+    except ImportError:
+        raise RuntimeError("sentence-transformers 또는 numpy 라이브러리가 설치되지 않았습니다.")
+    
     model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
     embeddings = model.encode(texts, convert_to_numpy=True)
     return embeddings
 
 
-# ----------------- 데이터 모델 -----------------
+# ----------------- 데이터 모델 (변경 없음) -----------------
 class Chunk(BaseModel):
     id: Optional[str] = None
     text: str
@@ -126,7 +133,6 @@ class Output(BaseModel):
     review: ReviewOut
     meta: Dict[str, Any]
 
-# ----------------- 프롬프트 템플릿 -----------------
 def _prompt_summaries(text: str) -> str:
     return textwrap.dedent(f"""
     [과제]
@@ -163,8 +169,8 @@ def _prompt_review(text: str, keywords: List[str], counts: Dict[str, int]) -> st
     [출력(JSON)]
     {{
       "review": {{
-        "ox":    [{{"q":"...","answer":true,"why":"...","sources":["c1"],"tags":["OX"],"confused":false}}],
-        "short": [{{"q":"...","answer":"...","sources":["c2"],"tags":["단답"],"confused":false}}],
+        "ox":       [{{"q":"...","answer":true,"why":"...","sources":["c1"],"tags":["OX"],"confused":false}}],
+        "short":    [{{"q":"...","answer":"...","sources":["c2"],"tags":["단답"],"confused":false}}],
         "discussion": [{{"q":"...","hint":"...","sources":["c3"],"tags":["토론"]}}]
       }}
     }}
@@ -190,6 +196,7 @@ def _prompt_keywords(text: str) -> str:
     }}
     """).strip()
 
+
 # ----------------- 실행 함수: 기본 모듈과 맞춤형 모듈 -----------------
 def generate_summaries(
     doc: PreprocessedDoc,
@@ -210,6 +217,8 @@ def generate_base_review(
     model: str = "gpt-4o-mini",
     seed: Optional[int] = None,
 ) -> Output:
+    print(f"generate_base_review 함수 시작: {len(doc.chunks)}개 페이지 데이터 받음")
+
     _normalize_ids(doc)
 
     # 1. 문서 전체 텍스트 대신, 일부만 샘플링하여 키워드 추출

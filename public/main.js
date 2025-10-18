@@ -81,8 +81,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         showQuizModal(null, true, false, "AI가 전체 문서를 분석해 퀴즈와 요약을 만드는 중... (최대 2분 소요)");
         try {
-            const generateFullDocQuiz = httpsCallable(functions, 'generateFullDocQuiz');
+            const generateFullDocQuiz = httpsCallable(functions, 'generateFullDocQuiz',{ timeout: 300000 });
             const result = await generateFullDocQuiz({ bookId });
+            console.log("서버로부터 받은 전체 데이터:", result.data);
             showFullDocQuiz(result.data);
         } catch (error) {
             console.error("전체 문서 퀴즈 생성 과정 오류:", error);
