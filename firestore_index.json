@@ -1,0 +1,20 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "quizItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "bookId", "order": "ASCENDING" },
+        { "fieldPath": "scope", "order": "ASCENDING" },
+        { "fieldPath": "bands", "arrayConfig": "CONTAINS" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
+
+
+{
+    "_comment":"firebase.json에 파일 경로 지정 필요"
+}
