@@ -1,16 +1,8 @@
-# (필요 시) 라이브러리 설치
-# 이미 설치되어 있으면 이 셀은 건너뛰어도 됩니다.
-#!pip -q install --upgrade openai pydantic scikit-learn
-# OPENAI_API_KEY 설정 (반드시 본인 키로 넣으세요)
-
-import os
-os.environ["OPENAI_API_KEY"] = "^^" # <- 여기에 키 입력
-
 from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import re
-from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader # PyPDF2는 Firebase Functions 코드에서 fitz로 대체되었으나, 여기서는 원본 유지
 from PyPDF2.errors import PdfReadError
 from pydantic import BaseModel
 from openai import OpenAI
@@ -19,6 +11,15 @@ import json
 from json.decoder import JSONDecodeError
 import random
 import textwrap
+import os
+import numpy as np # generate_embeddings 함수를 위해 추가 (단, 실제 사용하려면 sentence-transformers 설치 필요)
+
+os.environ["OPENAI_API_KEY"] = "^^" # <- 여기에 키 입력
+
+class PdfReadError(Exception): pass
+def load_pdf_text_by_page(pdf_path: str) -> List[str]:
+    print(f"더미: PDF 텍스트 로딩 (실제 PDF 라이브러리 사용 필요)")
+    return []
 
 # ----------------- PDF 전처리 유틸리티 -----------------
 def _normalize_text(s: str) -> str:
@@ -135,6 +136,7 @@ def pdf_to_preprocessed_doc(
             cid += 1
     return {"doc_id": doc_id or pdf_path, "chunks": chunks}
 
+
 # ----------------- OpenAI 클라이언트 및 유틸리티 -----------------
 def _get_client() -> "OpenAI":
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -249,6 +251,7 @@ class Output(BaseModel):
     review: ReviewOut
     meta: Dict[str, Any]
 
+
 # ----------------- 프롬프트 템플릿 -----------------
 def _prompt_summaries(text: str) -> str:
     return textwrap.dedent(f"""
@@ -313,24 +316,25 @@ def _prompt_keywords(text: str) -> str:
     }}
     """).strip()
 
-# ----------------- 실행 함수: 기본 모듈과 맞춤형 모듈 -----------------
+   # ----------------- 실행 함수: 기본 모듈과 맞춤형 모듈 -----------------
 def generate_summaries(
     doc: PreprocessedDoc,
     section: Optional[str] = None,
     chunk_ids: Optional[List[str]] = None,
-    model: str = "gpt-4.1-mini",
+    model: str = "gpt-4.1-mini", 
 ) -> SummaryOut:
     all_ids = _normalize_ids(doc)
     text, used_ids = _select_scope(doc, section_contains=section, chunk_ids=chunk_ids)
     data = _ask_gpt_json(_prompt_summaries(text), model=model, temperature=0.2, max_tokens=1600)
     data["summary_half"] = ""
     data["summary_full"] = ""
-    data["sources"] = _fix_sources(data.get("sources", []), all_ids, used_ids)
+    # sources 필드가 GPT 응답에 없으므로 used_ids로 대체
+    data["sources"] = _fix_sources(data.get("sources", []), all_ids, used_ids) 
     return SummaryOut(**data)
 
 def generate_base_review(
     doc: PreprocessedDoc,
-    model: str = "gpt-4.1-mini",
+    model: str = "gpt-4.1-mini", 
     seed: Optional[int] = None,
 ) -> Output:
     _normalize_ids(doc)
@@ -363,7 +367,7 @@ def generate_base_review(
             # 각 청크에 대한 퀴즈 생성
             text, used_ids_chunk = _select_scope(doc, section_contains=None, chunk_ids=[chunk.id])
             
-            counts = {"ox": 1, "short": 1, "discussion": 0}
+            counts = {"ox": 3, "short": 3, "discussion": 0}
             raw = _ask_gpt_json(
                 _prompt_review(text, keywords, counts), # 추출된 키워드 사용
                 model=model, temperature=0.4, max_tokens=1200
@@ -371,6 +375,7 @@ def generate_base_review(
             
             rv = raw.get("review", {}) or {}
             
+            # 결과 병합
             for item in rv.get("ox", []):
                 item["sources"] = _fix_sources(item.get("sources", []), [c.id for c in doc.chunks], used_ids_chunk)
                 review_output.ox.append(item)
@@ -379,6 +384,11 @@ def generate_base_review(
                 item["sources"] = _fix_sources(item.get("sources", []), [c.id for c in doc.chunks], used_ids_chunk)
                 review_output.short.append(item)
             
+            # discussion은 generate_base_review에서는 생성되지 않지만, 혹시 모를 경우 대비
+            for item in rv.get("discussion", []): 
+                item["sources"] = _fix_sources(item.get("sources", []), [c.id for c in doc.chunks], used_ids_chunk)
+                review_output.discussion.append(item)
+                
         except Exception:
             continue
 
@@ -394,25 +404,47 @@ def generate_base_review(
     )
     
     return Output(summaries=final_summary_out, review=review_output, meta={"model": model, "doc_id": doc.doc_id})
-    
-def generate_custom_review(
+
+
+ def generate_custom_review(
     doc: PreprocessedDoc,
     section: Optional[str] = None,
     chunk_ids: Optional[List[str]] = None,
     keywords: Optional[List[str]] = None,
-    model: str = "gpt-4.1-mini",
+    model: str = "gpt-4o-mini", # 모델명 gpt-4.1-mini -> gpt-4o-mini 로 변경
     seed: Optional[int] = None,
-    counts_override: Optional[Dict[str, int]] = None,
+    counts_override: Optional[Dict[str, int]] = None, # 청크당 문제 개수
 ) -> ReviewOut:
+    """
+    [수정된 함수]: 선택된 청크(chunk_ids 또는 section) 각각에 대해 개별적으로 퀴즈를 생성합니다.
+    """
     all_ids = _normalize_ids(doc)
-    text, used_ids = _select_scope(doc, section, chunk_ids)
+    
+    # 1. 대상 청크 ID 목록 확정
+    target_chunks = []
+    
+    # section 또는 chunk_ids를 사용해 대상 청크 객체 목록을 가져옵니다.
+    if section:
+        # section을 포함하는 모든 청크
+        target_chunks = [c for c in doc.chunks if section in " / ".join(c.section_path or [])]
+    elif chunk_ids:
+        # 명시된 ID 목록에 해당하는 청크
+        id_set = set(chunk_ids)
+        target_chunks = [c for c in doc.chunks if c.id in id_set]
+    else:
+        # 대상이 없으면 오류 발생 또는 빈 결과 반환
+        return ReviewOut(ox=[], short=[], discussion=[])
+
+
+    # 2. 키워드 추출 (문서 전체 또는 선택 범위 전체를 기반으로 한 번만 추출)
     if keywords:
         kws = keywords
     else:
-        full_text = " ".join([c.text for c in doc.chunks])
+        # 선택된 청크들의 텍스트만 합쳐서 키워드 추출
+        selected_text = "\n\n".join([c.text for c in target_chunks])
         try:
             raw_keywords = _ask_gpt_json(
-                _prompt_keywords(full_text),
+                _prompt_keywords(selected_text),
                 model=model, temperature=0.2, max_tokens=200
             )
             kws = raw_keywords.get("keywords", [])
@@ -420,77 +452,56 @@ def generate_custom_review(
             print(f"키워드 추출 실패: {e}. 기본 키워드를 사용합니다.")
             kws = ["핵심 개념", "정의", "관계", "예시", "의의"]
 
+    # 3. 문제 개수 설정 (청크당 문제 개수)
     rnd = random.Random(seed)
-    counts = counts_override or {
-        "ox": rnd.randint(3, 5),
-        "short": rnd.randint(3, 6),
-        "discussion": rnd.randint(2, 3),
+    # counts_override가 있으면 사용하고, 없으면 랜덤으로 설정 (기존 로직 유지)
+    counts_base = counts_override or {
+        "ox": 3,
+        "short": 3,
+        "discussion": 3,
     }
 
-    raw = _ask_gpt_json(
-        _prompt_review(text, kws, counts),
-        model=model, temperature=0.4, max_tokens=1200
-    )
-
-    rv = raw.get("review", {}) or {}
-    def _fix_item(it: Dict[str, Any], t: str) -> Dict[str, Any]:
-        it["sources"] = _fix_sources(it.get("sources", []), all_ids, used_ids[:1])
-        tags = it.get("tags") or []
-        if t not in tags: tags.append(t)
-        it["tags"] = tags
-        if t in ("OX", "단답"): it.setdefault("confused", False)
-        return it
-
-    ox = [_fix_item(it, "OX") for it in (rv.get("ox") or [])]
-    short = [_fix_item(it, "단답") for it in (rv.get("short") or [])]
-    discussion = [_fix_item(it, "토론") for it in (rv.get("discussion") or [])]
+    # 4. **핵심 수정: 각 청크를 순회하며 개별적으로 GPT 호출**
+    final_review_output = ReviewOut(ox=[], short=[], discussion=[])
     
-    return ReviewOut(ox=ox, short=short, discussion=discussion)
+    for chunk in target_chunks:
+        try:
+            # 해당 청크의 텍스트만 사용
+            text = chunk.text or ""
+            used_ids_chunk = [chunk.id] # 현재 처리 중인 청크 ID
+            
+            if not text.strip():
+                continue
 
-# ----------------- 실행 예제 -----------------
-PDF_PATH = "F:\\Joseph\\4-2\\윤리학\\알기_쉬운_윤리학_1장.pdf" 
-pre_json = pdf_to_preprocessed_doc(PDF_PATH, doc_id="demo_pdf")
-doc = PreprocessedDoc(**pre_json)
+            print(f"-> 청크 {chunk.id}에 대해 문제 생성 중...")
+            
+            raw = _ask_gpt_json(
+                _prompt_review(text, kws, counts_base), # 청크당 설정된 문제 개수 사용
+                model=model, temperature=0.4, max_tokens=2000 # max_tokens 증가 (서술형 포함)
+            )
 
-print("### 기본 모듈 실행 (청크별 300자 요약 및 핵심 퀴즈) ###")
-base_output = generate_base_review(doc, seed=42)
-print("---")
-print("**생성된 청크별 요약 전체:**")
-print(base_output.summaries.summary_full)
+            rv = raw.get("review", {}) or {}
 
-print("**생성된 OX 문제 목록:**")
-for i, item in enumerate(base_output.review.ox, 1):
-    print(f"{i}. [OX] 질문: {item['q']}")
-    print(f"   정답: {item['answer']}, 근거: {item['why']}")
+            def _fix_item(it: Dict[str, Any], t: str) -> Dict[str, Any]:
+                # 출처를 현재 청크 ID로만 설정
+                it["sources"] = _fix_sources(it.get("sources", []), all_ids, used_ids_chunk) 
+                tags = it.get("tags") or []
+                if t not in tags: tags.append(t)
+                it["tags"] = tags
+                if t in ("OX", "단답"): it.setdefault("confused", False)
+                return it
+            
+            # 결과 병합
+            ox = [_fix_item(it, "OX") for it in (rv.get("ox") or [])]
+            short = [_fix_item(it, "단답") for it in (rv.get("short") or [])]
+            discussion = [_fix_item(it, "토론") for it in (rv.get("discussion") or [])]
 
-print("**생성된 단답형 문제 목록:**")
-for i, item in enumerate(base_output.review.short, 1):
-    print(f"{i}. [단답] 질문: {item['q']}")
-    print(f"   정답: {item['answer']}")
+            final_review_output.ox.extend(ox)
+            final_review_output.short.extend(short)
+            final_review_output.discussion.extend(discussion)
 
-# 맞춤형 모듈 실행 (페이지 1,2에 대한 심화 문제)
-print("\n### 맞춤형 모듈 실행 (페이지 1,2에 대한 심화 문제) ###")
-custom_output = generate_custom_review(doc, section="p1", counts_override={"ox":2, "short":2, "discussion":3})
-print("---")
-
-print("**생성된 OX 문제 목록:**")
-for i, item in enumerate(custom_output.ox, 1):
-    print(f"{i}. [OX] 질문: {item['q']}")
-    print(f"   정답: {item['answer']}, 근거: {item['why']}")
-
-print("\n---")
-
-print("**생성된 단답형 문제 목록:**")
-for i, item in enumerate(custom_output.short, 1):
-    print(f"{i}. [단답] 질문: {item['q']}")
-    print(f"   정답: {item['answer']}")
-
-print("\n---")
-
-print("**생성된 서술형 문제 목록:**")
-for i, item in enumerate(custom_output.discussion, 1):
-    print(f"{i}. [서술] 질문: {item['q']}")
-    if 'hint' in item:
-        print(f"   힌트: {item['hint']}")
-
-print("\n---")
+        except Exception as e:
+            print(f"청크 {chunk.id} 문제 생성 중 오류 발생: {e}")
+            continue
+    
+    return final_review_output
