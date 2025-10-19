@@ -11,124 +11,16 @@ from firebase_admin import firestore, initialize_app, messaging, storage
 from firebase_functions import https_fn, options, scheduler_fn
 
 from hashlib import sha256
-from .utils_similarity import normalize_q, char_ngrams, simhash64, simhash_bands, hamming
+# from .utils_similarity import normalize_q, char_ngrams, simhash64, simhash_bands, hamming # 로컬 모듈 가정
 import re
 
-
-# ---------- 근사 중복  저장 ----------
-@https_fn.on_call(cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]))
-def saveQuizItems(req: https_fn.CallableRequest) -> https_fn.Response:
-    """
-    입력:
-    { bookId, scope: "highlight"|"full",
-      items: [{type, q|question, answer?, sources?, tags?}] }
-    동작:
-    - 질문 정규화 -> SimHash(64) -> 밴드키 생성
-    - 같은 (userId, bookId, scope)에서 bands ARRAY_CONTAINS 로 후보 수집
-    - 해밍거리 <= 6 이면 근사중복
-    - 문서ID: {uid}_{bookId}_{scope}_{sha256(normQ)}
-    - upsert 저장 (정확중복은 자동 차단), nearDuplicates 목록 반환
-    """
-    global db
-    if db is None:
-        db = firestore.client()
-    if req.auth is None:
-        raise https_fn.HttpsError(code="unauthenticated", message="로그인이 필요합니다.")
-    uid = req.auth.uid
-    data = req.data or {}
-    book_id = data.get("bookId")
-    scope = data.get("scope")
-    items = data.get("items") or []
-    if not book_id or scope not in ("highlight","full") or not isinstance(items, list):
-        raise https_fn.HttpsError(code="invalid-argument", message="bookId, scope, items 필요")
-
-    col = db.collection("quizzes")
-    new_cnt = dup_cnt = near_cnt = 0
-    results = []
-
-    for it in items:
-        q_raw = it.get("q") or it.get("question") or ""
-        norm = normalize_q(q_raw)
-        if not norm:
-            continue  #빈 질문은 건너뜀
-        sha = sha256(norm.encode("utf-8")).hexdigest()
-        doc_id = f"{uid}_{book_id}_{scope}_{sha}"
-
-        # SimHash  bands
-        ngrams = char_ngrams(norm, n=3)
-        s64 = simhash64(ngrams)
-        bands = simhash_bands(s64)  # 4개 키
-
-        # 후보 수집 (LSH로 좁혀서)
-        candidates = {}
-        for key in bands:
-            qs = (col.where("userId", "==", uid)
-                    .where("bookId", "==", book_id)
-                    .where("scope", "==", scope)
-                    .where("bands", "array_contains", key)
-                    .limit(25)
-                    .stream())
-            for d in qs:
-                if d.id not in candidates:
-                    candidates[d.id] = d.to_dict()
-
-        # 해밍거리로 근사 여부 판정
-        near_dups = []
-        for cid, cdata in candidates.items():
-            try:
-                c_s64 = int(cdata.get("simhash64"), 16)
-                dist = hamming(s64, c_s64)
-                if dist <= 6:  # 임계값: 4~8 사이에서 튜닝 가능
-                    near_dups.append({
-                        "id": cid,
-                        "q": cdata.get("q"),
-                        "distance": dist
-                    })
-            except Exception:
-                pass
-
-        ref = col.document(doc_id)
-        existed = ref.get().exists
-        payload = {
-            "userId": uid, "bookId": book_id, "scope": scope,
-            "q": q_raw,
-            "type": it.get("type"),
-            "answer": it.get("answer"),
-            "sources": it.get("sources") or [],
-            "tags": it.get("tags") or [],
-            "normQ": norm,
-            "simhash64": f"{s64:016X}",
-            "bands": bands,
-            "updatedAt": firestore.SERVER_TIMESTAMP,
-        }
-        if not existed:
-            payload["createdAt"] = firestore.SERVER_TIMESTAMP
-        ref.set(payload, merge=True)
-
-        if existed:
-            dup_cnt += 1
-        elif near_dups:
-            near_cnt += 1
-        else:
-            new_cnt += 1
-
-        results.append({
-            "q": q_raw,
-            "duplicate": existed,
-            "nearDuplicates": sorted(near_dups, key=lambda x: x["distance"])[:10],
-        })
-
-    return {"new": new_cnt, "duplicates": dup_cnt, "near": near_cnt, "results": results}
-
-
 # --- 초기화 ---
-# ✅ [수정] 스토리지 버킷을 명시적으로 지정하여 파일 접근 오류를 해결합니다.
 initialize_app()
+# 클라이언트를 전역으로 바로 초기화 (콜드 스타트 시 1회)
+db = firestore.client()
+storage_client = storage.bucket() 
 
-
-# 지연 초기화를 위한 전역 클라이언트 변수
-db = None
-storage_client = None
+# 지연 초기화를 위한 전역 클라이언트 변수 (vision/openai는 사용 시점에 로딩)
 vision_client = None
 openai_client = None
 
@@ -140,9 +32,21 @@ options.set_global_options(
     secrets=["OPENAI_API_KEY"]
 )
 
+# --- 헬퍼 함수: 인증 및 입력 검증 ---
+def _get_auth_and_book_id(req: https_fn.CallableRequest) -> tuple[str, str]:
+    """인증 및 bookId를 검증하고 user_id와 book_id를 반환합니다."""
+    if req.auth is None:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
+    user_id = req.auth.uid
+    book_id = req.data.get("bookId")
+    if not book_id:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="bookId가 필요합니다.")
+    return user_id, book_id
+
 # --- 헬퍼 함수: 프롬프트 생성 ---
 def _get_quiz_prompt(context: str) -> str:
     """퀴즈 생성을 위한 GPT 프롬프트를 반환합니다."""
+    # ... (기존 코드와 동일)
     return f"""
     당신은 학습 내용을 바탕으로 객관식 퀴즈를 출제하는 AI입니다.
     아래 주어진 내용을 바탕으로, 가장 중요하다고 생각되는 내용에 대해 객관식 문제 3개를 만들어주세요.
@@ -160,22 +64,14 @@ def _get_quiz_prompt(context: str) -> str:
 )
 def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
     """사용자의 하이라이트 내용을 기반으로 간단한 퀴즈를 생성합니다."""
-    # ✅ [수정] openai 라이브러리를 함수 내부에서 지연 로딩합니다.
+    # ✅ openai 라이브러리 지연 로딩
     import openai
 
-    global db, openai_client
-    if db is None:
-        db = firestore.client()
+    global openai_client
     if openai_client is None:
         openai_client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-    if req.auth is None:
-        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
-
-    user_id = req.auth.uid
-    book_id = req.data.get("bookId")
-    if not book_id:
-        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="bookId가 필요합니다.")
+    user_id, book_id = _get_auth_and_book_id(req) # 헬퍼 함수 사용
 
     docs = db.collection('highlights').where('userId', '==', user_id).where('bookId', '==', book_id).stream()
     texts = [doc.to_dict().get('text', '') for doc in docs if doc.to_dict().get('text')]
@@ -203,34 +99,22 @@ def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
 
 @https_fn.on_call(
     secrets=["OPENAI_API_KEY"],
-    cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]),timeout_sec=300
+    cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]), timeout_sec=300
 )
 def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
     """PDF에서 텍스트를 추출하고 퀴즈를 생성합니다."""
-    # ✅ [수정] 무거운 라이브러리들을 함수 내부에서 지연 로딩하여 초기화 시간 초과를 방지합니다.
+    # ✅ 무거운 라이브러리들 내부 지연 로딩
     import fitz  # PyMuPDF
-    from quiz_generator import PreprocessedDoc, Chunk, generate_base_review
+    from quiz_generator import PreprocessedDoc, Chunk, generate_base_review # 로컬 모듈 가정
 
-    global db, storage_client
-    if db is None:
-        db = firestore.client()
-    if storage_client is None:
-        storage_client = storage.bucket() # initialize_app에서 버킷이름을 설정했으므로 인자 없어도 OK
-
-    if req.auth is None:
-        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
-
-    user_id = req.auth.uid
-    book_id = req.data.get("bookId")
-    if not book_id:
-        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="bookId가 필요합니다.")
+    user_id, book_id = _get_auth_and_book_id(req) # 헬퍼 함수 사용
 
     print(f"'{book_id}'에 대한 퀴즈 생성 시작")
 
     # --- 체크포인트 1: Cloud Storage에서 파일 다운로드 ---
     try:
         file_path = f"docs/{user_id}/{book_id}.pdf"
-        print(f"파일을 찾습니다: gs://mybook-d143d.firebasestorage.app{file_path}")
+        print(f"파일을 찾습니다: gs://mybook-d143d.firebasestorage.app/{file_path}")
         blob = storage_client.blob(file_path)
         if not blob.exists():
             print(f"Checkpoint 1 오류: 파일을 찾을 수 없음 - {file_path}")
@@ -238,7 +122,7 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
         pdf_bytes = blob.download_as_bytes()
         print("Checkpoint 1: 파일 다운로드 성공")
     except Exception as e:
-        print(f"Checkpoint 1 오류: {traceback.format_exc()}") # ✅ [수정] 더 상세한 오류 로그
+        print(f"Checkpoint 1 오류: {traceback.format_exc()}")
         raise https_fn.HttpsError(code='internal', message=f'파일 다운로드 중 오류: {str(e)}')
 
     # --- 체크포인트 2: PyMuPDF로 텍스트 추출 ---
@@ -259,17 +143,23 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
         
         print("Checkpoint 2: 텍스트 추출 성공")
     except Exception as e:
-        print(f"Checkpoint 2 오류: {traceback.format_exc()}") # ✅ [수정] 더 상세한 오류 로그
+        print(f"Checkpoint 2 오류: {traceback.format_exc()}")
         raise https_fn.HttpsError(code='internal', message=f'PDF 처리 중 오류: {str(e)}')
 
     # --- 체크포인트 3: AI를 호출하여 퀴즈 생성 ---
     try:
         processed_doc = PreprocessedDoc(doc_id=book_id, chunks=chunks)
-        output = generate_base_review(processed_doc, seed=42, model="gpt-4o-mini")
+        # OpenAI 클라이언트 초기화 (여기에 위치해야 generateQuiz와 무관하게 작동)
+        import openai
+        global openai_client
+        if openai_client is None:
+            openai_client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+            
+        output = generate_base_review(processed_doc, seed=42, model="gpt-4o-mini", openai_client=openai_client) # quiz_generator 모듈 수정 필요
         print("Checkpoint 3: AI 퀴즈 생성 성공")
         return json.loads(output.json())
     except Exception as e:
-        print(f"Checkpoint 3 오류: {traceback.format_exc()}") # ✅ [수정] 더 상세한 오류 로그
+        print(f"Checkpoint 3 오류: {traceback.format_exc()}")
         raise https_fn.HttpsError(code='internal', message=f'AI 퀴즈 생성 중 오류: {str(e)}')
 
 
@@ -278,7 +168,7 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
 )
 def runOcrOnSelection(req: https_fn.CallableRequest) -> https_fn.Response:
     """사용자가 선택한 이미지 영역에 대해 OCR을 수행합니다."""
-    # ✅ [수정] vision 라이브러리를 함수 내부에서 지연 로딩합니다.
+    # ✅ vision 라이브러리 내부 지연 로딩
     from google.cloud import vision
 
     global vision_client
@@ -304,18 +194,119 @@ def runOcrOnSelection(req: https_fn.CallableRequest) -> https_fn.Response:
         print(f"OCR 오류: {traceback.format_exc()}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=f"OCR 처리 중 서버 오류 발생: {str(e)}")
 
+# ---------- 근사 중복 저장 ----------
+@https_fn.on_call(
+    cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"])
+)
+def saveQuizItems(req: https_fn.CallableRequest) -> https_fn.Response:
+    """
+    입력:
+    { bookId, scope: "highlight"|"full",
+      items: [{type, q|question, answer?, sources?, tags?}] }
+    동작:
+    - 질문 정규화 -> 3gram -> SimHash(64) -> 밴드키 생성
+    - 같은 (userId, bookId, scope)에서 bands ARRAY_CONTAINS 로 후보 수집(limit 50)
+    - 해밍거리 <= 6 이면 근사중복
+    - 문서ID: {uid}_{bookId}_{scope}_{sha256(q_norm)[:10]}
+    출력:
+    { saved: [id...], skipped: [{q, reason, existingId?}] }
+    """
+    if req.auth is None:
+        raise https_fn.HttpsError(code="unauthenticated", message="로그인이 필요합니다.")
+
+    uid = req.auth.uid
+    book_id = req.data.get("bookId")
+    scope = (req.data.get("scope") or "full").strip()  # "highlight" | "full"
+    items = req.data.get("items") or []
+    if not book_id or not isinstance(items, list):
+        raise https_fn.HttpsError(code="invalid-argument", message="bookId와 items가 필요합니다.")
+
+    col = db.collection("quizItems")
+    saved, skipped = [], []
+
+    for raw in items:
+        # 1) 질문 텍스트 뽑기
+        q = (raw.get("q") or raw.get("question") or "").strip()
+        if not q:
+            skipped.append({"q": "", "reason": "NO_QUESTION"})
+            continue
+
+        # 2) 정규화 + simhash/bands
+        # NOTE: 이 부분은 로컬 유틸리티 모듈(utils_similarity)에 의존
+        q_norm = normalize_q(q)
+        tokens = char_ngrams(q_norm, n=3)
+        sig64 = simhash64(tokens)           # 64-bit int
+        bands = simhash_bands(sig64)        # 문자열 키 리스트(예: 8개)
+
+        # 3) 후보 수집(각 band 별로 질의 후 합집합)
+        candidates = {}
+        for b in bands:
+            qry = (
+                col.where("userId", "==", uid)
+                    .where("bookId", "==", book_id)
+                    .where("scope", "==", scope)
+                    .where("bands", "array_contains", b)
+                    .limit(50)
+            )
+            for doc in qry.stream():
+                if doc.id not in candidates:
+                    candidates[doc.id] = doc.to_dict()
+
+        # 4) 근사중복 판정 (해밍 <= 6)
+        is_dup = False
+        dup_id = None
+        for cid, c in candidates.items():
+            try:
+                c_sig = int(c.get("sim64", 0))  # number 필드
+            except Exception:
+                continue
+            if hamming(sig64, c_sig) <= 6:
+                is_dup = True
+                dup_id = cid
+                break
+
+        if is_dup:
+            skipped.append({"q": q, "reason": "DUPLICATE", "existingId": dup_id})
+            continue
+
+        # 5) 신규 저장 (정확중복은 doc_id 충돌로 자동 방지)
+        qhash = sha256(q_norm.encode("utf-8")).hexdigest()[:10]
+        doc_id = f"{uid}_{book_id}_{scope}_{qhash}"
+        ref = col.document(doc_id)
+        existed = ref.get().exists
+
+        payload = {
+            "userId": uid,
+            "bookId": book_id,
+            "scope": scope,
+            "type": raw.get("type") or "unknown",
+            "q": q,
+            "q_norm": q_norm,
+            "answer": raw.get("answer"),
+            "sources": raw.get("sources") or [],
+            "tags": raw.get("tags") or [],
+            "sim64": int(sig64),     # Firestore number로 저장 (64bit 정수 안전성 주의)
+            "bands": bands,          # ARRAY field
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        if not existed:
+            payload["createdAt"] = firestore.SERVER_TIMESTAMP
+
+        ref.set(payload, merge=True)
+        saved.append(doc_id)
+
+    return {"saved": saved, "skipped": skipped}
+
 
 @scheduler_fn.on_schedule(schedule="every day 09:00", timezone="Asia/Seoul")
 def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
-    global db
-    # ✨ [수정] 지연 초기화 패턴 적용
-    if db is None:
-        db = firestore.client()
-        
     print("매일 복습 알림 함수 실행 시작.")
-    # ... (이하 로직은 동일)
     now = datetime.now(timezone.utc)
     users_to_notify = {}
+    
+    # ✅ 복습 알림 후 상태 업데이트를 위한 Batch Write 시작
+    batch = db.batch()
+    processed_count = 0
 
     try:
         docs = db.collection('highlights').where('nextReviewDate', '<=', now).stream()
@@ -324,7 +315,16 @@ def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
             user_id = item.get('userId')
             if user_id:
                 users_to_notify[user_id] = users_to_notify.get(user_id, 0) + 1
+                
+                # 알림을 보낼 항목의 lastNotifiedAt 업데이트 준비
+                batch.update(doc.reference, {"lastNotifiedAt": firestore.SERVER_TIMESTAMP})
+                processed_count += 1
         
+        # ✅ 상태 업데이트 커밋
+        if processed_count > 0:
+            batch.commit()
+            print(f"Batch Commit: {processed_count}개 하이라이트 항목 lastNotifiedAt 업데이트 완료.")
+
         if not users_to_notify:
             print("알림을 보낼 사용자가 없습니다.")
             return
@@ -332,10 +332,12 @@ def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
         for user_id, count in users_to_notify.items():
             try:
                 user_doc = db.collection('users').document(user_id).get()
-                if not user_doc.exists: continue
+                if not user_doc.exists: 
+                    continue
                 
                 token = user_doc.to_dict().get('fcmToken')
-                if not token: continue
+                if not token: 
+                    continue
 
                 message = messaging.Message(
                     notification=messaging.Notification(
@@ -355,11 +357,6 @@ def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]))
 def testSendNotification(req: https_fn.CallableRequest) -> https_fn.Response:
-    global db
-    # ✨ [수정] 지연 초기화 패턴 적용
-    if db is None:
-        db = firestore.client()
-
     if req.auth is None:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
 
