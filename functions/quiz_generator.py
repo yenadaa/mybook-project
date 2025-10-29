@@ -290,19 +290,37 @@ def generate_custom_review(
     section: Optional[str] = None,
     chunk_ids: Optional[List[str]] = None,
     keywords: Optional[List[str]] = None,
-    model: str = "gpt-4.1-mini",
+    model: str = "gpt-4o-mini",
     seed: Optional[int] = None,
     counts_override: Optional[Dict[str, int]] = None,
 ) -> ReviewOut:
     all_ids = _normalize_ids(doc)
-    text, used_ids = _select_scope(doc, section, chunk_ids)
+    
+    # 1. 대상 청크 ID 목록 확정
+    target_chunks = []
+    
+    # section 또는 chunk_ids를 사용해 대상 청크 객체 목록을 가져옵니다.
+    if section:
+        # section을 포함하는 모든 청크
+        target_chunks = [c for c in doc.chunks if section in " / ".join(c.section_path or [])]
+    elif chunk_ids:
+        # 명시된 ID 목록에 해당하는 청크
+        id_set = set(chunk_ids)
+        target_chunks = [c for c in doc.chunks if c.id in id_set]
+    else:
+        # 대상이 없으면 오류 발생 또는 빈 결과 반환
+        return ReviewOut(ox=[], short=[], discussion=[])
+
+
+    # 2. 키워드 추출 (문서 전체 또는 선택 범위 전체를 기반으로 한 번만 추출)
     if keywords:
         kws = keywords
     else:
-        full_text = " ".join([c.text for c in doc.chunks])
+        # 선택된 청크들의 텍스트만 합쳐서 키워드 추출
+        selected_text = "\n\n".join([c.text for c in target_chunks])
         try:
             raw_keywords = _ask_gpt_json(
-                _prompt_keywords(full_text),
+                _prompt_keywords(selected_text),
                 model=model, temperature=0.2, max_tokens=200
             )
             kws = raw_keywords.get("keywords", [])
@@ -310,29 +328,56 @@ def generate_custom_review(
             print(f"키워드 추출 실패: {e}. 기본 키워드를 사용합니다.")
             kws = ["핵심 개념", "정의", "관계", "예시", "의의"]
 
+    # 3. 문제 개수 설정 (청크당 문제 개수)
     rnd = random.Random(seed)
-    counts = counts_override or {
-        "ox": rnd.randint(3, 5),
-        "short": rnd.randint(3, 6),
-        "discussion": rnd.randint(2, 3),
+    # counts_override가 있으면 사용하고, 없으면 랜덤으로 설정 (기존 로직 유지)
+    counts_base = counts_override or {
+        "ox": 3,
+        "short": 3,
+        "discussion": 3,
     }
 
-    raw = _ask_gpt_json(
-        _prompt_review(text, kws, counts),
-        model=model, temperature=0.4, max_tokens=1200
-    )
-
-    rv = raw.get("review", {}) or {}
-    def _fix_item(it: Dict[str, Any], t: str) -> Dict[str, Any]:
-        it["sources"] = _fix_sources(it.get("sources", []), all_ids, used_ids[:1])
-        tags = it.get("tags") or []
-        if t not in tags: tags.append(t)
-        it["tags"] = tags
-        if t in ("OX", "단답"): it.setdefault("confused", False)
-        return it
-
-    ox = [_fix_item(it, "OX") for it in (rv.get("ox") or [])]
-    short = [_fix_item(it, "단답") for it in (rv.get("short") or [])]
-    discussion = [_fix_item(it, "토론") for it in (rv.get("discussion") or [])]
+    # 4. **핵심 수정: 각 청크를 순회하며 개별적으로 GPT 호출**
+    final_review_output = ReviewOut(ox=[], short=[], discussion=[])
     
-    return ReviewOut(ox=ox, short=short, discussion=discussion)
+    for chunk in target_chunks:
+        try:
+            # 해당 청크의 텍스트만 사용
+            text = chunk.text or ""
+            used_ids_chunk = [chunk.id] # 현재 처리 중인 청크 ID
+            
+            if not text.strip():
+                continue
+
+            print(f"-> 청크 {chunk.id}에 대해 문제 생성 중...")
+            
+            raw = _ask_gpt_json(
+                _prompt_review(text, kws, counts_base), # 청크당 설정된 문제 개수 사용
+                model=model, temperature=0.4, max_tokens=2000 # max_tokens 증가 (서술형 포함)
+            )
+
+            rv = raw.get("review", {}) or {}
+
+            def _fix_item(it: Dict[str, Any], t: str) -> Dict[str, Any]:
+                # 출처를 현재 청크 ID로만 설정
+                it["sources"] = _fix_sources(it.get("sources", []), all_ids, used_ids_chunk) 
+                tags = it.get("tags") or []
+                if t not in tags: tags.append(t)
+                it["tags"] = tags
+                if t in ("OX", "단답"): it.setdefault("confused", False)
+                return it
+            
+            # 결과 병합
+            ox = [_fix_item(it, "OX") for it in (rv.get("ox") or [])]
+            short = [_fix_item(it, "단답") for it in (rv.get("short") or [])]
+            discussion = [_fix_item(it, "토론") for it in (rv.get("discussion") or [])]
+
+            final_review_output.ox.extend(ox)
+            final_review_output.short.extend(short)
+            final_review_output.discussion.extend(discussion)
+
+        except Exception as e:
+            print(f"청크 {chunk.id} 문제 생성 중 오류 발생: {e}")
+            continue
+    
+    return final_review_output

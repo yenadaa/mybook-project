@@ -1,96 +1,158 @@
-<!DOCTYPE html>
+  <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-    <link rel="stylesheet" href="reset.css">
-    <link rel="stylesheet" href="main.css">
-    <link rel="stylesheet" href="doc.css">
-    <title>My Book</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF Viewer — Extended (Marker+Text Capture+Thickness)</title>
+  <!-- pdf.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  </script>
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <!-- Tesseract.js (OCR) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <link rel = "stylesheet" href = "main.css">
 </head>
 <body>
+  <div class="app">
+   <div class="toolbar">
+    <button id="create-quiz-btn" class="label-btn"><i class="fa-solid fa-magic-sparkles"></i> 퀴즈 만들기</button>
+      
+      <input id="file" class="file-input" type="file" accept="application/pdf" />
+      <span class="divider"></span>
 
-    <div id="quiz-modal-overlay" class="modal-overlay hidden">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h2 id="quiz-modal-title">AI 생성 퀴즈</h2>
-          <button id="quiz-close-btn" class="close-btn">&times;</button>
-        </div>
-        <div id="quiz-modal-body" class="modal-body">
-          </div>
+      <div class="group">
+        <button id="prevPage" title="이전 페이지"><i class="fa-solid fa-chevron-left"></i></button>
+        <div id="pageIndicator" class="page-indicator">p. - / -</div>
+        <button id="nextPage" title="다음 페이지"><i class="fa-solid fa-chevron-right"></i></button>
+        <input id="jumpInput" class="jump-input" type="number" min="1" placeholder="#" title="페이지 점프" />
       </div>
+
+      <div class="group">
+        <button id="zoomOut" title="축소"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+        <div id="zoomLabel" class="zoom-label">100%</div>
+        <button id="zoomIn" title="확대"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+        <button id="zoomReset" title="원본 배율"><i class="fa-solid fa-minimize"></i></button>
+      </div>
+
+      <div class="group">
+        <button id="toggleDark" title="다크 모드"><i class="fa-solid fa-moon"></i></button>
+        <button id="modeContinuous" class="active" title="연속 스크롤"><i class="fa-solid fa-bars-staggered"></i></button>
+        <button id="modeSingle" title="단일 페이지"><i class="fa-regular fa-file"></i></button>
+      </div>
+
+      <div class="group">
+        <button id="undoBtn" title="되돌리기 (Ctrl+Z)"><i class="fa-solid fa-arrow-rotate-left"></i></button>
+        <button id="redoBtn" title="다시하기 (Ctrl+Y)"><i class="fa-solid fa-arrow-rotate-right"></i></button>
+        <button id="penBtn" title="형광펜 (H)"><i class="fa-solid fa-pen"></i></button>
+        <button id="eraserBtn" title="지우개 (E)"><i class="fa-solid fa-eraser"></i></button>
+        <button id="ocrSelectBtn" title="텍스트 선택 (OCR)"><i class="fa-solid fa-i-cursor"></i></button>
+        <div class="divider"></div>
+        <button class="chip-btn tag-btn" data-tag="기본">전체</button>
+        <button class="chip-btn tag-btn" data-tag="중요">중요</button>
+        <button class="chip-btn tag-btn" data-tag="암기">암기</button>
+        <button class="chip-btn tag-btn" data-tag="참고">참고</button>
+      </div>
+
+      <div class="group" title="형광펜 두께">
+        <span style="padding-left:8px">두께</span>
+        <input id="thickness" type="range" min="6" max="48" step="2" value="20" style="width:140px; padding:0 6px" />
+        <div id="thicknessLabel" class="zoom-label" style="min-width:60px">20 px</div>
+      </div>
+
+      <div class="group">
+        <i class="fa-solid fa-magnifying-glass" style="padding-left:8px"></i>
+        <input id="searchInput" class="jump-input" style="width:150px" placeholder="문서 검색" />
+        <button id="searchPrev" title="이전 결과"><i class="fa-solid fa-angle-up"></i></button>
+        <button id="searchNext" title="다음 결과"><i class="fa-solid fa-angle-down"></i></button>
+      </div>
+
+      <div class="group">
+        <button id="addBookmark" title="현재 페이지 북마크"><i class="fa-regular fa-bookmark"></i></button>
+        <button id="exportNotes" title="노트 내보내기 CSV"><i class="fa-solid fa-file-export"></i></button>
+        <span class="divider"></span>
+        <select id="ocrLang" title="OCR 언어" style="padding:6px 8px; background:var(--panel); color:var(--fg); border-left:1px solid #ececec">
+          <option value="eng+kor">영어+한국어</option>
+          <option value="kor+eng" selected>한국어+영어</option>
+          <option value="eng">영어</option>
+          <option value="kor">한국어</option>
+        </select>
+        <button id="ocrPage" title="현재 페이지 OCR"><i class="fa-regular fa-wand-magic-sparkles"></i></button>
+        <button id="ocrAll" title="전체 페이지 OCR"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+        <button id="ocrToggleDebug" title="OCR 경계 표시 토글"><i class="fa-regular fa-eye"></i></button>
+        <span id="ocrStatus" class="ocr-status"></span>
+      </div>
+
+    <div class="group" style="margin-left:auto;">
+      <span id="authStatus" class="zoom-label" style="min-width:140px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px;">로그인 상태...</span>
+      <button id="loginBtn" title="로그인"><i class="fa-solid fa-user-lock"></i> 로그인</button>
+      <button id="logoutBtn" title="로그아웃"><i class="fa-solid fa-right-from-bracket"></i> 로그아웃</button>
+    </div>
     </div>
 
-    <header>
-        <div class="header_box">
-            <div class="header">
-                <button id="doc-btn"><i class="fa-solid fa-list fa-xl"></i></button>
-                <button id="undo-btn"><i class="fa-solid fa-arrow-rotate-left fa-xl"></i></button>
-                <button id="redo-btn"><i class="fa-solid fa-arrow-rotate-right fa-xl"></i></button>
-                <button id="pen1" class="tool-btn"><i class="fa-solid fa-pen fa-xl"></i></button>
-                <button class="tag-btn tool-btn" id="tag-btn"><i class="fa-solid fa-tag fa-2xl"></i></button>
-                <div class="dropdown" id="dropdown">
-                    <ul>
-                        <li><button data-tag="중요">중요</button></li>
-                        <li><button data-tag="암기">암기</button></li>
-                        <li><button data-tag="참고">참고</button></li>
-                    </ul>
-                </div>
-                <div class="eraser">
-                    <button id="eraser-btn" class="tool-btn"><i class="fa-solid fa-eraser fa-xl"></i></button>
-                </div>
-            </div>
-            <div class="header">
-                <label for="file-btn" class="icon"><i class="fa-regular fa-plus fa-2xl" id="plus-icon"></i></label>
-                <input type="file" accept="application/pdf" id="file-btn" style="display:none;">
-                <button id="ocr-pen-btn" class="tool-btn">OCR</button>
-                <button id="create-quiz-btn">문제 만들기 🎲</button>
-                <div id="quiz-options-modal" class="hidden">
-                    <h3>어떤 문제를 만들까요?</h3>
-                    <button id="modal-full-doc-btn">전체 문서로 꼼꼼하게</button>
-                    <button id="modal-highlights-btn">하이라이트로 빠르게</button>
-                    <button id="modal-close-btn">닫기</button>
-                </div>
-                <div id="auth-slot">
-                    <button type="button" id="login-btn">구글 로그인</button>
-                    <div id="user-info" class="hidden">
-                        <strong id="user-email"></strong>
-                        <button id="logout-btn" class="loginout-btn">로그아웃</button>
-                    </div>
-                </div>
-            </div>
+    <div class="main">
+      <aside class="sidebar">
+        <div class="sidebar-tabs">
+          <button id="tabDocs" class="active">문서목록</button>
+          <button id="tabThumbs">썸네일</button>
+          <button id="tabOutline">목차</button>
         </div>
-    </header>
+        <div id="sidebarContent" class="sidebar-content">
+          <div id="doc-list"></div>
+          <div id="thumbs" style="display:none"></div> 
+          <ul id="outline" class="outline" style="display:none"></ul>
+          <ul id="bookmarks" class="outline" style="display:none"></ul> 
+        </div>
+      </aside>
 
-    <section class="viewer-box">
-        <div id="chalkboard" class="chalkboard"><p>pdf 파일 추가 또는 목록에서 열기</p></div>
-        <div id="book-layout" class="book hidden">
-            <div id="pdf-container" class="Allpage left-page"></div>
-            <div class="center-line" id="line"></div>
-            <div id="note-container" class="Allpage right-page">
-                <div class="tabs" id="tabs">
-                    <div class="tab active" data-tag="all">전체</div>
-                    <div class="tab" data-tag="중요">중요</div>
-                    <div class="tab" data-tag="암기">암기</div>
-                    <div class="tab" data-tag="참고">참고</div>
-                </div>
-                <div class="note-wrap" id="note"></div>
-            </div>
-        </div>
-        <div id="doc-layout" class="doc-layout hidden">
-            <div class="doc-padding">
-                <aside id="doc-drawer" class="doc-drawer hidden">
-                    <div class="doc-header">
-                        <h3>내 문서</h3>
-                        <button id="doc-close" aria-label="닫기">✕</button>
-                    </div>
-                    <div id="doc-list" class="doc-list"></div>
-                </aside>
-            </div>
-        </div>
-    </section>
+      <section class="viewer">
+        <div id="empty" class="empty">PDF 파일을 열어보세요</div>
+        <div id="pages" class="pages" style="display:none"></div>
+      </section>
 
-    <script type="module" src="main.js"></script>
+      <aside class="right">
+        <div class="right-tabs">
+          <button class="active" data-filter="all" id="tabAll">전체</button>
+          <button data-filter="중요">중요</button>
+          <button data-filter="암기">암기</button>
+          <button data-filter="참고">참고</button>
+        </div>
+        <div id="notes" class="notes"></div>
+        <div class="notes-footer">
+          <small style="color:var(--muted)">형광펜 스트로크를 지우려면 지우개(E)로 드래그해요 · 두께 단축키: [ / ]</small>
+          <div>
+            <button id="clearData" title="모든 데이터 초기화"><i class="fa-solid fa-trash"></i></button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+  <div id="quiz-options-modal" class="modal-overlay hidden">
+        <div class="modal-body">
+            <h2>퀴즈 생성 옵션</h2>
+            <p>어떤 내용을 기반으로 퀴즈를 만들까요?</p>
+            <div class="modal-actions">
+                <button id="modal-highlights-btn">하이라이트 기반</button>
+                <button id="modal-full-doc-btn">전체 문서 기반</button>
+                <button id="modal-close-btn" class="close-btn">&times;</button>
+            </div>
+        </div>
+    </div>
+    <div id="quiz-modal-overlay" class="modal-overlay hidden">
+        <div id="quiz-modal-body" class="modal-body quiz-results">
+            </div>
+        <button id="quiz-close-btn" class="modal-close-btn">&times;</button>
+    </div>
+
+  <script src="A.firebase.js" type="module" defer></script>
+  <script src="doc_firebase.js" type="module" defer></script>
+  <script src="viewer.js" type="module" defer></script>
+  <script src="ocr.js" type="module" defer></script>
+  <script src="main.js" type="module" defer></script>
+
+
 </body>
 </html>

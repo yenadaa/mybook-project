@@ -1,13 +1,7 @@
 firebase-functions
 firebase-admin
 google-cloud-vision
-google-cloud-storage
-PyMuPDF
-Pillow
 openai
-certifi
-requests
-datetime
 PyMuPDF
 pydantic
 scikit-learn

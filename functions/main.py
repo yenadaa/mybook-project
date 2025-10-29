@@ -9,6 +9,11 @@ from io import BytesIO
 
 from firebase_admin import firestore, initialize_app, messaging, storage
 from firebase_functions import https_fn, options, scheduler_fn
+from hashlib import sha256
+
+from utils_similarity import normalize_q, char_ngrams, simhash64, simhash_bands, hamming
+
+import re
 
 # --- 초기화 ---
 # ✅ [수정] 스토리지 버킷을 명시적으로 지정하여 파일 접근 오류를 해결합니다.
@@ -28,6 +33,19 @@ options.set_global_options(
     timeout_sec=540,
     secrets=["OPENAI_API_KEY"]
 )
+
+# --- 헬퍼 함수: 인증 및 입력 검증 ---
+def _get_auth_and_book_id(req: https_fn.CallableRequest) -> tuple[str, str]:
+    """인증 및 bookId를 검증하고 user_id와 book_id를 반환합니다."""
+    if req.auth is None:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
+    user_id = req.auth.uid
+    book_id = req.data.get("bookId")
+    if not book_id:
+        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="bookId가 필요합니다.")
+    return user_id, book_id
+
+
 
 # --- 헬퍼 함수: 프롬프트 생성 ---
 def _get_quiz_prompt(context: str) -> str:
@@ -92,7 +110,7 @@ def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
 
 @https_fn.on_call(
     secrets=["OPENAI_API_KEY"],
-    cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]),timeout_sec=300
+    cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]),timeout_sec=540
 )
 def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
     """PDF에서 텍스트를 추출하고 퀴즈를 생성합니다."""
@@ -109,8 +127,7 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
     if req.auth is None:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
 
-    user_id = req.auth.uid
-    book_id = req.data.get("bookId")
+    user_id, book_id = _get_auth_and_book_id(req)
     if not book_id:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INVALID_ARGUMENT, message="bookId가 필요합니다.")
 
@@ -118,8 +135,9 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
 
     # --- 체크포인트 1: Cloud Storage에서 파일 다운로드 ---
     try:
-        file_path = f"docs/{user_id}/{book_id}.pdf"
-        print(f"파일을 찾습니다: gs://mybook-d143d.firebasestorage.app{file_path}")
+        app_id = "default-app-id"
+        file_path = f"artifacts/{app_id}/users/{user_id}/docs/{book_id}.pdf"
+        print(f"파일을 찾습니다: gs://{storage_client.name}/{file_path}")
         blob = storage_client.blob(file_path)
         if not blob.exists():
             print(f"Checkpoint 1 오류: 파일을 찾을 수 없음 - {file_path}")
@@ -127,7 +145,7 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
         pdf_bytes = blob.download_as_bytes()
         print("Checkpoint 1: 파일 다운로드 성공")
     except Exception as e:
-        print(f"Checkpoint 1 오류: {traceback.format_exc()}") # ✅ [수정] 더 상세한 오류 로그
+        print(f"Checkpoint 1 오류: {traceback.format_exc()}") # 
         raise https_fn.HttpsError(code='internal', message=f'파일 다운로드 중 오류: {str(e)}')
 
     # --- 체크포인트 2: PyMuPDF로 텍스트 추출 ---
@@ -148,17 +166,21 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
         
         print("Checkpoint 2: 텍스트 추출 성공")
     except Exception as e:
-
         if not chunks:
             raise ValueError('PDF에서 텍스트를 추출할 수 없습니다 (이미지 기반 PDF일 수 있습니다).')
         print("Checkpoint 2: 텍스트 추출 성공")
     except Exception as e:
-        print(f"Checkpoint 2 오류: {traceback.format_exc()}") # ✅ [수정] 더 상세한 오류 로그
+        print(f"Checkpoint 2 오류: {traceback.format_exc()}") # [수정] 더 상세한 오류 로그
         raise https_fn.HttpsError(code='internal', message=f'PDF 처리 중 오류: {str(e)}')
 
     # --- 체크포인트 3: AI를 호출하여 퀴즈 생성 ---
     try:
         processed_doc = PreprocessedDoc(doc_id=book_id, chunks=chunks)
+        # OpenAI 클라이언트 초기화 (여기에 위치해야 generateQuiz와 무관하게 작동)
+        import openai
+        global openai_client
+        if openai_client is None:
+            openai_client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))        
         output = generate_base_review(processed_doc, seed=42, model="gpt-4o-mini")
         print("Checkpoint 3: AI 퀴즈 생성 성공")
         return json.loads(output.json())
@@ -197,6 +219,113 @@ def runOcrOnSelection(req: https_fn.CallableRequest) -> https_fn.Response:
     except Exception as e:
         print(f"OCR 오류: {traceback.format_exc()}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=f"OCR 처리 중 서버 오류 발생: {str(e)}")
+    
+@https_fn.on_call(cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]))
+def saveQuizItems(req: https_fn.CallableRequest) -> https_fn.Response:
+    """
+    입력:
+    { bookId, scope: "highlight"|"full",
+      items: [{type, q|question, answer?, sources?, tags?}] }
+    동작:
+    - 질문 정규화 -> 3gram -> SimHash(64) -> 밴드키 생성
+    - 같은 (userId, bookId, scope)에서 bands ARRAY_CONTAINS 로 후보 수집(limit 50)
+    - 해밍거리 <= 6 이면 근사중복
+    - 문서ID: {uid}_{bookId}_{scope}_{sha256(q_norm)[:10]}
+    출력:
+    { saved: [id...], skipped: [{q, reason, existingId?}] }
+    """
+    global db
+    if db is None:
+        db = firestore.client()
+
+    if req.auth is None:
+        raise https_fn.HttpsError(code="unauthenticated", message="로그인이 필요합니다.")
+
+    uid = req.auth.uid
+    book_id = req.data.get("bookId")
+    scope = (req.data.get("scope") or "full").strip()  # "highlight" | "full"
+    items = req.data.get("items") or []
+    if not book_id or not isinstance(items, list):
+        raise https_fn.HttpsError(code="invalid-argument", message="bookId와 items가 필요합니다.")
+
+    col = db.collection("quizItems")
+    saved, skipped = [], []
+
+    # [수정] 모든 로직이 이 루프 안에 있어야 합니다.
+    for raw in items:
+        # 1) 질문 텍스트 뽑기
+        q = (raw.get("q") or raw.get("question") or "").strip()
+        if not q:
+            skipped.append({"q": "", "reason": "NO_QUESTION"})
+            continue
+
+        # 2) 정규화 + simhash/bands
+        q_norm = normalize_q(q)
+        tokens = char_ngrams(q_norm, n=3)
+        sig64 = simhash64(tokens)
+        bands = simhash_bands(sig64)
+
+        # 3) 후보 수집(각 band 별로 질의 후 합집합)
+        candidates = {}
+        for b in bands:
+            qry = (
+                col.where("userId", "==", uid)
+                   .where("bookId", "==", book_id)
+                   .where("scope", "==", scope)
+                   .where("bands", "array_contains", b)
+                   .limit(50)
+            )
+            for doc in qry.stream():
+                if doc.id not in candidates:
+                    candidates[doc.id] = doc.to_dict()
+
+        #  4단계
+        is_dup = False
+        dup_id = None
+        for cid, c in candidates.items():
+            try:
+                c_sig = int(c.get("sim64", "0")) 
+            except Exception:
+                continue
+            if hamming(sig64, c_sig) <= 6:
+                is_dup = True
+                dup_id = cid
+                break
+                
+        if is_dup:
+            skipped.append({"q": q, "reason": "DUPLICATE", "existingId": dup_id})
+            continue
+
+        #  [수정] 5단계 - 올바른 들여쓰기
+        qhash = sha256(q_norm.encode("utf-8")).hexdigest()[:10]
+        doc_id = f"{uid}_{book_id}_{scope}_{qhash}"
+        ref = col.document(doc_id)
+        existed = ref.get().exists
+
+        payload = {
+            "userId": uid,
+            "bookId": book_id,
+            "scope": scope,
+            "type": raw.get("type") or "unknown",
+            "q": q,
+            "q_norm": q_norm,
+            "answer": raw.get("answer"),
+            "sources": raw.get("sources") or [],
+            "tags": raw.get("tags") or [], 
+            "sim64": str(sig64), # (str 저장 - 올바름)
+            "bands": bands,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        if not existed:
+            payload["createdAt"] = firestore.SERVER_TIMESTAMP
+
+        ref.set(payload, merge=True)
+        saved.append(doc_id)
+
+    #[수정] return 문은 루프가 끝난 후 맨 마지막에 한 번
+    return {"saved": saved, "skipped": skipped}
+
+
 
 """
 
