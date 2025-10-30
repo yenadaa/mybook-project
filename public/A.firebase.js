@@ -26,14 +26,14 @@ Timestamp,
 deleteDoc,
 writeBatch
 } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-storage.js";
+import { getStorage, ref, uploadBytes, getDownloadURL,deleteObject} from "https://www.gstatic.com/firebasejs/9.23.0/firebase-storage.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-functions.js";
 import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging.js";
 
 
 const firebaseConfig = {
 apiKey: "AIzaSyAeWQaegsc3H01i8qkNoyFZX6CcaW-iJ2g",
-authDomain: "mybook-d143d.firebaseapp.com",
+authDomain: "mybook-d143d.web.app",
 projectId: "mybook-d143d",
 storageBucket: "mybook-d143d.firebasestorage.app", 
 messagingSenderId: "427068485624",
@@ -55,11 +55,23 @@ const functions = getFunctions(app, 'asia-northeast3');
 // --- 다른 모듈에서 사용할 수 있도록 내보내기 ---
 
 export {
-app, db, auth, storage, functions, provider, messaging,
-GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, httpsCallable,
-doc, setDoc, updateDoc, getDoc, getDocs, collection, addDoc, onSnapshot, query, where, orderBy, Timestamp,
-ref, uploadBytes, getDownloadURL,signInWithPopup,
-getToken,
-deleteDoc,
-writeBatch
+    // 인스턴스
+    app, db, auth, storage, functions, provider, messaging,
+
+    // Auth
+    GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, signInWithPopup,
+
+    // Firestore
+    doc, setDoc, updateDoc, getDoc, getDocs, collection, addDoc, onSnapshot, query, where, orderBy, Timestamp,
+    deleteDoc,
+    writeBatch,
+
+    // Storage
+    ref, uploadBytes, getDownloadURL, deleteObject, 
+
+    // Functions
+    httpsCallable,
+    
+    // Messaging
+    getToken
 };

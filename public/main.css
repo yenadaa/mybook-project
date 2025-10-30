@@ -526,3 +526,9 @@ input[type="range"] { accent-color: var(--accent); }
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+
+.draw-layer {
+  /* 브라우저가 스크롤이나 핀치줌 같은 기본 동작을
+     이 요소에서 처리하지 못하도록 막습니다. */
+  touch-action: none;
+}

@@ -1,11 +1,15 @@
 // A.firebase.js 파일로부터 필요한 모든 Firebase 함수와 인스턴스를 가져옵니다.
 import {
-    db, storage, auth, provider, // 인스턴스
-    collection, query, where, orderBy, onSnapshot,
-    addDoc, deleteDoc, doc, getDoc, updateDoc,
-    Timestamp, writeBatch, getDocs,
-    ref as storageRef, getDownloadURL as getStorageDownloadURL, uploadBytes as storageUploadBytes, deleteDoc as storageDeleteObject,
-    signInWithPopup, signOut, onAuthStateChanged, messaging, getToken, setDoc
+    db, storage, auth, provider, // 인스턴스
+    collection, query, where, orderBy, onSnapshot,
+    addDoc, deleteDoc, doc, getDoc, updateDoc,
+    Timestamp, writeBatch, getDocs,
+    ref as storageRef, 
+    getDownloadURL as getStorageDownloadURL, 
+    uploadBytes as storageUploadBytes, 
+    deleteObject as storageDeleteObject, 
+    signInWithPopup, signOut, onAuthStateChanged, messaging, getToken, setDoc,
+    signInWithRedirect, getRedirectResult 
 } from './A.firebase.js';
 
 // --- 전역 변수 ---
@@ -32,6 +36,26 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
         document.head.appendChild(style);
     }
+
+    getRedirectResult(auth)
+        .then((result) => {
+            if (result) {
+                // 사용자가 방금 리디렉션을 통해 성공적으로 로그인함
+                console.log("✅ 리디렉션 로그인 성공!", result.user);
+                // (참고: 직후에 onAuthStateChanged도 호출되어 UI가 업데이트됩니다)
+            } else {
+                // 사용자가 그냥 페이지를 방문함 (리디렉션 아님)
+                console.log("페이지 일반 로드 (리디렉션 아님).");
+            }
+        })
+        .catch((error) => {
+            // 리디렉션 '이후'에 발생한 오류 (예: 계정 충돌)
+            console.error("❌ 리디렉션 로그인 실패:", error);
+            if (error.code === 'auth/account-exists-with-different-credential') {
+                 alert("이미 다른 방식(예: 이메일)으로 가입된 계정입니다.");
+            }
+        });
+    // --- 리디렉션 처리 코드 끝 ---
     
     const loginBtn  = $("loginBtn"); 
     const logoutBtn = $("logoutBtn");
@@ -42,8 +66,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (loginBtn) {
         loginBtn.addEventListener("click", () => {
             console.log("팝업으로 로그인 시도.");
-            signInWithPopup(auth, provider)
-                .then((result) => { console.log("✅ 팝업 로그인 성공!", result.user); })
+            signInWithRedirect(auth, provider)
+                /*.then((result) => { console.log("✅ 팝업 로그인 성공!", result.user); })
                 .catch((error) => {
                     console.error("❌ 팝업 로그인 실패:", error);
                     if (error.code === 'auth/popup-blocked') {
@@ -58,7 +82,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         `;
                         document.body.appendChild(alertBox);
                     }
-                });
+                });*/
         });
     }
 
