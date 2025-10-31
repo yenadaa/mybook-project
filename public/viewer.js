@@ -215,7 +215,7 @@ window.renderDocument = async function(arrayBuffer) {
     updateToolbar();
 
     searchIndex = new Array(pdfDoc.numPages);
-
+    if (els.thumbs) els.thumbs.innerHTML = '';
     // Create page elements sequentially first
     for (let p = 1; p <= pdfDoc.numPages; p++) {
         const wrap = document.createElement('div');
@@ -233,8 +233,17 @@ window.renderDocument = async function(arrayBuffer) {
         wrap.appendChild(textLayer);
         wrap.appendChild(drawCanvas);
         if (els.pages) els.pages.appendChild(wrap);
-    }
 
+        if (els.thumbs) {
+            const thumbWrap = document.createElement('div');
+            thumbWrap.className = 'thumb';
+            thumbWrap.dataset.page = String(p); // 👈 나중에 이 번호로 찾아갑니다.
+            thumbWrap.addEventListener('click', () => scrollToPage(p));
+            // (옵션) 로딩 중임을 표시
+            // thumbWrap.innerHTML = `<span class.="thumb-loading">${p}</span>`; 
+            els.thumbs.appendChild(thumbWrap);
+    }
+    }
     // Now render content (can be parallelized more if needed)
     const renderPromises = [];
     for (let p = 1; p <= pdfDoc.numPages; p++) {
@@ -339,28 +348,34 @@ async function renderPage(p) {
 }
 
 async function renderThumb(p) {
-    if (!els.thumbs || !pdfDoc) return;
-    try {
-        const page = await pdfDoc.getPage(p);
-        const viewport = page.getViewport({ scale: 0.2 });
-        const wrap = document.createElement('div');
-        wrap.className = 'thumb';
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        const dpr = window.devicePixelRatio || 1;
-        canvas.width = Math.floor(viewport.width * dpr);
-        canvas.height = Math.floor(viewport.height * dpr);
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        await page.render({ canvasContext: ctx, viewport }).promise;
-        wrap.appendChild(canvas);
-        wrap.addEventListener('click', () => scrollToPage(p));
-        els.thumbs.appendChild(wrap);
-        // page.cleanup(); // Cleanup
-    } catch (error) {
-        console.error(`Error rendering thumbnail for page ${p}:`, error);
-    }
+    // 1. window.renderDocument에서 미리 만들어 둔 빈칸(.thumb)을 찾습니다.
+    const wrap = document.querySelector(`#thumbs .thumb[data-page="${p}"]`);
+    
+    // 2. [수정] 빈칸(wrap)이 없거나 pdfDoc이 없으면 함수를 종료합니다.
+    if (!wrap || !pdfDoc) return;
+
+    try {
+        const page = await pdfDoc.getPage(p);
+        const viewport = page.getViewport({ scale: 0.2 });
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        
+        canvas.width = Math.floor(viewport.width * dpr);
+        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        // 3. [수정] 빈칸(wrap)의 내용을 비우고, 완성된 캔버스 하나만 추가합니다.
+        wrap.innerHTML = ''; 
+        wrap.appendChild(canvas);
+        // page.cleanup();
+    } catch (error) {
+        console.error(`Error rendering thumbnail for page ${p}:`, error);
+    }
 }
 
 async function renderOutline() {
@@ -988,23 +1003,6 @@ document.addEventListener('DOMContentLoaded', ()=> {
 
     // 2. 여기에 모든 이벤트 리스너 연결 코드를 붙여넣습니다!
     console.log("Adding event listeners after DOMContentLoaded...");
-
-    els.file?.addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        finalizePendingChunk();
-        const ab = await file.arrayBuffer();
-        if (typeof window.createDocFromFile === 'function') {
-            window.createDocFromFile(file); // Upload to Firebase
-        } else {
-            // Render locally
-            currentPage = 1; scale = 1.0; continuousMode = true;
-            await window.renderDocument(ab); // Use window.renderDocument
-            console.warn("doc.js not fully integrated, rendering file locally only.");
-        }
-        updateToolbar();
-        e.target.value = null; // Reset file input
-    });
 
     els.prevPage?.addEventListener('click', () => { if (!pdfDoc) return; currentPage = Math.max(1, currentPage - 1); scrollToPage(currentPage); });
     els.nextPage?.addEventListener('click', () => { if (!pdfDoc) return; currentPage = Math.min(pdfDoc.numPages, currentPage + 1); scrollToPage(currentPage); });
