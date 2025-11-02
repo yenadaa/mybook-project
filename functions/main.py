@@ -102,6 +102,74 @@ def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
         print(f"GPT API 호출 오류: {e}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message="퀴즈 생성 중 오류가 발생했습니다.")
 
+@https_fn.on_call(
+    secrets=["OPENAI_API_KEY"],
+    cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]), # 👈 [중요] CORS 설정 추가
+    timeout_sec=300 # 5분 (하이라이트 기반이라 9분까진 필요 없을 수 있음)
+)
+def generateCustomReview(req: https_fn.CallableRequest) -> https_fn.Response:
+    """
+    사용자의 하이라이트만 모아서 generate_base_review (복합 퀴즈)를 실행합니다.
+    """
+    global db, openai_client
+    if db is None: db = firestore.client()
+    if openai_client is None: openai_client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+    user_id, book_id = _get_auth_and_book_id(req)
+    print(f"'{book_id}'에 대한 '하이라이트 기반 복합 퀴즈'(generateCustomReview) 생성 시작")
+
+    # --- 체크포인트 1: 하이라이트 텍스트 추출 ---
+    try:
+        docs = db.collection('highlights').where('userId', '==', user_id).where('bookId', '==', book_id).stream()
+        
+        # generate_base_review에 넣기 위해 'Chunk' 리스트로 변환
+        chunks = []
+        highlight_count = 0
+        for doc in docs:
+            doc_data = doc.to_dict()
+            text = doc_data.get('text')
+            if not text:
+                continue
+            
+            # 하이라이트가 저장된 페이지 번호 (없으면 0)
+            page_num = doc_data.get('pageNumber', 0)
+            
+            chunks.append(
+                Chunk(
+                    id=doc.id, # 하이라이트 문서 ID
+                    text=text,
+                    section_path=[f"p{page_num}"] # 페이지 번호 참조
+                )
+            )
+            highlight_count += 1
+
+        if not chunks:
+            print("하이라이트가 없어 퀴즈를 생성할 수 없습니다.")
+            # main.js가 오류나지 않도록 빈 구조 반환
+            return {"summaries": {}, "review": {}} 
+
+        total_chars = sum(len(c.text) for c in chunks)
+        print(f"Checkpoint 1: 하이라이트 {highlight_count}개, 총 {total_chars}자 로드 성공")
+
+    except Exception as e:
+        print(f"Checkpoint 1 (Highlight Fetch) 오류: {traceback.format_exc()}")
+        raise https_fn.HttpsError(code='internal', message=f'하이라이트 로드 중 오류: {str(e)}')
+
+    # --- 체크포인트 2: AI 퀴즈 생성 (generate_base_review 재사용) ---
+    try:
+        # PreprocessedDoc 객체 생성
+        processed_doc = PreprocessedDoc(doc_id=book_id, chunks=chunks)
+        
+        # generateFullDocQuiz와 동일한 AI 생성기 호출
+        output = generate_base_review(processed_doc, seed=42, model="gpt-4o-mini")
+        
+        print("Checkpoint 2: AI 복합 퀴즈 생성 성공")
+        # main.js가 기대하는 JSON 형식으로 반환
+        return json.loads(output.json()) 
+        
+    except Exception as e:
+        print(f"Checkpoint 2 (AI Generation) 오류: {traceback.format_exc()}")
+        raise https_fn.HttpsError(code='internal', message=f'AI 퀴즈 생성 중 오류: {str(e)}')
 # ---------------------------------------------
 # 2. 전체 문서 기반 퀴즈 (시간 초과 위험!)
 # ---------------------------------------------

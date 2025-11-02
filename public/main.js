@@ -65,32 +65,60 @@ document.addEventListener('DOMContentLoaded', () => {
         quizOptionsModal?.classList.add('hidden');
     });
 
-    modalHighlightsBtn?.addEventListener('click', async () => {
-        quizOptionsModal?.classList.add('hidden');
-        showQuizModal(null, true, false, "하이라이트 기반 퀴즈 생성 중...");
-        try {
-            const generateQuiz = httpsCallable(functions, 'generateQuiz' , {timeout : 300000});
-            const result = await generateQuiz({ bookId: getCurrentBookId() });
-            const quiz = result.data.quiz || [];
+ modalHighlightsBtn?.addEventListener('click', async () => {
+    
+    // 1. 옵션 모달을 닫습니다.
+    quizOptionsModal?.classList.add('hidden');
 
-            // 1) 저장용 payload (객관식 → type 'mcq')
-            const items = quiz.map(q => ({
-              type: 'mcq',
-              q: q.question,
-              answer: q.answer || "",
-              sources: [], tags: ['하이라이트']
-            }));
-            const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
-            const saved = await saveQuizItems({ bookId: getCurrentBookId(), scope: 'highlight', items });
-            console.log('saveQuizItems(highlight):', saved.data);
+    // 2. bookId와 user를 가져옵니다. (버그 수정)
+    const bookId = getCurrentBookId();
+    const user = getCurrentUser();
 
-            showSimpleQuiz(quiz);
-        } catch (error) {
-            console.error("하이라이트 퀴즈 생성 오류:", error);
-            showQuizModal(null, false, true);
-        }
-    });
+    // 3. bookId가 없으면 경고하고 중단합니다.
+    if (!bookId || !user) {
+        console.warn("하이라이트 퀴즈 생성 중단: bookId 또는 user가 없습니다.");
+        return alert("퀴즈를 만들 문서를 먼저 열어주세요.");
+    }
 
+    // 4. 유효성 검사 통과 후 로딩창을 켭니다. (중복 호출 제거)
+    showQuizModal(null, true, false, "하이라이트만 모아 퀴즈·요약 생성 중...");
+
+    try {
+        // 5. [핵심] main.py의 generateCustomReview 함수 (요약+퀴즈 세트)를 호출합니다.
+        const generateCustomReview = httpsCallable(functions, 'generateCustomReview', { timeout: 300000 });
+        const { data } = await generateCustomReview({ bookId });
+
+        // 6. '전체 문서' 때와 동일한 로직으로 'items'를 가공합니다.
+        const items = [];
+        if (data?.review?.ox) {
+            data.review.ox.forEach(it =>
+                items.push({ type: 'ox', q: it.q, answer: String(it.answer), sources: it.sources || [], tags: it.tags || [] })
+            );
+        }
+        if (data?.review?.short) {
+            data.review.short.forEach(it =>
+                items.push({ type: 'short', q: it.q, answer: it.answer || "", sources: it.sources || [], tags: it.tags || [] })
+            );
+        }
+        if (data?.review?.discussion) {
+            data.review.discussion.forEach(it =>
+                items.push({ type: 'discussion', q: it.q, sources: it.sources || [], tags: it.tags || [] })
+            );
+        }
+
+        // 7. DB에 저장합니다 (scope: 'highlight')
+        const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
+        const saved = await saveQuizItems({ bookId, scope: 'highlight', items });
+
+        // 8. [핵심] '전체 문서'와 동일한 함수로 결과를 렌더링합니다.
+        showFullDocQuiz(data, saved.data);
+        
+    } catch (error) {
+        // 9. 오류 처리
+        console.error("하이라이트 퀴즈 생성 오류:", error);
+        showQuizModal(null, false, true, `오류가 발생했습니다: ${error.message}`);
+    }
+});
 
     modalFullDocBtn?.addEventListener('click', async () => {
         quizOptionsModal?.classList.add('hidden');
