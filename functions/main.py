@@ -371,6 +371,7 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
     if openai_client is None: openai_client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     if storage_client is None: storage_client = storage.bucket()
 
+    user_id = None
     try:
         # 1. 작업 요청에서 userId 가져오기
         payload = req.get_json(silent=True)
@@ -380,15 +381,15 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
             return https_fn.Response("Bad Request", status=400)
 
         print(f"'{user_id}' 사용자의 복습 퀴즈 세션 생성을 시작합니다.")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc) # 👈 datetime 오타 수정됨
         
         # 2. 복습할 하이라이트 찾기
         highlights_query = db.collection('highlights').where('userId', '==', user_id).where('nextReviewDate', '<=', now)
-        due_highlights_docs = list(highlights_query.stream()) # 👈 [수정] 나중에 업데이트를 위해 doc 객체 저장
+        due_highlights_docs = list(highlights_query.stream())
         
         # 3. 틀렸던 퀴즈 찾기 (복습 레벨 1~3, 즉 완료(4)가 아닌 것)
         wrong_quiz_query = db.collection('quizItems').where('userId', '==', user_id).where('reviewLevel', '>', 0).where('reviewLevel', '<', 4)
-        wrong_items_docs = list(wrong_quiz_query.stream()) # 👈 [수정] doc 객체 저장
+        wrong_items_docs = list(wrong_quiz_query.stream())
 
         # 4. 복습할 것이 없으면 종료
         if not due_highlights_docs and not wrong_items_docs:
@@ -401,7 +402,7 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
         
         if highlight_texts:
             context = "\n".join(highlight_texts)
-            prompt = _get_quiz_prompt(context) # (generateQuiz 함수 프롬프트 재사용)
+            prompt = _get_quiz_prompt(context) 
             
             response = openai_client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -412,15 +413,11 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
             
             new_quiz_items = [{
                 'type': 'mcq',
-                'q': q.get('question'),
-                'answer': q.get('answer'),
-                'options': q.get('options', []),
-                'source': 'highlight', # 출처: 하이라이트
-                'sourceRef': [doc.id for doc in due_highlights_docs] # 👈 이 퀴즈가 어떤 하이라이트들 기반인지
+                'q': q.get('question'), 'answer': q.get('answer'), 'options': q.get('options', []),
+                'source': 'highlight', 'sourceRef': [doc.id for doc in due_highlights_docs]
             } for q in quiz_data]
 
         # 6. 퀴즈 세트 합치기
-        # (틀린 문제는 doc.to_dict()로 변환)
         final_quiz_items = [doc.to_dict() for doc in wrong_items_docs] + new_quiz_items
 
         # 7. Firestore 'reviewSessions'에 퀴즈 세트 저장
@@ -428,31 +425,43 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
         session_ref.set({
             "userId": user_id,
             "createdAt": firestore.SERVER_TIMESTAMP,
-            "items": final_quiz_items # 👈 퀴즈 목록 저장
+            "items": final_quiz_items
         })
         new_session_id = session_ref.id
         print(f"'{user_id}' 사용자의 퀴즈 세션 '{new_session_id}' 저장 완료.")
 
-        # 8. 사용자에게 알림 보내기
-        user_doc = db.collection('users').document(user_id).get()
-        fcm_token = user_doc.to_dict().get('fcmToken')
+        # --- 👇 [수정] 8. 알림 보내기 (별도 try...except로 분리) ---
+        try:
+            user_doc = db.collection('users').document(user_id).get()
+            fcm_token = None
+            
+            if user_doc.exists: # 👈 [핵심] 사용자가 'users' 문서가 있는지 확인
+                fcm_token = user_doc.to_dict().get('fcmToken')
+            else:
+                print(f"'{user_id}' 사용자는 'users' 문서가 없습니다. (알림 권한을 허용한 적 없음)")
+
+            if fcm_token: # 👈 토큰이 있을 때만 전송
+                quiz_url = f"/quiz-page.html?session={new_session_id}"
+                message = messaging.Message(
+                    notification=messaging.Notification(
+                        title="MyBook 복습 시간입니다! 📚",
+                        body=f"오늘 복습할 {len(final_quiz_items)}개의 퀴즈가 준비되었어요."
+                    ),
+                    token=fcm_token,
+                    data={ "urlToOpen": quiz_url }
+                )
+                messaging.send(message)
+                print(f"'{user_id}' 사용자에게 알림 전송 완료.")
+            else:
+                print(f"'{user_id}' 사용자는 FCM 토큰이 없어 알림을 보내지 않습니다.")
         
-        if fcm_token:
-            quiz_url = f"/quiz-page.html?session={new_session_id}" # 👈 퀴즈 페이지 주소
-            
-            message = messaging.Message(
-                notification=messaging.Notification(
-                    title="MyBook 복습 시간입니다! 📚",
-                    body=f"오늘 복습할 {len(final_quiz_items)}개의 퀴즈가 준비되었어요."
-                ),
-                token=fcm_token,
-                data={ "urlToOpen": quiz_url } # 👈 퀴즈 페이지 주소를 데이터로 전송
-            )
-            messaging.send(message)
-            print(f"'{user_id}' 사용자에게 알림 전송 완료.")
-            
+        except Exception as notify_e:
+            # ❗ 알림 전송에 실패해도, 퀴즈 생성/저장은 성공했으므로 
+            #    오류만 로깅하고 함수를 중단시키지 않습니다.
+            print(f"'{user_id}' 사용자에게 알림 전송 중 오류 발생: {notify_e}")
+        # --- 알림 로직 끝 ---
+
         # 9. [중요] 복습한 항목들 날짜 업데이트 (망각곡선)
-        # (간단한 예: 1일 뒤로 설정)
         batch = db.batch()
         next_review_time = datetime.now(timezone.utc) + timedelta(days=1)
         
@@ -465,10 +474,12 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
         batch.commit()
         print(f"'{user_id}' 사용자의 복습 날짜 업데이트 완료.")
 
-        return https_fn.Response("Session created and notification sent", status=200)
+        # 10. Cloud Tasks에 성공 응답
+        return https_fn.Response("Session created", status=200)
 
     except Exception as e:
-        print(f"'{user_id}' 사용자 처리 중 오류: {traceback.format_exc()}")
+        # (이것은 1~7, 9단계에서 발생한 치명적 오류)
+        print(f"'{user_id or 'Unknown user'}' 사용자 처리 중 치명적 오류: {traceback.format_exc()}")
         try:
              # 오류 발생 시 Firestore에 기록
              db.collection("reviewSessions").add({
@@ -478,7 +489,6 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
         except Exception as db_e:
             print(f"Firestore 오류 상태 저장 실패: {db_e}")
         return https_fn.Response(f"Internal Error: {e}", status=500)
-
 
 # ---------------------------------------------
 # 6. 테스트 알림 (수정됨)
