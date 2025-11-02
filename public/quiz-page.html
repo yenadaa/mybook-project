@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyBook 복습 퀴즈</title>
+    
+    <link rel="stylesheet" href="main.css">
+    
+    <style>
+        /* 이 페이지 전용의 최소한의 레이아웃 스타일 */
+        body {
+            background-color: var(--bg, #f4f4f4); /* main.css 변수 활용 */
+            font-family: sans-serif;
+            color: var(--fg, #111);
+        }
+        .quiz-page-container {
+            max-width: 800px; /* 퀴즈 페이지 너비 */
+            margin: 20px auto; /* 중앙 정렬 */
+            padding: 20px 30px;
+            background-color: var(--panel, #fff); /* main.css 변수 활용 */
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: var(--fg);
+            border-bottom: 2px solid var(--border-light);
+            padding-bottom: 10px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--muted);
+            font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="quiz-page-container">
+        <h1>오늘의 복습 퀴즈</h1>
+        
+        <div id="quiz-content">
+            <p class="loading">퀴즈를 불러오는 중입니다...</p>
+        </div>
+    </div>
+
+    <script src="A.firebase.js" type="module"></script>
+    
+    <script src="quiz-page.js" type="module"></script>
+
+</body>
+</html>

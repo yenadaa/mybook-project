@@ -5,3 +5,4 @@ openai
 PyMuPDF
 pydantic
 scikit-learn
+google-cloud-tasks

@@ -1,21 +1,16 @@
 {
-  "functions": {
-    "source": "functions"
-  },
   "hosting": {
-    "public": "public",
+    "public": "build",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
     ]
-  },
-  "emulators": {
-    "functions": {
-      "port": 8082
-    },
-    "ui": {
-      "enabled": true
-    }
   }
 }

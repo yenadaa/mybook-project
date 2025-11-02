@@ -1,17 +1,15 @@
-// A.firebase.js 파일로부터 필요한 모든 Firebase 함수와 인스턴스를 가져옵니다.
 import {
     db, storage, auth, provider, // 인스턴스
     collection, query, where, orderBy, onSnapshot,
     addDoc, deleteDoc, doc, getDoc, updateDoc,
     Timestamp, writeBatch, getDocs,
     ref as storageRef, 
-    getDownloadURL as getStorageDownloadURL, 
-    uploadBytes as storageUploadBytes, 
-    deleteObject as storageDeleteObject, 
+    getDownloadURL as getStorageDownloadURL, 
+    uploadBytes as storageUploadBytes, 
+    deleteObject as storageDeleteObject, 
     signInWithPopup, signOut, onAuthStateChanged, messaging, getToken, setDoc,
-    signInWithRedirect, getRedirectResult 
+    signInWithRedirect, getRedirectResult 
 } from './A.firebase.js';
-
 // --- 전역 변수 ---
 const appId = "default-app-id"; // A.firebase.js에서 export되지 않는 경우를 대비한 대체 값
 let currentUser = null; 
@@ -463,11 +461,15 @@ window.saveHighlightChange = async function(type, highlightData) {
 
     try {
         if (type === 'add') {
+            const now = new Date();
+            const nextReviewDate = new Date(now.getTime() + (24 * 60 * 60 * 1000));
             const docData = {
                 ...highlightData, 
                 userId: user.uid,
                 bookId: bookId,
-                createdAt: Timestamp.now()
+                createdAt: Timestamp.now(),
+                nextReviewDate: Timestamp.fromDate(nextReviewDate), // 1일 뒤
+                reviewLevel: 1 // 현재 1단계 (1일)
             };
             delete docData.id; 
             await addDoc(highlightsCol, docData);

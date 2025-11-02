@@ -29,7 +29,8 @@ const HIGHLIGHT_COLORS = {
     '기본': 'rgba(250, 250, 0, 0.35)',
     '중요': 'rgba(255, 165, 0, 0.35)',
     '암기': 'rgba(144, 238, 144, 0.35)',
-    '참고': 'rgba(135, 206, 250, 0.35)'
+    '참고': 'rgba(135, 206, 250, 0.35)',
+    'OCR': 'rgba(135, 206, 250, 0.35)'
 };
 let currentThicknessPx = Number(localStorage.getItem('pdfViewer.penThicknessPx')) || 20;
 
@@ -583,17 +584,38 @@ function initDrawLayer(p, drawCanvas) {
         finalizePendingChunk();
         const toRemove = [];
         // Only consider highlights with a valid Firestore ID for removal
-        highlights.filter(hh => hh.page === p && hh.type === 'stroke' && hh.id && !hh.id.startsWith('temp_')).forEach(hh => {
-            const bb = bboxOfPathStyle((hh.paths || [hh.path || []]), w, h, (hh.thicknessNorm || 0) * h);
-            if (boxesIntersect({x0:x0/w, y0:y0/h, x1:x1/w, y1:y1/h}, {x0:bb.x0/w, y0:bb.y0/h, x1:bb.x1/w, y1:bb.y1/h})) {
-                toRemove.push(hh.id); // Firestore ID
+        highlights.filter(hh => 
+            hh.page === p && 
+            hh.id && !hh.id.startsWith('temp_') &&
+            (hh.type === 'stroke' || hh.type === 'ocrBlock')
+        ).forEach(hh =>{
+            
+            let bb; // 바운딩 박스
+            if (hh.type === 'stroke') {
+                bb = bboxOfPathStyle(hh.paths, w, h, (hh.thicknessNorm || 0) * h);
+            } else if (hh.type === 'ocrBlock' && hh.bbox) {
+                // ocrBlock의 바운딩 박스 계산
+                bb = {
+                    x0: hh.bbox.x0 * w, y0: hh.bbox.y0 * h,
+                    x1: hh.bbox.x1 * w, y1: hh.bbox.y1 * h
+                };
+            } else {
+                return; // bbox가 없으면 통과
             }
-        });
-        if (toRemove.length) {
-            const removedItems = removeHighlights(toRemove);
-            // addCommand({ action:'remove', payload:{ ids: toRemove, removed: removedItems } }); // Add command for local undo
-        }
-    };
+
+            // 지우개 영역과 겹치는지 확인
+            if (boxesIntersect(
+                {x0:x0/w, y0:y0/h, x1:x1/w, y1:y1/h}, // Eraser norm rect
+                {x0:bb.x0/w, y0:bb.y0/h, x1:bb.x1/w, y1:bb.y1/h}  // Highlight norm rect
+            )) {
+                toRemove.push(hh.id); 
+            }
+        });
+
+        if (toRemove.length) {
+            const removedItems = removeHighlights(toRemove);
+        }
+    };
 
     const handlePointerEnd = (e) => {
         if (st.pointerId !== e.pointerId) return;
@@ -839,55 +861,81 @@ function setHighlightComment(id, comment) { // id는 Firestore ID
 
 // ====== Redrawing Strokes ======
 function redrawStrokesForPage(p) {
-    const cache = pagesCache.get(p);
-    if (!cache) return;
-    const draw = cache.drawCanvas;
-    const ctx = draw.getContext('2d');
-    ctx.clearRect(0, 0, draw.width, draw.height);
-    const w = draw.width, h = draw.height;
-     // Ensure valid dimensions
-     if (!w || !h || w === 0 || h === 0) return;
+    const cache = pagesCache.get(p);
+    if (!cache) return;
+    const draw = cache.drawCanvas;
+    const ctx = draw.getContext('2d');
+    ctx.clearRect(0, 0, draw.width, draw.height);
+    const w = draw.width, h = draw.height;
+     // Ensure valid dimensions
+     if (!w || !h || w === 0 || h === 0) return;
 
-    // highlights 배열에서 직접 필터링
-    const items = highlights.filter(hh => hh.page === p && hh.type === 'stroke');
-    items.forEach(hh => {
-        const strokeColor = hh.color || HIGHLIGHT_COLORS['기본'];
-        // Use default thickness if thicknessNorm is missing or invalid
-        const defaultThicknessNorm = 20 / h; // Default 20px normalized
-        const normThickness = (typeof hh.thicknessNorm === 'number' && !isNaN(hh.thicknessNorm)) ? hh.thicknessNorm : defaultThicknessNorm;
-        const lineW = Math.max(2, normThickness * h);
+    // 1. [기존] 펜 스트로크(stroke) 그리기
+    const items = highlights.filter(hh => hh.page === p && hh.type === 'stroke');
+    items.forEach(hh => {
+        const strokeColor = hh.color || HIGHLIGHT_COLORS['기본'];
+        // Use default thickness if thicknessNorm is missing or invalid
+        const defaultThicknessNorm = 20 / h; // Default 20px normalized
+        const normThickness = (typeof hh.thicknessNorm === 'number' && !isNaN(hh.thicknessNorm)) ? hh.thicknessNorm : defaultThicknessNorm;
+        const lineW = Math.max(2, normThickness * h);
 
+        ctx.save();
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = strokeColor;
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.lineWidth = lineW;
+
+        // paths(다중 세그먼트) 지원 + 기존 path 호환
+        const segments = Array.isArray(hh.paths) ? hh.paths.map(p => p.points) : (Array.isArray(hh.path) ? [hh.path] : []);
+
+        ctx.beginPath();
+        segments.forEach(seg => {
+            if (!Array.isArray(seg)) return; // Skip if segment is not an array
+             // Filter out invalid points before mapping
+            const validPoints = seg.filter(pt => pt && typeof pt.x === 'number' && typeof pt.y === 'number' && !isNaN(pt.x) && !isNaN(pt.y));
+            if (validPoints.length === 0) return; // Skip if no valid points in segment
+
+            const path = validPoints.map(pt => ({ x: pt.x * w, y: pt.y * h }));
+            if (path.length > 0) {
+                 ctx.moveTo(path[0].x, path[0].y);
+                 for (let i = 1; i < path.length; i++) {
+                    ctx.lineTo(path[i].x, path[i].y);
+                }
+            }
+        });
+         if (!ctx.isPointInPath(0, 0)) { // Check if path is empty before stroking
+             ctx.stroke();
+        }
+        ctx.restore();
+    });
+
+    // 👇 [추가] 2. OCR 블록(ocrBlock) 그리기
+    const ocrBlocks = highlights.filter(hh => hh.page === p && hh.type === 'ocrBlock');
+    ocrBlocks.forEach(hh => {
+        if (!hh.bbox) return; // bbox 없으면 그릴 수 없음
+
+        // 정규화된 bbox를 픽셀 좌표로 변환
+        const rect = { 
+            x: hh.bbox.x0 * w,
+            y: hh.bbox.y0 * h,
+            width: (hh.bbox.x1 - hh.bbox.x0) * w,
+            height: (hh.bbox.y1 - hh.bbox.y0) * h
+        };
+        
         ctx.save();
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.strokeStyle = strokeColor;
-        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        ctx.lineWidth = lineW;
-
-        // paths(다중 세그먼트) 지원 + 기존 path 호환
-        const segments = Array.isArray(hh.paths) ? hh.paths.map(p => p.points) : (Array.isArray(hh.path) ? [hh.path] : []);
-
-        ctx.beginPath();
-        segments.forEach(seg => {
-            if (!Array.isArray(seg)) return; // Skip if segment is not an array
-             // Filter out invalid points before mapping
-            const validPoints = seg.filter(pt => pt && typeof pt.x === 'number' && typeof pt.y === 'number' && !isNaN(pt.x) && !isNaN(pt.y));
-            if (validPoints.length === 0) return; // Skip if no valid points in segment
-
-            const path = validPoints.map(pt => ({ x: pt.x * w, y: pt.y * h }));
-            if (path.length > 0) {
-                 ctx.moveTo(path[0].x, path[0].y);
-                 for (let i = 1; i < path.length; i++) {
-                    ctx.lineTo(path[i].x, path[i].y);
-                }
-            }
-        });
-         if (!ctx.isPointInPath(0, 0)) { // Check if path is empty before stroking
-             ctx.stroke();
-        }
+        // 'OCR' 태그 색상 (반투명 파랑)으로 채우기
+        ctx.fillStyle = hh.color || HIGHLIGHT_COLORS['OCR'];
+        ctx.fillRect(rect.x, rect.y, rect.width, rect.height); 
+        
+        // (선택) 더 진한 색으로 테두리 추가
+        const borderColor = (hh.color || HIGHLIGHT_COLORS['OCR']).replace('0.35', '0.8'); 
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = 1; 
+        ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+        
         ctx.restore();
     });
 }
-
 // ====== Notes Panel ======
 function noteFilterActive() { const btn = document.querySelector('.right-tabs button.active'); return btn ? btn.dataset.filter : 'all';}
 function renderNotes() {
@@ -1458,37 +1506,86 @@ function switchSidebar(contentId) {
 
 // ===== [새 함수 1] OCR 영역 추출 및 실행 함수 =====
 async function extractAndRunOcr(pageNumber, rect) {
-    const pageCache = pagesCache.get(pageNumber);
-    if (!pageCache || !pageCache.canvas) { /* ... 오류 처리 ... */ return; }
-    const sourceCanvas = pageCache.canvas; // canvas.page
-    const scaleX = sourceCanvas.width / parseFloat(sourceCanvas.style.width);
-    const scaleY = sourceCanvas.height / parseFloat(sourceCanvas.style.height);
-    const sx = rect.x * scaleX, sy = rect.y * scaleY, sWidth = rect.width * scaleX, sHeight = rect.height * scaleY;
-
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = Math.max(1, sWidth); tempCanvas.height = Math.max(1, sHeight);
-    const tempCtx = tempCanvas.getContext('2d');
-    try {
-      tempCtx.drawImage(sourceCanvas, sx, sy, sWidth, sHeight, 0, 0, tempCanvas.width, tempCanvas.height);
-    } catch (e) { /* ... 오류 처리 ... */ return; }
-
-    const base64ImageData = tempCanvas.toDataURL('image/png').split(',')[1];
-    console.log("추출된 이미지 데이터 길이:", base64ImageData.length);
-    showOcrResultModal(true); // 로딩 모달 표시
-
-    try { // Cloud Function 호출
-        const runOcrOnSelection = httpsCallable(functions, 'runOcrOnSelection');
-        const result = await runOcrOnSelection({ imageData: base64ImageData });
-        const detectedText = result.data.text || "";
-        console.log("Cloud Vision API 결과:", detectedText);
-        showOcrResultModal(false, detectedText); // 결과 모달 업데이트
-    } catch (error) {
-        console.error("Cloud Vision OCR 함수 호출 오류:", error);
-        showOcrResultModal(false, `OCR 오류: ${error.message}`, true); // 오류 모달 업데이트
-    } finally {
-         removeOcrSelectionRect(); // 선택 영역 제거
-         setMode('none'); // 모드 해제
+    const pageCache = pagesCache.get(pageNumber);
+    if (!pageCache || !pageCache.canvas) {
+        console.error("OCR 오류: 해당 페이지의 원본 캔버스(pageCache.canvas)를 찾을 수 없습니다.");
+        removeOcrSelectionRect();
+        return;
     }
+
+    const sourceCanvas = pageCache.canvas; // PDF 내용이 그려진 canvas.page
+    const scaleX = sourceCanvas.width / parseFloat(sourceCanvas.style.width);
+    const scaleY = sourceCanvas.height / parseFloat(sourceCanvas.style.height);
+    const sx = rect.x * scaleX, sy = rect.y * scaleY, sWidth = rect.width * scaleX, sHeight = rect.height * scaleY;
+
+    // 임시 캔버스 생성하여 선택 영역 그리기
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = Math.max(1, sWidth);
+    tempCanvas.height = Math.max(1, sHeight);
+    const tempCtx = tempCanvas.getContext('2d');
+    try {
+      tempCtx.drawImage(sourceCanvas, sx, sy, sWidth, sHeight, 0, 0, tempCanvas.width, tempCanvas.height);
+    } catch (e) {
+        console.error("drawImage 오류:", e, { sx, sy, sWidth, sHeight, cw: tempCanvas.width, ch: tempCanvas.height });
+        alert("이미지 영역 추출 중 오류가 발생했습니다.");
+        removeOcrSelectionRect();
+        return;
+    }
+
+    const base64ImageData = tempCanvas.toDataURL('image/png').split(',')[1];
+    console.log("추출된 이미지 데이터 길이:", base64ImageData.length);
+    
+    // [수정] 팝업 로딩 대신 '로딩 중...' 커서 표시
+    document.body.style.cursor = 'wait';
+
+    // Cloud Function 호출 (try...catch 블록 1개로 정리)
+    try {
+        const runOcrOnSelection = httpsCallable(functions, 'runOcrOnSelection');
+        const result = await runOcrOnSelection({ imageData: base64ImageData });
+        const detectedText = result.data.text || "";
+        console.log("Cloud Vision API 결과:", detectedText);
+
+        // 👇 [핵심] 팝업 대신 하이라이트로 저장하는 로직
+        if (detectedText.trim()) {
+            // 1. 뷰어에 표시할 'rect' 좌표를 'norm' 좌표(0~1)로 변환
+            const drawCanvas = pageCache.drawCanvas;
+            const w = parseFloat(drawCanvas.style.width);
+            const h = parseFloat(drawCanvas.style.height);
+            
+            const normRect = {
+                x0: rect.x / w,
+                y0: rect.y / h,
+                x1: (rect.x + rect.width) / w,
+                y1: (rect.y + rect.height) / h
+            };
+
+            // 2. 'highlight' 객체 생성
+            const highlightData = {
+                page: pageNumber,
+                type: 'ocrBlock', // 👈 'stroke'와 구분되는 새 타입
+                bbox: normRect,    // 👈 펜 'paths' 대신 정규화된 'bbox' 저장
+                text: detectedText.trim(), // 👈 AI가 요약한 줄글
+                tag: 'OCR', // 👈 'OCR' 태그 자동 지정
+                color: HIGHLIGHT_COLORS['OCR'],
+                comment: ''
+            };
+
+            // 3. 저장 함수 호출 (펜 저장과 동일한 함수 사용)
+            execAddHighlight(highlightData); 
+
+        } else {
+            alert("추출된 텍스트가 없습니다.");
+        }
+        // 👆 [수정 완료]
+
+    } catch (error) {
+        console.error("Cloud Vision OCR 함수 호출 오류:", error);
+        alert(`OCR 오류: ${error.message}`); // 팝업 대신 alert 사용
+    } finally {
+        document.body.style.cursor = 'default'; // 👈 커서 복원
+        removeOcrSelectionRect(); // 작업 완료 후 선택 영역 제거
+        setMode('none'); // OCR 모드 해제
+    }
 }
 
 // ===== [새 함수 2] OCR 선택 영역 제거 함수 =====
