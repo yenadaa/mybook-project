@@ -294,72 +294,83 @@ def generate_custom_review(
     seed: Optional[int] = None,
     counts_override: Optional[Dict[str, int]] = None,
 ) -> ReviewOut:
+    
+    # ⭐️ [로그 추가 1] 이 함수가 진짜 호출되었는지 확인
+    print("--- generate_custom_review 함수 시작 (quiz_generator.py) ---")
+    
     all_ids = _normalize_ids(doc)
     
     # 1. 대상 청크 ID 목록 확정
     target_chunks = []
     
-    # section 또는 chunk_ids를 사용해 대상 청크 객체 목록을 가져옵니다.
     if section:
-        # section을 포함하는 모든 청크
         target_chunks = [c for c in doc.chunks if section in " / ".join(c.section_path or [])]
     elif chunk_ids:
-        # 명시된 ID 목록에 해당하는 청크
         id_set = set(chunk_ids)
         target_chunks = [c for c in doc.chunks if c.id in id_set]
     else:
-        # 대상이 없으면 오류 발생 또는 빈 결과 반환
+        # ⭐️ [로그 추가 2] 청크가 없어서 종료되는지 확인
+        print("--- generate_custom_review: 대상 청크(chunk_ids)가 없어 빈 결과 반환 ---")
         return ReviewOut(ox=[], short=[], discussion=[])
 
+    # ⭐️ [로그 추가 3] 대상 청크 개수 확인
+    print(f"--- generate_custom_review: 총 {len(target_chunks)}개의 청크(하이라이트) 처리 시작 ---")
 
-    # 2. 키워드 추출 (문서 전체 또는 선택 범위 전체를 기반으로 한 번만 추출)
+    # 2. 키워드 추출
     if keywords:
         kws = keywords
     else:
-        # 선택된 청크들의 텍스트만 합쳐서 키워드 추출
         selected_text = "\n\n".join([c.text for c in target_chunks])
+        
+        # ⭐️ [로그 추가 4] 키워드 추출용 AI 호출 직전
+        print(f"--- generate_custom_review: AI 호출 (키워드 추출) 시작... (텍스트 크기: {len(selected_text)}) ---")
+        
         try:
             raw_keywords = _ask_gpt_json(
                 _prompt_keywords(selected_text),
                 model=model, temperature=0.2, max_tokens=200
             )
             kws = raw_keywords.get("keywords", [])
+            print("--- generate_custom_review: AI 호출 (키워드 추출) 성공 ---") # 👈 성공 로그
         except Exception as e:
             print(f"키워드 추출 실패: {e}. 기본 키워드를 사용합니다.")
             kws = ["핵심 개념", "정의", "관계", "예시", "의의"]
 
-    # 3. 문제 개수 설정 (청크당 문제 개수)
+    # 3. 문제 개수 설정
     rnd = random.Random(seed)
-    # counts_override가 있으면 사용하고, 없으면 랜덤으로 설정 (기존 로직 유지)
     counts_base = counts_override or {
         "ox": 3,
         "short": 3,
         "discussion": 3,
     }
 
-    # 4. **핵심 수정: 각 청크를 순회하며 개별적으로 GPT 호출**
+    # 4. 각 청크를 순회하며 개별적으로 GPT 호출
     final_review_output = ReviewOut(ox=[], short=[], discussion=[])
     
     for chunk in target_chunks:
         try:
-            # 해당 청크의 텍스트만 사용
             text = chunk.text or ""
-            used_ids_chunk = [chunk.id] # 현재 처리 중인 청크 ID
+            used_ids_chunk = [chunk.id]
             
             if not text.strip():
                 continue
 
-            print(f"-> 청크 {chunk.id}에 대해 문제 생성 중...")
+            # ⭐️ [로그 추가 5] 퀴즈 생성용 AI 호출 직전
+            print(f"-> 청크 {chunk.id}에 대해 문제 생성 중... (텍스트 크기: {len(text)})")
             
             raw = _ask_gpt_json(
-                _prompt_review(text, kws, counts_base), # 청크당 설정된 문제 개수 사용
-                model=model, temperature=0.4, max_tokens=2000 # max_tokens 증가 (서술형 포함)
+                _prompt_review(text, kws, counts_base),
+                model=model, temperature=0.4, max_tokens=2000
             )
+            
+            # ⭐️ [로그 추가 6] 퀴즈 생성 AI 호출 성공
+            print(f"-> 청크 {chunk.id} 문제 생성 성공")
 
             rv = raw.get("review", {}) or {}
 
+            # ... (이하 _fix_item 및 결과 병합 로직 동일) ...
+            
             def _fix_item(it: Dict[str, Any], t: str) -> Dict[str, Any]:
-                # 출처를 현재 청크 ID로만 설정
                 it["sources"] = _fix_sources(it.get("sources", []), all_ids, used_ids_chunk) 
                 tags = it.get("tags") or []
                 if t not in tags: tags.append(t)
@@ -367,7 +378,6 @@ def generate_custom_review(
                 if t in ("OX", "단답"): it.setdefault("confused", False)
                 return it
             
-            # 결과 병합
             ox = [_fix_item(it, "OX") for it in (rv.get("ox") or [])]
             short = [_fix_item(it, "단답") for it in (rv.get("short") or [])]
             discussion = [_fix_item(it, "토론") for it in (rv.get("discussion") or [])]
@@ -377,7 +387,9 @@ def generate_custom_review(
             final_review_output.discussion.extend(discussion)
 
         except Exception as e:
-            print(f"청크 {chunk.id} 문제 생성 중 오류 발생: {e}")
+            print(f"청크 {chunk.id} 문제 생성 중 오류 발생: {e}") # 👈 이것도 중요한 로그
             continue
     
+    # ⭐️ [로그 추가 7] 함수가 성공적으로 끝났는지 확인
+    print("--- generate_custom_review 함수 정상 종료 ---")
     return final_review_output

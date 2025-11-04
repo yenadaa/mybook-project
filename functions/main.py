@@ -7,6 +7,10 @@ import traceback
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
+# ⭐️ [추가] textwrap, random (quiz_generator가 내부적으로 사용)
+import textwrap
+import random
+
 from firebase_admin import firestore, initialize_app, messaging, storage
 from firebase_functions import https_fn, options, scheduler_fn
 from hashlib import sha256
@@ -14,7 +18,17 @@ from hashlib import sha256
 # 유틸리티 및 AI 생성기 import
 from utils_similarity import normalize_q, char_ngrams, simhash64, simhash_bands, hamming
 import fitz  # PyMuPDF
-from quiz_generator import PreprocessedDoc, Chunk, generate_base_review
+
+# ⭐️ [수정] quiz_generator.py에서 필요한 함수들을 정확히 import 합니다.
+from quiz_generator import (
+    PreprocessedDoc, 
+    Chunk, 
+    generate_base_review,     # 👈 generateFullDocQuiz가 사용
+    generate_custom_review,   # 👈 [핵심] generateCustomReview가 사용할 함수
+    Output,                   # 👈 [핵심] 결과를 포장할 모델
+    SummaryOut,               # 👈 [핵심] 결과를 포장할 모델
+    ReviewOut                 # 👈 [핵심] 결과를 포장할 모델
+)
 import openai
 from google.cloud import vision
 
@@ -30,7 +44,7 @@ db = None
 storage_client = None
 vision_client = None
 openai_client = None
-tasks_client = None # ❗ Tasks 클라이언트 추가
+tasks_client = None 
 
 # --- 전역 설정 ---
 options.set_global_options(
@@ -102,76 +116,100 @@ def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
         print(f"GPT API 호출 오류: {e}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message="퀴즈 생성 중 오류가 발생했습니다.")
 
+# ---------------------------------------------
+# 2. ⭐️ [수정된 전체 코드] 하이라이트 기반 복합 퀴즈
+# ---------------------------------------------
 @https_fn.on_call(
     secrets=["OPENAI_API_KEY"],
-    cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]), # 👈 [중요] CORS 설정 추가
-    timeout_sec=300 # 5분 (하이라이트 기반이라 9분까진 필요 없을 수 있음)
+    cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]),
+    timeout_sec=540,
+    memory=options.MemoryOption.GB_4 # 👈 4GB 메모리 설정
 )
 def generateCustomReview(req: https_fn.CallableRequest) -> https_fn.Response:
     """
-    사용자의 하이라이트만 모아서 generate_base_review (복합 퀴즈)를 실행합니다.
+    [수정] 사용자의 하이라이트 (Chunk)를 모아서,
+    quiz_generator.py의 'generate_custom_review' 함수를 호출합니다.
     """
     global db, openai_client
     if db is None: db = firestore.client()
     if openai_client is None: openai_client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
     user_id, book_id = _get_auth_and_book_id(req)
-    print(f"'{book_id}'에 대한 '하이라이트 기반 복합 퀴즈'(generateCustomReview) 생성 시작")
+    model = "gpt-4o-mini"
+    print(f"'{book_id}'에 대한 'generateCustomReview' (올바른 버전) 생성 시작")
 
-    # --- 체크포인트 1: 하이라이트 텍스트 추출 ---
+    # --- 체크포인트 1: 하이라이트 텍스트 -> Chunk 리스트로 변환 ---
     try:
         docs = db.collection('highlights').where('userId', '==', user_id).where('bookId', '==', book_id).stream()
         
-        # generate_base_review에 넣기 위해 'Chunk' 리스트로 변환
         chunks = []
-        highlight_count = 0
+        highlight_ids = [] # 👈 [수정] ID만 필요합니다.
+
         for doc in docs:
             doc_data = doc.to_dict()
             text = doc_data.get('text')
             if not text:
                 continue
             
-            # 하이라이트가 저장된 페이지 번호 (없으면 0)
             page_num = doc_data.get('pageNumber', 0)
+            chunk_id = doc.id # 하이라이트 문서 ID
             
             chunks.append(
                 Chunk(
-                    id=doc.id, # 하이라이트 문서 ID
+                    id=chunk_id, 
                     text=text,
-                    section_path=[f"p{page_num}"] # 페이지 번호 참조
+                    section_path=[f"p{page_num}"]
                 )
             )
-            highlight_count += 1
+            highlight_ids.append(chunk_id)
 
         if not chunks:
             print("하이라이트가 없어 퀴즈를 생성할 수 없습니다.")
-            # main.js가 오류나지 않도록 빈 구조 반환
             return {"summaries": {}, "review": {}} 
 
-        total_chars = sum(len(c.text) for c in chunks)
-        print(f"Checkpoint 1: 하이라이트 {highlight_count}개, 총 {total_chars}자 로드 성공")
+        print(f"Checkpoint 1: 하이라이트 {len(chunks)}개 로드 성공")
 
     except Exception as e:
         print(f"Checkpoint 1 (Highlight Fetch) 오류: {traceback.format_exc()}")
         raise https_fn.HttpsError(code='internal', message=f'하이라이트 로드 중 오류: {str(e)}')
 
-    # --- 체크포인트 2: AI 퀴즈 생성 (generate_base_review 재사용) ---
+    # --- 👇👇 [누락된 부분] 이 코드가 통째로 빠져있었습니다! 👇👇 ---
+    # --- 체크포인트 2: AI 퀴즈 생성 (generate_custom_review 호출) ---
     try:
-        # PreprocessedDoc 객체 생성
+        # 1. PreprocessedDoc 객체 생성 (모든 하이라이트 청크를 포함)
         processed_doc = PreprocessedDoc(doc_id=book_id, chunks=chunks)
         
-        # generateFullDocQuiz와 동일한 AI 생성기 호출
-        output = generate_base_review(processed_doc, seed=42, model="gpt-4o-mini")
+        # 2. [핵심] generate_base_review가 아니라 generate_custom_review를 호출
+        #    chunk_ids 인자에 하이라이트 ID 리스트를 전달합니다.
+        review_output = generate_custom_review(
+            doc=processed_doc, 
+            chunk_ids=highlight_ids, # 👈 이 하이라이트들만 대상으로!
+            model=model,
+            seed=42,
+            # ⭐️ 하이라이트 '각각'에 대해 만들 퀴즈 개수 설정
+            counts_override={"ox": 1, "short": 1, "discussion": 1} 
+        )
         
-        print("Checkpoint 2: AI 복합 퀴즈 생성 성공")
-        # main.js가 기대하는 JSON 형식으로 반환
-        return json.loads(output.json()) 
+        # 3. main.js가 기대하는 {summaries, review} 형태로 맞춥니다.
+        #    (generate_custom_review는 요약은 안 만드므로, 요약은 비워둡니다)
+        final_output = Output(
+            summaries=SummaryOut(summary_300="", summary_half="", summary_full="하이라이트 기반 퀴즈는 요약을 제공하지 않습니다.", sources=highlight_ids),
+            review=review_output, # 👈 AI가 생성한 복합 퀴즈 결과
+            meta={"model": model, "doc_id": book_id}
+        )
+
+        print("Checkpoint 2: AI 복합 퀴즈 ('generate_custom_review') 생성 성공")
+        # 4. main.js가 기대하는 JSON 형식으로 반환
+        return json.loads(final_output.json()) 
         
     except Exception as e:
         print(f"Checkpoint 2 (AI Generation) 오류: {traceback.format_exc()}")
         raise https_fn.HttpsError(code='internal', message=f'AI 퀴즈 생성 중 오류: {str(e)}')
+    # --- 👆👆 [누락된 부분] 여기까지 👆👆 ---
+
+
 # ---------------------------------------------
-# 2. 전체 문서 기반 퀴즈 (시간 초과 위험!)
+# 3. [번호 수정] 전체 문서 기반 퀴즈 (시간 초과 위험!)
 # ---------------------------------------------
 @https_fn.on_call(
     secrets=["OPENAI_API_KEY"],
@@ -229,7 +267,7 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
         raise https_fn.HttpsError(code='internal', message=f'AI 퀴즈 생성 중 오류: {str(e)}')
 
 # ---------------------------------------------
-# 3. 이미지 영역 OCR (OpenAI Vision)
+# 4. [번호 수정] 이미지 영역 OCR (OpenAI Vision)
 # ---------------------------------------------
 @https_fn.on_call(
     secrets=["OPENAI_API_KEY"],
@@ -272,7 +310,7 @@ def runOcrOnSelection(req: https_fn.CallableRequest) -> https_fn.Response:
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message=f"AI 비전 처리 중 서버 오류 발생: {str(e)}")
 
 # ---------------------------------------------
-# 4. 퀴즈 저장 (중복 검사)
+# 5. [번호 수정] 퀴즈 저장 (중복 검사)
 # ---------------------------------------------
 @https_fn.on_call(cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]))
 def saveQuizItems(req: https_fn.CallableRequest) -> https_fn.Response:
@@ -356,7 +394,7 @@ def saveQuizItems(req: https_fn.CallableRequest) -> https_fn.Response:
     return {"saved": saved, "skipped": skipped}
 
 # ---------------------------------------------
-# 5. 복습 알림 (지휘자 / 일꾼 분리)
+# 6. [번호 수정] 복습 알림 (지휘자 / 일꾼 분리)
 # ---------------------------------------------
 
 # --- Cloud Tasks 큐 정보 ---
@@ -525,7 +563,7 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
         
         except Exception as notify_e:
             # ❗ 알림 전송에 실패해도, 퀴즈 생성/저장은 성공했으므로 
-            #    오류만 로깅하고 함수를 중단시키지 않습니다.
+            #    오류만 로깅하고 함수를 중단시키지 않습니다.
             print(f"'{user_id}' 사용자에게 알림 전송 중 오류 발생: {notify_e}")
         # --- 알림 로직 끝 ---
 
@@ -559,7 +597,7 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response(f"Internal Error: {e}", status=500)
 
 # ---------------------------------------------
-# 6. 테스트 알림 (수정됨)
+# 7. [번호 수정] 테스트 알림 (수정됨)
 # ---------------------------------------------
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]))
