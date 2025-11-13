@@ -1,0 +1,10 @@
+{
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.4",
+    "@capacitor/core": "^7.4.4"
+  },
+  "dependencies": {
+    "@capacitor-firebase/authentication": "^7.4.0",
+    "@capacitor/android": "^7.4.4"
+  }
+}

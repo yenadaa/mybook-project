@@ -1,19 +1,23 @@
+// ✅ 1. 'signInWithRedirect' 등 웹 전용 함수를 다시 import 합니다. (웹 배포를 위해 필수)
 import {
-    db, storage, auth, provider, // 인스턴스
-    collection, query, where, orderBy, onSnapshot,
-    addDoc, deleteDoc, doc, getDoc, updateDoc,
-    Timestamp, writeBatch, getDocs,
-    ref as storageRef, 
-    getDownloadURL as getStorageDownloadURL, 
-    uploadBytes as storageUploadBytes, 
-    deleteObject as storageDeleteObject, 
-    signInWithPopup, signOut, onAuthStateChanged, messaging, getToken, setDoc,
-    signInWithRedirect, getRedirectResult 
+    db, storage, auth, provider, // 인스턴스
+    collection, query, where, orderBy, onSnapshot,
+    addDoc, deleteDoc, doc, getDoc, updateDoc,
+    Timestamp, writeBatch, getDocs,
+    ref as storageRef,
+    getDownloadURL as getStorageDownloadURL,
+    uploadBytes as storageUploadBytes,
+    deleteObject as storageDeleteObject,
+    signInWithPopup, signOut, onAuthStateChanged, messaging, getToken, setDoc,
+    signInWithRedirect, getRedirectResult // ✅ 다시 추가
 } from './A.firebase.js';
+
+// ❌ '@capacitor-firebase/authentication' import는 완전히 삭제합니다.
+
 // --- 전역 변수 ---
 const appId = "default-app-id"; // A.firebase.js에서 export되지 않는 경우를 대비한 대체 값
-let currentUser = null; 
-let currentBookId = null; 
+let currentUser = null;
+let currentBookId = null;
 let unsubscribeDocs = null;
 let unsubscribeHighlights = null;
 
@@ -35,12 +39,12 @@ document.addEventListener("DOMContentLoaded", () => {
         document.head.appendChild(style);
     }
 
+    // ✅ 2. 'getRedirectResult' 코드는 웹 배포를 위해 다시 원상 복구합니다.
     getRedirectResult(auth)
         .then((result) => {
             if (result) {
                 // 사용자가 방금 리디렉션을 통해 성공적으로 로그인함
-                console.log("✅ 리디렉션 로그인 성공!", result.user);
-                // (참고: 직후에 onAuthStateChanged도 호출되어 UI가 업데이트됩니다)
+                console.log("✅ (WEB) 리디렉션 로그인 성공!", result.user);
             } else {
                 // 사용자가 그냥 페이지를 방문함 (리디렉션 아님)
                 console.log("페이지 일반 로드 (리디렉션 아님).");
@@ -48,39 +52,56 @@ document.addEventListener("DOMContentLoaded", () => {
         })
         .catch((error) => {
             // 리디렉션 '이후'에 발생한 오류 (예: 계정 충돌)
-            console.error("❌ 리디렉션 로그인 실패:", error);
+            console.error("❌ (WEB) 리디렉션 로그인 실패:", error);
             if (error.code === 'auth/account-exists-with-different-credential') {
-                 alert("이미 다른 방식(예: 이메일)으로 가입된 계정입니다.");
+                alert("이미 다른 방식(예: 이메일)으로 가입된 계정입니다.");
             }
         });
     // --- 리디렉션 처리 코드 끝 ---
     
-    const loginBtn  = $("loginBtn"); 
+    const loginBtn  = $("loginBtn");
     const logoutBtn = $("logoutBtn");
     const authStatus = $("authStatus");
-    const userDisplay = authStatus; 
+    const userDisplay = authStatus;
 
     // 로그인 버튼 리스너
     if (loginBtn) {
-        loginBtn.addEventListener("click", () => {
-            console.log("팝업으로 로그인 시도.");
-            signInWithRedirect(auth, provider)
-                /*.then((result) => { console.log("✅ 팝업 로그인 성공!", result.user); })
-                .catch((error) => {
-                    console.error("❌ 팝업 로그인 실패:", error);
-                    if (error.code === 'auth/popup-blocked') {
-                        const alertBox = document.createElement('div');
-                        alertBox.className = 'custom-alert-modal';
-                        alertBox.innerHTML = `
-                            <div class="modal-content">
-                                <h3>팝업 차단됨</h3>
-                                <p>브라우저에서 팝업이 차단되었습니다. 팝업 차단을 해제하고 다시 시도해주세요.</p>
-                                <button onclick="this.closest('.custom-alert-modal').remove()">확인</button>
-                            </div>
-                        `;
-                        document.body.appendChild(alertBox);
+        // ✅ 3. [핵심] 'async'로 변경하고, 앱/웹 환경을 감지합니다.
+        loginBtn.addEventListener("click", async () => {
+            
+            // ✅ 'Capacitor' 전역 객체가 있고, 'isNativePlatform'이 true면 앱입니다.
+            const isNativeApp = window.Capacitor && window.Capacitor.isNativePlatform();
+
+            if (isNativeApp) {
+                // --- 📱 NATIVE APP (안드로이드) 로직 ---
+                console.log("✅ NATIVE: 네이티브 Google 로그인 시도.");
+                try {
+                    const { FirebaseAuthentication } = Capacitor.Plugins;
+                    if (!FirebaseAuthentication) {
+                        throw new Error("Firebase Auth 플러그인을 찾을 수 없습니다. (cap sync 확인 필요)");
                     }
-                });*/
+                    
+                    const result = await FirebaseAuthentication.signInWithGoogle();
+                    const credential = firebase.auth.GoogleAuthProvider.credential(
+                        result.credential.idToken
+                    );
+                    await firebase.auth().signInWithCredential(credential);
+                    console.log("✅ NATIVE: Firebase 로그인 성공!");
+
+                } catch (error) {
+                    console.error("❌ NATIVE: 로그인 실패:", error);
+                    alert("로그인에 실패했습니다: " + (error.message || "Unknown error"));
+                }
+            } else {
+                // --- 🌍 WEB (웹사이트) 로직 ---
+                console.log("✅ WEB: 웹 (Redirect) 로그인 시도.");
+                // (참고: signInWithPopup은 팝업 차단 때문에 앱/웹 모두에서 비추천)
+                // 원래 쓰시던 'signInWithRedirect'를 사용합니다.
+                await signInWithRedirect(auth, provider);
+                // (이 코드는 'Missing initial state' 오류를 냈지만, 
+                //  그건 '앱'에서 '웹' 코드를 실행했기 때문입니다.
+                //  '웹'에서 '웹' 코드를 실행하면 정상 작동해야 합니다.)
+            }
         });
     }
 
@@ -112,6 +133,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // --- 푸시 알림 권한 및 토큰 저장 함수 ---
 async function requestPermissionAndSaveToken(user) {
+    // (웹에서는 'unsupported-browser' 오류가 날 수 있지만, 앱에서는 무시됩니다)
     try {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
@@ -165,7 +187,7 @@ export function initDocSystem(user) {
     if (!listEl) { console.error("doc-list element not found."); return; }
     
     if (!user) {
-        resetToHome(); 
+        resetToHome();
         listEl.innerHTML = '';
         listEl.innerHTML += '<div class="doc-row" style="padding: 10px; color: var(--muted); text-align: center;">로그인 후 문서를 관리할 수 있습니다.</div>';
         return;
@@ -178,9 +200,9 @@ export function initDocSystem(user) {
     unsubscribeDocs = onSnapshot(docsQuery,
         (snapshot) => {
             const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-            renderDocsList(docs); 
+            renderDocsList(docs);
         },
-        (error) => { 
+        (error) => {
             console.error("Error fetching documents:", error);
             listEl.innerHTML = '<li>문서 로딩 오류.</li>';
         }
@@ -223,8 +245,8 @@ async function handleDocListClick(e) {
 async function handleFileChange(e) {
     const file = e.target.files[0];
     if (file) {
-        await createDocFromFile(file); 
-        e.target.value = null; 
+        await createDocFromFile(file);
+        e.target.value = null;
     }
 }
 
@@ -240,7 +262,7 @@ export async function createDocFromFile(file) {
         return;
     }
 
-    let docRef; 
+    let docRef;
     try {
         // 1. Firestore 문서 먼저 생성
         const userDocsPath = `artifacts/${appId}/users/${user.uid}/userDocs`;
@@ -257,7 +279,7 @@ export async function createDocFromFile(file) {
         await storageUploadBytes(storageRefInstance, file);
 
         // 3. Firestore 문서에 Storage 경로 업데이트
-        await updateDoc(docRef, { storagePath: storagePath }); 
+        await updateDoc(docRef, { storagePath: storagePath });
 
         // 4. 업로드 성공 후 문서 열기
         await openDoc(bookId);
@@ -284,7 +306,7 @@ function renderDocsList(docs) {
     listEl.innerHTML = '';
     
     const addButton = document.createElement('button');
-    addButton.className = 'doc-add'; 
+    addButton.className = 'doc-add';
     addButton.innerHTML = '➕ 새 문서 추가';
     listEl.appendChild(addButton);
 
@@ -329,7 +351,7 @@ export async function deleteDocFromDb(docId) {
         // 3. 관련된 Firestore 하이라이트 삭제
         const highlightsQuery = query(collection(db, "highlights"), where("bookId", "==", docId), where("userId", "==", user.uid));
         const snapshot = await getDocs(highlightsQuery);
-        const batch = writeBatch(db); 
+        const batch = writeBatch(db);
         snapshot.forEach(doc => {
             batch.delete(doc.ref);
         });
@@ -355,7 +377,7 @@ export async function openDoc(bookId) {
         unsubscribeHighlights();
         unsubscribeHighlights = null;
     }
-    currentBookId = bookId; 
+    currentBookId = bookId;
 
     document.querySelectorAll('.doc-row').forEach(el => el.classList.remove('active'));
     const activeRow = document.querySelector(`.doc-row[data-id="${bookId}"]`);
@@ -376,13 +398,13 @@ export async function openDoc(bookId) {
             const url = await getStorageDownloadURL(storageRefInstance);
             
             // --- PDF 다운로드 시 HTTP 응답 상태 확인 로직 ---
-            console.log(`PDF Download URL: ${url}`); 
+            console.log(`PDF Download URL: ${url}`);
 
             const response = await fetch(url);
             
             if (!response.ok) {
                 const errorMsg = `PDF Download Failed: HTTP status ${response.status} (${response.statusText}). URL: ${url}. Check Storage rules or file existence.`;
-                alert(errorMsg); 
+                alert(errorMsg);
                 throw new Error(errorMsg);
             }
 
@@ -390,7 +412,7 @@ export async function openDoc(bookId) {
             // --- 로직 끝 ---
             
             if (window.renderDocument) {
-                 window.renderDocument(arrayBuffer); 
+                window.renderDocument(arrayBuffer);
             } else {
                 console.error("window.renderDocument not found in mybook.js!");
             }
@@ -405,7 +427,7 @@ export async function openDoc(bookId) {
                         window.setHighlightsData(highlightsFromFirestore);
                     }
                 },
-                (error) => { 
+                (error) => {
                     console.error("Error fetching highlights:", error);
                     if (window.setHighlightsData) window.setHighlightsData([]);
                 }
@@ -429,13 +451,13 @@ function resetToHome() {
     }
     currentBookId = null;
 
-    if (window.clearViewer) { 
+    if (window.clearViewer) {
         window.clearViewer();
     } else {
-        clearViewer(); 
+        clearViewer();
     }
     showEmptyState();
-    if(window.setHighlightsData) window.setHighlightsData([]); 
+    if(window.setHighlightsData) window.setHighlightsData([]);
 }
 
 // --- 외부 노출 함수 ---
@@ -444,7 +466,7 @@ export function getCurrentUser() {
 }
 
 export function getCurrentBookId() {
-    return currentBookId;
+    return currentBookId;
 }
 
 
@@ -454,7 +476,7 @@ window.saveHighlightChange = async function(type, highlightData) {
 
     if (!user || !bookId || !highlightData || highlightData.id?.startsWith('local_')) {
         console.warn(`Firestore save/update aborted: Missing data or using local_ ID. Type: ${type}`);
-        return; 
+        return;
     }
 
     const highlightsCol = collection(db, "highlights");
@@ -464,25 +486,27 @@ window.saveHighlightChange = async function(type, highlightData) {
             const now = new Date();
             const nextReviewDate = new Date(now.getTime() + (24 * 60 * 60 * 1000));
             const docData = {
-                ...highlightData, 
+                ...highlightData,
                 userId: user.uid,
                 bookId: bookId,
                 createdAt: Timestamp.now(),
                 nextReviewDate: Timestamp.fromDate(nextReviewDate), // 1일 뒤
                 reviewLevel: 1 // 현재 1단계 (1일)
             };
-            delete docData.id; 
-            await addDoc(highlightsCol, docData);
+            delete docData.id;
+            const docRef = await addDoc(highlightsCol, docData);
+            console.log("Firestore: 새 하이라이트 추가 완료", docRef.id);
+            return docRef; // 👈 viewer-highlight-manager.js가 id를 받을 수 있도록 반환
             
         } else if (type === 'update') {
             const docRef = doc(db, "highlights", highlightData.id);
             const updateData = { ...highlightData };
 
             delete updateData.id;
-            delete updateData.userId; 
-            delete updateData.bookId; 
+            delete updateData.userId;
+            delete updateData.bookId;
             delete updateData.createdAt;
-            updateData.updatedAt = Timestamp.now(); 
+            updateData.updatedAt = Timestamp.now();
 
             await updateDoc(docRef, updateData);
 

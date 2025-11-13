@@ -1,3 +1,9 @@
+# Dependencies
+/node_modules
+
+# Build artifacts
+/android/build
+
 # Firebase
 .firebase
 firebase-debug.log

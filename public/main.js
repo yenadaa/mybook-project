@@ -7,14 +7,12 @@ import {
     getCurrentBookId
 } from './doc_firebase.js';
 import { httpsCallable, functions } from './A.firebase.js';
-import { initOcr } from './ocr.js';
 
 console.log("✅ main.js 스크립트 파일 로드됨");
 
 // DOM 로드 후 UI 이벤트 핸들러 연결
 document.addEventListener('DOMContentLoaded', () => {
     console.log("✅ main.js DOMContentLoaded 이벤트 발생");
-    initOcr();
 
     // --- HTML 요소 가져오기 ---
     const createQuizBtn = document.getElementById('create-quiz-btn');

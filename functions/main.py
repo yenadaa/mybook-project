@@ -23,11 +23,11 @@ import fitz  # PyMuPDF
 from quiz_generator import (
     PreprocessedDoc, 
     Chunk, 
-    generate_base_review,     # 👈 generateFullDocQuiz가 사용
-    generate_custom_review,   # 👈 [핵심] generateCustomReview가 사용할 함수
-    Output,                   # 👈 [핵심] 결과를 포장할 모델
-    SummaryOut,               # 👈 [핵심] 결과를 포장할 모델
-    ReviewOut                 # 👈 [핵심] 결과를 포장할 모델
+    generate_base_review,    
+    generate_custom_review, 
+    Output,                  
+    SummaryOut,            
+    ReviewOut              
 )
 import openai
 from google.cloud import vision
@@ -77,6 +77,27 @@ def _get_quiz_prompt(context: str) -> str:
     --- 학습 내용 ---
     {context}
     """
+def _get_next_review_date(new_review_level: int) -> datetime:
+    """새로운 reviewLevel에 따라 다음 복습 날짜를 계산합니다."""
+    now = datetime.now(timezone.utc)
+    
+    # new_review_level == 1 (첫 복습 완료) -> 1일 뒤
+    if new_review_level == 1:
+        return now + timedelta(days=1)
+    # new_review_level == 2 (1일차 복습 완료) -> 3일 뒤
+    elif new_review_level == 2:
+        return now + timedelta(days=3)
+    # new_review_level == 3 (3일차 복습 완료) -> 7일 뒤
+    elif new_review_level == 3:
+        return now + timedelta(days=7)
+    # new_review_level == 4 (7일차 복습 완료) -> 30일 뒤 (또는 완료)
+    elif new_review_level == 4:
+        return now + timedelta(days=30)
+    # 그 외 (레벨 5 이상)
+    else:
+        # 4단계 완료로 간주, 넉넉하게 90일 뒤
+        return now + timedelta(days=90)
+
 
 # ---------------------------------------------
 # 1. 하이라이트 기반 퀴즈 (즉시 실행)
@@ -417,16 +438,19 @@ def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
     # 1. 복습할 항목이 있는 사용자 ID 수집 (중복 제거)
     users_to_notify = set()
     
-    # 쿼리 1: 하이라이트 (doc_firebase.js에서 저장한 것)
+    '''# 쿼리 1: 하이라이트 (doc_firebase.js에서 저장한 것)
     highlights_query = db.collection('highlights').where('nextReviewDate', '<=', now)
     for doc in highlights_query.stream():
         users_to_notify.add(doc.to_dict().get('userId'))
-
-    # 쿼리 2: 틀린 퀴즈 (saveQuizItems에서 저장한 것)
-    wrong_quiz_query = db.collection('quizItems').where('nextReviewDate', '<=', now).where('reviewLevel', '>', 0)
+'''
+    # 쿼리 1: 틀린 퀴즈 (saveQuizItems에서 저장한 것)
+    wrong_quiz_query = (
+            db.collection('quizItems')
+            .where('nextReviewDate', '<=', now)
+            .where('reviewLevel', '<', 4) 
+        )
     for doc in wrong_quiz_query.stream():
         users_to_notify.add(doc.to_dict().get('userId'))
-
     if not users_to_notify:
         print("알림을 보낼 사용자가 없습니다.")
         return
@@ -487,44 +511,19 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
             return https_fn.Response("Bad Request", status=400)
 
         print(f"'{user_id}' 사용자의 복습 퀴즈 세션 생성을 시작합니다.")
-        now = datetime.now(timezone.utc) # 👈 datetime 오타 수정됨
-        
-        # 2. 복습할 하이라이트 찾기
-        highlights_query = db.collection('highlights').where('userId', '==', user_id).where('nextReviewDate', '<=', now)
-        due_highlights_docs = list(highlights_query.stream())
-        
+        now = datetime.now(timezone.utc) #
+
         # 3. 틀렸던 퀴즈 찾기 (복습 레벨 1~3, 즉 완료(4)가 아닌 것)
-        wrong_quiz_query = db.collection('quizItems').where('userId', '==', user_id).where('reviewLevel', '>', 0).where('reviewLevel', '<', 4)
+        wrong_quiz_query = db.collection('quizItems').where('userId', '==', user_id).where('reviewLevel', '<', 4).where('reviewLevel', '<', 4)
         wrong_items_docs = list(wrong_quiz_query.stream())
 
         # 4. 복습할 것이 없으면 종료
-        if not due_highlights_docs and not wrong_items_docs:
+        if not wrong_items_docs and not wrong_items_docs:
             print(f"'{user_id}' 사용자는 복습할 항목이 없습니다.")
             return https_fn.Response("No items to review", status=200)
 
-        # 5. 새 퀴즈 생성 (하이라이트 기반)
-        new_quiz_items = []
-        highlight_texts = [doc.to_dict().get('text', '') for doc in due_highlights_docs if doc.to_dict().get('text')]
-        
-        if highlight_texts:
-            context = "\n".join(highlight_texts)
-            prompt = _get_quiz_prompt(context) 
-            
-            response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
-            )
-            quiz_data = json.loads(response.choices[0].message.content).get('quiz', [])
-            
-            new_quiz_items = [{
-                'type': 'mcq',
-                'q': q.get('question'), 'answer': q.get('answer'), 'options': q.get('options', []),
-                'source': 'highlight', 'sourceRef': [doc.id for doc in due_highlights_docs]
-            } for q in quiz_data]
-
         # 6. 퀴즈 세트 합치기
-        final_quiz_items = [doc.to_dict() for doc in wrong_items_docs] + new_quiz_items
+        final_quiz_items = [doc.to_dict() for doc in wrong_items_docs] 
 
         # 7. Firestore 'reviewSessions'에 퀴즈 세트 저장
         session_ref = db.collection("reviewSessions").document()
@@ -536,12 +535,12 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
         new_session_id = session_ref.id
         print(f"'{user_id}' 사용자의 퀴즈 세션 '{new_session_id}' 저장 완료.")
 
-        # --- 👇 [수정] 8. 알림 보내기 (별도 try...except로 분리) ---
+        # --- 👇 [수정] 8. 알림 보내기---
         try:
             user_doc = db.collection('users').document(user_id).get()
             fcm_token = None
             
-            if user_doc.exists: # 👈 [핵심] 사용자가 'users' 문서가 있는지 확인
+            if user_doc.exists: # [핵심] 사용자가 'users' 문서가 있는지 확인
                 fcm_token = user_doc.to_dict().get('fcmToken')
             else:
                 print(f"'{user_id}' 사용자는 'users' 문서가 없습니다. (알림 권한을 허용한 적 없음)")
@@ -549,12 +548,13 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
             if fcm_token: # 👈 토큰이 있을 때만 전송
                 quiz_url = f"/quiz-page.html?session={new_session_id}"
                 message = messaging.Message(
-                    notification=messaging.Notification(
-                        title="MyBook 복습 시간입니다! 📚",
-                        body=f"오늘 복습할 {len(final_quiz_items)}개의 퀴즈가 준비되었어요."
-                    ),
-                    token=fcm_token,
-                    data={ "urlToOpen": quiz_url }
+                    data={ 
+                        "urlToOpen": quiz_url,
+                        # sw.js의 onBackgroundMessage가 사용할 제목/본문
+                        "title": "MyBook 복습 시간입니다! 📚", 
+                        "body": f"오늘 복습할 {len(final_quiz_items)}개의 퀴즈가 준비되었어요."
+                    },
+                    token=fcm_token
                 )
                 messaging.send(message)
                 print(f"'{user_id}' 사용자에게 알림 전송 완료.")
@@ -570,15 +570,18 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
         # 9. [중요] 복습한 항목들 날짜 업데이트 (망각곡선)
         batch = db.batch()
         next_review_time = datetime.now(timezone.utc) + timedelta(days=1)
-        
-        for doc in due_highlights_docs:
-            batch.update(doc.reference, {"nextReviewDate": next_review_time, "reviewLevel": firestore.Increment(1)})
-            
         for doc in wrong_items_docs:
-            batch.update(doc.reference, {"nextReviewDate": next_review_time, "reviewLevel": firestore.Increment(1)})
+                current_level = doc.to_dict().get("reviewLevel", 0)
+                new_level = current_level + 1
+                next_review_date = _get_next_review_date(new_level) # 👈 망각 곡선 적용
+                
+                batch.update(doc.reference, {
+                    "nextReviewDate": next_review_date, 
+                    "reviewLevel": firestore.Increment(1)
+                })
             
         batch.commit()
-        print(f"'{user_id}' 사용자의 복습 날짜 업데이트 완료.")
+        print(f"'{user_id}' 사용자의 복습 날짜 (망각 곡선) 업데이트 완료.")
 
         # 10. Cloud Tasks에 성공 응답
         return https_fn.Response("Session created", status=200)
@@ -599,6 +602,7 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
 # ---------------------------------------------
 # 7. [번호 수정] 테스트 알림 (수정됨)
 # ---------------------------------------------
+'''
 @https_fn.on_call(
     cors=options.CorsOptions(cors_origins=["https://mybook-d143d.web.app"]))
 def testSendNotification(req: https_fn.CallableRequest) -> https_fn.Response:
@@ -630,3 +634,4 @@ def testSendNotification(req: https_fn.CallableRequest) -> https_fn.Response:
     except Exception as e:
         print(f"테스트 알림 전송 실패: {e}")
         raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message="알림 전송 중 오류 발생")
+        '''
