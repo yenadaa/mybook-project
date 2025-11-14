@@ -99,9 +99,7 @@ def smart_chunk_text(
             final_chunks.append(chunks[i])
         i += 1
 
-    # 3. 토큰 한도 (약 4000자) 검사 및 추가 분할
-    # OpenAI의 토큰은 글자 수와 정확히 일치하지 않지만, 대략적인 가이드라인으로 사용
-    token_limit_chars = 4000
+    token_limit_chars = 6000
     if len(final_chunks[0]) > token_limit_chars:
         # 문장 단위로 추가 분할 시도 (예시)
         sentences = re.split(r'(?<=[.!?])\s+', final_chunks[0])
@@ -175,7 +173,7 @@ def _ask_gpt_json(prompt: str, model: str, temperature: float, max_tokens: int) 
             return {}  # 빈 딕셔너리를 반환하여 프로그램이 멈추지 않도록 함
     except Exception as e1:
         print(f"API 호출 중 오류 발생: {e1}")
-        return {} # API 호출 실패 시에도 빈 딕셔너리를 반환
+        return {"error": str(e1), "status": "api_fail"} # API 호출 실패 시에도 빈 딕셔너리를 반환
 
 def _normalize_ids(doc: PreprocessedDoc) -> List[str]:
     for i, ch in enumerate(doc.chunks):
@@ -220,18 +218,23 @@ def _fix_sources(candidate: List[str], valid_ids: List[str], fallback: List[str]
     out = [s for s in (candidate or []) if s in valid]
     return out or (fallback if fallback else (valid_ids[:1] if valid_ids else []))
 
+_SENTENCE_MODEL = None
+_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2'
+
 def generate_embeddings(texts: List[str]) -> np.ndarray:
+    global _SENTENCE_MODEL
     if SentenceTransformer is None:
         raise RuntimeError("sentence-transformers 라이브러리가 설치되지 않았습니다. (pip install sentence-transformers 필요)")
-    # [수정] 모델 로딩을 try-except로 감싸 안정성 강화
-    try:
-        model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-    except Exception as e:
-        raise RuntimeError(f"SentenceTransformer 모델 로딩 실패: {e}")
+    
+    if _SENTENCE_MODEL is None:
+        try:
+            print(f"[DEBUG] Loading SentenceTransformer model: {_MODEL_NAME}")
+            _SENTENCE_MODEL = SentenceTransformer(_MODEL_NAME)
+        except Exception as e:
+            raise RuntimeError(f"SentenceTransformer 모델 로딩 실패: {e}")
         
-    embeddings = model.encode(texts, convert_to_numpy=True)
+    embeddings = _SENTENCE_MODEL.encode(texts, convert_to_numpy=True)
     return embeddings
-
 
 # ----------------- 데이터 모델 -----------------
 class Chunk(BaseModel):
@@ -258,12 +261,35 @@ class Output(BaseModel):
     review: ReviewOut
     meta: Dict[str, Any]
 
+# Cell 178 (데이터 모델)에 추가
+class QuestionData(BaseModel):
+    q: str
+    concept_ids: List[str]
+    relation_label_free: str
+    relation_type_norm: List[str]
+    rubric: List[Dict[str, Any]]
+    facets: Dict[str, Any]
+
+class AnswerIn(BaseModel):
+    q_data: QuestionData
+    user_answer: str
+
+class ScoreBreakdown(BaseModel):
+    key: str
+    score_out_of_10: float
+    weight: float # (채점 결과에는 없지만, 채점 시 필요하므로 명시)
+
+class ScoreResult(BaseModel):
+    score_breakdown: List[ScoreBreakdown]
+    final_score: float
+    feedback_tip: str
+    llm_assessment: str
 
 # ----------------- 프롬프트 템플릿 -----------------
 def _prompt_summaries(text: str) -> str:
     return textwrap.dedent(f"""
     [과제]
-    아래 텍스트를 근거로 약 300자 이내의 요약을 만드세요.
+    아래 텍스트를 근거로 약 500자 이내의 요약을 만드세요.
     - 핵심만 1문단으로 작성하세요.
 
     [텍스트]
@@ -396,17 +422,19 @@ def _shingle_hash(s: str, k: int = 3) -> str:
     shingles = [" ".join(toks[i:i+k]) for i in range(max(1, len(toks)-k+1))]
     return hashlib.sha1(("||".join(shingles)).encode()).hexdigest()[:12]
 
+# 기존 함수 전체를 대체
 def _build_inventory_from_chunks(
     concepts_user: List[str],
     target_chunks: List[Chunk],
-    dedup: bool = True
+    dedup: bool = True,
+    window_size: int = 1, # [수정] 앞뒤로 몇 개의 문장을 가져올지 결정 (1이면 1+1+1=3 문장)
 ) -> Tuple[List[Dict[str,Any]], List[Dict[str,Any]]]:
     """
     반환:
-      concepts = [{"id":"u1","label":"...","aliases":[...]}...]
-      sentences = [{"sid":1,"chunkId":"c1","text":"...","concepts":["u1","u3"]}...]
+      concepts = [{\"id\":\"u1\",\"label\":\"...\",\"aliases\":[...]}...]\n
+      sentences = [{\"sid\":1,\"chunkId\":\"c1\",\"text\":\"...\",\"concepts\":[\"u1\",\"u3\"],\"is_context\":false}...]\n
     """
-    # concepts
+    # concepts: (변경 없음)
     concepts, seen = [], set()
     for i, raw in enumerate(concepts_user or []):
         lab = (raw or "").strip()
@@ -416,32 +444,72 @@ def _build_inventory_from_chunks(
         seen.add(key)
         concepts.append({"id": f"u{i+1}", "label": lab, "aliases": [lab, key]})
 
-    # sentences
-    sentences, seen_hash, sid = [], set(), 1
+    # sentences: (핵심 수정 영역)
+    sentences_inv, seen_hash, sid = [], set(), 1
+    
+    # 1. 청크별로 문장을 분리하고 개념 매핑
+    all_sentences = []
     for ch in (target_chunks or []):
-        chunk_id = ch.id or "c0"
-        text = ch.text or ""
-        for s in _sent_split(text):
-            h = _shingle_hash(s, 3)
-            if dedup and h in seen_hash:
-                continue
-            seen_hash.add(h)
-            # concept anchoring
+        raw_sents = _sent_split(ch.text)
+        for i, s_text in enumerate(raw_sents):
             hits = []
-            s_low = s.lower()
+            s_low = s_text.lower()
             for c in concepts:
                 for alias in c["aliases"]:
                     a = (alias or "").lower().strip()
                     if a and a in s_low:
                         hits.append(c["id"]); break
-            sentences.append({"sid": sid, "chunkId": chunk_id, "text": s, "concepts": sorted(set(hits))})
-            sid += 1
-    return concepts, sentences
+            all_sentences.append({
+                "chunkId": ch.id or "c0",
+                "idx": i, # 청크 내 문장 인덱스
+                "text": s_text,
+                "concepts": sorted(set(hits)),
+            })
+
+    # 2. 개념이 앵커링된 문장을 중심으로 윈도우 생성
+    for i, sent_data in enumerate(all_sentences):
+        # 앵커링된 개념이 있는 문장만 윈도우의 '중심'이 될 수 있음
+        if not sent_data["concepts"]:
+            continue 
+
+        # 윈도우 경계 설정
+        start_idx = max(0, i - window_size)
+        end_idx = min(len(all_sentences), i + window_size + 1) # i+1은 중심 문장 포함
+
+        # 3. 윈도우 텍스트 결합 및 중복 검사
+        window_texts = []
+        source_chunk_ids = set()
+        all_concepts_in_window = set()
+        
+        # 윈도우 내 문장들을 결합
+        for j in range(start_idx, end_idx):
+            current_sent = all_sentences[j]
+            window_texts.append(current_sent["text"])
+            source_chunk_ids.add(current_sent["chunkId"])
+            all_concepts_in_window.update(current_sent["concepts"])
+        
+        full_text = " ".join(window_texts)
+        h = _shingle_hash(full_text, 3)
+
+        if dedup and h in seen_hash:
+            continue
+        seen_hash.add(h)
+
+        # 4. 최종 인벤토리 항목 생성
+        sentences_inv.append({
+            "sid": sid,
+            "chunkId": list(source_chunk_ids), # 대표 청크 ID (실제로는 여러 청크에 걸칠 수 있으나 단순화)
+            "text": full_text,
+            "concepts": sorted(list(all_concepts_in_window)), # 개념은 중심 문장의 개념을 그대로 사용
+        })
+        sid += 1
+        
+    return concepts, sentences_inv
 
 def _topic_groups(concepts: List[Dict[str,Any]], sentences: List[Dict[str,Any]], K: int = 8, top_m:int = 5) -> List[Dict[str,Any]]:
     """
-    LDA -> 토픽 그룹. sklearn 없으면 co-occurrence 폴백.
-    반환: [{"tid":"t1","concept_ids":[...],"weights":[...],"top_sent_ids":[...]}...]
+    LDA -> 토픽 그룹. sklearn 없으면 co-occurrence 폴백(강화된 로직 적용).
+    반환: [{'tid':'t1','concept_ids':[...],'weights':[...],'top_sent_ids':[...]}...]
     """
     # 문장-개념 매트릭스
     cid2idx = {c["id"]:i for i,c in enumerate(concepts)}
@@ -450,7 +518,8 @@ def _topic_groups(concepts: List[Dict[str,Any]], sentences: List[Dict[str,Any]],
         row = [0]*len(concepts)
         for cid in s["concepts"]:
             if cid in cid2idx: row[cid2idx[cid]] += 1
-        if sum(row)==0: continue
+        # [수정] 개념이 하나도 없는 문장은 행렬에 포함하지 않음
+        if sum(row)==0: continue 
         X.append(row); sid_order.append(s["sid"])
 
     if not X:
@@ -459,8 +528,17 @@ def _topic_groups(concepts: List[Dict[str,Any]], sentences: List[Dict[str,Any]],
     try:
         from sklearn.decomposition import LatentDirichletAllocation
         import numpy as np
+        
+        # [수정] CountVectorizer 대신 횟수 배열을 직접 사용
         X_arr = np.array(X)
-        K_eff = max(2, min(K, min(len(X_arr), len(concepts))))
+        
+        # 유효한 K 계산: 행(문장 수)과 열(개념 수)보다 작거나 같게
+        K_eff = max(2, min(K, X_arr.shape[0], X_arr.shape[1]))
+        
+        # [수정] K_eff가 너무 작을 경우, LDA 대신 폴백을 바로 사용
+        if K_eff < 2:
+             raise ImportError("LDA components too small, falling back.")
+
         lda = LatentDirichletAllocation(n_components=K_eff, random_state=42, learning_method="batch")
         doc_topic = lda.fit_transform(X_arr)    # D x K
         topic_word = lda.components_            # K x V
@@ -469,36 +547,73 @@ def _topic_groups(concepts: List[Dict[str,Any]], sentences: List[Dict[str,Any]],
             word_w = topic_word[k]
             idx_sorted = list(reversed(sorted(range(len(word_w)), key=lambda i: word_w[i])))
             top_idx = idx_sorted[:top_m]
+            
             cids = [concepts[i]["id"] for i in top_idx]
             weights = [float(word_w[i]) for i in top_idx]
             sw = sum(weights) or 1.0
             weights = [w/sw for w in weights]
+            
             doc_scores = [doc_topic[d][k] for d in range(len(X_arr))]
             doc_sorted = list(reversed(sorted(range(len(doc_scores)), key=lambda d: doc_scores[d])))
             top_sids = [sid_order[d] for d in doc_sorted[:top_m]]
+            
+            # [수정] 토픽에 개념이 2개 미만이거나 상위 문장이 없는 경우 건너뜀
+            if len(cids) < 2 or not top_sids:
+                 continue
+
             groups.append({"tid": f"t{k+1}", "concept_ids": cids, "weights": weights, "top_sent_ids": top_sids})
+            
         return groups
+        
     except Exception:
-        # 폴백: co-occurrence 기반
+        # 폴백: co-occurrence 기반 (출현 횟수와 공출현 횟수 사용)
         co = collections.defaultdict(lambda: collections.Counter())
+        total_co = collections.Counter()
+        
+        # 공출현 및 총 출현 횟수 계산
         for s in sentences:
             for a,b in itertools.combinations(sorted(s["concepts"]), 2):
                 co[a][b]+=1; co[b][a]+=1
+            for c in s["concepts"]: total_co[c]+=1 
+                
         all_cids = set(cid2idx.keys()); used=set(); out=[]; k=1
-        while all_cids - used:
-            root = max(list(all_cids - used), key=lambda x: sum(co[x].values()))
+        
+        # 모든 개념이 그룹화될 때까지 반복
+        while all_cids - used and k <= K:
+            # [수정] 그룹의 중심(Root) 개념을 총 출현 횟수가 가장 높은 개념으로 선택
+            candidates = list(all_cids - used)
+            if not candidates: break
+            
+            root = max(candidates, key=lambda x: total_co[x])
+            
+            # [수정] 이웃 개념을 root와의 공출현 횟수 기준으로 선택
             nbrs = [cid for cid,_cnt in co[root].most_common(top_m-1)]
             cids = [root] + [c for c in nbrs if c not in used][:top_m-1]
+            
+            # 개념이 2개 미만이면 그룹 생성 X
+            if len(cids) < 2:
+                used.add(root)
+                continue
+                
             w = [1.0] + [0.9**i for i in range(len(cids)-1)]
             sw=sum(w); w=[x/sw for x in w]
-            # top sentences: 공출현 높은 것
+            
+            # top sentences: 그룹 개념들을 가장 많이 포함한 문장
             sscores=[]
             for s in sentences:
                 sscores.append((s["sid"], sum(1 for cid in set(cids) if cid in s["concepts"])))
             s_sorted = sorted(sscores, key=lambda x: x[1], reverse=True)
             top_sids = [sid for sid,score in s_sorted[:top_m] if score>0]
+            
+            # [수정] 상위 문장이 없는 경우 건너뜀
+            if not top_sids:
+                used.update(cids)
+                continue
+            
             out.append({"tid":f"t{k}", "concept_ids":cids, "weights":w, "top_sent_ids":top_sids})
+            
             used.update(cids); k+=1
+            
         return out
 
 def _prompt_hyperedges_from_topic(topic: Dict[str,Any], concepts: List[Dict[str,Any]], sent_map: Dict[int, Dict[str,Any]]) -> str:
@@ -580,6 +695,7 @@ def _build_hyperedges_for_topics(topics, concepts, sentences, model="gpt-4o-mini
         merged.append(arr[0])
     return sorted(merged, key=lambda x: x["score"], reverse=True)[:30]
 
+# changes.ipynb (Cell 182) - _prompt_questions_from_hyperedges 함수 전체 대체
 def _prompt_questions_from_hyperedges(hes: List[Dict[str,Any]], concepts: List[Dict[str,Any]]) -> str:
     concept_by_id = {c["id"]: c for c in concepts}
     input_json = []
@@ -597,39 +713,51 @@ def _prompt_questions_from_hyperedges(hes: List[Dict[str,Any]], concepts: List[D
 
 [지침]
 - 문제에는 '정의/조건/과정' 같은 서술 지시를 넣지 마세요.
+- **입력된 Facets(scope, mechanism, conditions 등) 정보**를 바탕으로 문제의 구체성을 높이세요.
 - 개념 묶음이 자연스럽게 상위 주제/핵심 개념을 설명하도록 물어보세요.
 - 외부지식 금지. 입력의 개념/문장 근거만 사용.
 - 각 문항에는 모범답안을 제외하고, 간단 루브릭(3~5개, 가중치 합 1.0)만 포함.
+- **[핵심 지침]** 루브릭의 가중치는 **기본 개념 이해(정의, 단순 관계)는 낮게(0.1~0.3)**, **Facets 관련 심층적 관계(기전/조건/예외 등)는 높게(0.4 이상)** 부여하세요.
 
 [출력(JSON)]
-{"questions":[
-  {
-    "q": "불교에서 말하는 무아와 무상을 바탕으로 연기를 설명하시오.",
-    "hid": "h3",
-    "concept_ids": ["u1","u2","u5"],
-    "relation_label_free": "...",
-    "relation_type_norm": ["전제/조건","정의/동일시"],
-    "source_sent_ids": [12,13],
-    "rubric": [
-      {"key":"핵심개념 이해","weight":0.3},
-      {"key":"관계 설명","weight":0.4},
-      {"key":"근거 인용","weight":0.3}
-    ],
-    "facets": { "scope":"...", "mechanism":"...", "conditions":["..."], "exceptions":["..."], "purpose":"...", "granularity":"..." }
-  }
+{\"questions\":[\n
+  {\n
+    \"q\": \"불교에서 말하는 무아와 무상을 바탕으로 연기를 설명하시오.\",\n
+    \"hid\": \"h3\",\n
+    \"concept_ids\": [\"u1\",\"u2\",\"u5\"],\n
+    \"relation_label_free\": \"...\",\n
+    \"relation_type_norm\": [\"전제/조건\",\"정의/동일시\"],\n
+    \"source_sent_ids\": [12,13],\n
+    \"rubric\": [\n
+      {\"key\":\"핵심개념 이해(무아/무상 정의)\",\"weight\":0.2},\n
+      {\"key\":\"연기의 조건적 발생 원리 설명\",\"weight\":0.5},\n
+      {\"key\":\"근거 인용\",\"weight\":0.3}\n
+    ],\n
+    \"facets\": { \"scope\":\"...\", \"mechanism\":\"...\", \"conditions\":[\"...\"], \"exceptions\":[\"...\"], \"purpose\":\"...\", \"granularity\":\"...\" }\n
+  }\n
 ]}
 [입력(JSON)]
-""".strip() + "\n" + json.dumps({"hyperedges": input_json}, ensure_ascii=False))
-
+"""
+    .strip() + "\n" + json.dumps({"hyperedges": input_json}, ensure_ascii=False))
+    
+# Cell 182의 _generate_relation_questions 함수 전체
 def _generate_relation_questions(hyperedges: List[Dict[str,Any]], concepts: List[Dict[str,Any]], desired_n:int, model="gpt-4o-mini") -> List[Dict[str,Any]]:
     if not hyperedges: return []
-    subset = hyperedges[: min(len(hyperedges), max(6, desired_n*3))]
+    
+    # [수정] 하이퍼엣지를 score 순으로 정렬하고 상위 N개를 선택
+    subset = sorted(hyperedges, key=lambda x: x.get('score', 0), reverse=True)[: min(len(hyperedges), max(6, desired_n*3))]
+    
     raw = ASK_JSON(_prompt_questions_from_hyperedges(subset, concepts), model=model, temperature=0.3, max_tokens=1400)
     qs = raw.get("questions", []) or []
+    
+    # 하이퍼엣지 ID와 score 매핑 생성
+    he_map = {h['hid']: h for h in subset}
+    
     def _renorm(weights):
         s = sum(w.get("weight",0.0) for w in weights) or 1.0
         for w in weights: w["weight"] = float(w.get("weight",0.0))/s
         return weights
+        
     out=[]
     for q in qs:
         if not q.get("q"): continue
@@ -637,15 +765,25 @@ def _generate_relation_questions(hyperedges: List[Dict[str,Any]], concepts: List
         if len(cids)<2: continue
         src = q.get("source_sent_ids") or []
         if not src: continue
+        
+        # [추가] 해당 질문을 생성한 하이퍼엣지의 score를 질문 객체에 할당
+        hid = q.get('hid')
+        he_score = he_map.get(hid, {}).get('score', 0.0)
+        
         out.append({
             "type":"discussion",
             "q": q["q"].strip(),
             "concept_ids": cids,
             "relation_label_free": (q.get("relation_label_free") or "").strip(),
             "relation_type_norm": q.get("relation_type_norm") or [],
-            "rubric": _renorm(q.get("rubric") or [{"key":"핵심개념 이해","weight":0.34},{"key":"관계 설명","weight":0.33},{"key":"근거 인용","weight":0.33}]),
+            "rubric": _renorm(q.get("rubric") or [
+                {"key":"핵심개념 이해","weight":0.34},
+                {"key":"관계 설명","weight":0.33},
+                {"key":"근거 인용","weight":0.33}
+            ]),
             "facets": q.get("facets") or {},
-            "source_sent_ids": src
+            "source_sent_ids": src,
+            "score": he_score # [핵심 수정: score 할당]
         })
     return out[:desired_n]
 
@@ -655,7 +793,10 @@ def _assemble_relation_payload(book_id: str, discussion_items: List[Dict[str,Any
         src_pairs=[]
         for sid in it.get("source_sent_ids", [])[:3]:
             s = sid2s.get(int(sid))
-            if s: src_pairs.append({"chunkId": s["chunkId"], "sentId": s["sid"]})
+            if s: 
+                # [수정] s['chunkId']는 이미 리스트이므로 첫 번째 요소를 선택
+                primary_chunk_id = s.get("chunkId", ["c0"])[0] 
+                src_pairs.append({"chunkId": primary_chunk_id, "sentId": s["sid"]}) 
         it["sources"] = src_pairs
         it["tags"] = ["highlight-based","relation"]
         it.pop("source_sent_ids", None)
@@ -738,7 +879,7 @@ def generate_relation_discussion_from_chunks(
     max_limit = desired_discussion_n if desired_discussion_n > 0 else 10
     
     # 생성된 모든 문제를 score 기준으로 정렬
-    final_discussions = sorted(all_discussion_items, key=lambda x: x.get('score', 1.0), reverse=True)
+    final_discussions = sorted(all_discussion_items, key=lambda x: x.get('score', 0.0), reverse=True)
     final_discussions = final_discussions[:max_limit]
 
 
@@ -818,6 +959,54 @@ def _extract_user_concepts_from_chunks(chunks: List[Chunk], top_k:int=10, min_le
     cands = [w for w,_ in counter.most_common(top_k)]
     return cands
 
+def _prompt_score_discussion(q_data: Dict[str, Any], user_answer: str) -> str:
+    """사용자 답안 채점을 위한 프롬프트 템플릿"""
+    
+    # [수정] 루브릭 출력 시 가중치를 제거합니다.
+    rubric_str = '\n'.join([
+        f"- {r.get('key', 'Unknown')}" 
+        for r in q_data.get('rubric', [])
+    ])
+    
+    # [수정] 프롬프트 내 가중치 관련 지침 제거
+    return textwrap.dedent(f"""
+    [역할] 서술형 답안의 '루브릭 기반 채점' 및 '피드백' 생성기.
+    
+    [채점 지침]
+    1. **절대 모범답안을 노출하지 마세요.**
+    2. 사용자 답안을 분석하여 **각 루브릭 항목(key)**에 대해 10점 만점으로 점수(score_out_of_10)를 매기세요.
+    3. 각 항목 점수를 바탕으로 답안의 전체적인 **수준을 한 문장으로 평가(llm_assessment)**하세요.
+    4. 루브릭을 유출하지 않으면서도, 사용자가 **다음에 어떤 내용을 추가/보완**해야 할지 힌트를 주는 **'한 줄 팁(feedback_tip)'**을 생성하세요. 팁은 '구조도에서 부과되지 않은 내용'을 찾을 수 있는 방향으로 작성해야 합니다.
+    
+    [문제 정보]
+    - 질문: {q_data.get('q')}
+    - 필수 포함 개념: {', '.join([f"u{cid}" for cid in q_data.get('concept_ids', [])])}
+    - 관계 유형: {', '.join(q_data.get('relation_type_norm', []))}
+    - 루브릭 항목 (10점 만점으로 평가하세요):
+    {rubric_str}
+
+    [사용자 답안]
+    {user_answer}
+
+    [출력(JSON)]
+    {{
+      "score_breakdown": [
+        {{
+          "key": "루브릭 항목 1의 key",
+          "score_out_of_10": 7.5
+        }},
+        {{
+          "key": "루브릭 항목 2의 key",
+          "score_out_of_10": 9.0
+        }}
+        // ... 모든 루브릭 항목 포함
+      ],
+      "llm_assessment": "답안은 핵심 개념을 정확히 이해하고 있으나, 관계를 설명하는 논리가 다소 부족합니다.",
+      "feedback_tip": "제시된 개념들이 어떠한 '기전'을 통해 상호작용하는지에 대한 내용을 보충해보세요." 
+      // 피드백 팁은 루브릭 외부의 내용(구조도에서 추출된 Facets 등)을 힌트 주는 용도.
+    }}
+    """).strip()
+
 # ----------------- 실행 함수: 기본 모듈과 맞춤형 모듈 -----------------
 def generate_summaries(
     doc: PreprocessedDoc,
@@ -837,6 +1026,8 @@ def generate_summaries(
     data["sources"] = _fix_sources(data.get("sources", []), all_ids, used_ids) 
     return SummaryOut(**data)
 
+# Cell 45의 generate_base_review 함수를 다음으로 대체:
+
 def generate_base_review(
     doc: PreprocessedDoc,
     model: str = "gpt-4.1-mini", 
@@ -844,12 +1035,25 @@ def generate_base_review(
 ) -> Output:
     _normalize_ids(doc)
 
-    # 1. 문서 전체 범위를 설정 (키워드 추출용)
+    # 1. 문서 전체 범위를 설정 (키워드 추출 및 전체 요약용)
     try:
-        full_text, all_ids = _select_scope(doc, section_contains=None, chunk_ids=None, auto_chars=4000*3)
+        # 전체 문서를 대상으로 텍스트와 ID를 가져옵니다. (auto_chars=4000*3으로 최대 12000자까지 처리)
+        full_text, all_ids = _select_scope(doc, section_contains=None, chunk_ids=None, auto_chars=4000*3) 
     except ValueError:
-        return Output(summaries=SummaryOut(summary="", sources=[]),
+        return Output(summaries=SummaryOut(summary="범위 내 텍스트 없음", sources=[]),
                       review=ReviewOut(ox=[], short=[], discussion=[]), meta={"model": model, "doc_id": doc.doc_id})
+
+
+    # === ⭐️ [수정된 로직] 전체 요약 단 1회 생성 ===
+    # 500자 요약 요청은 _prompt_summaries 함수에서 처리
+    final_summary_out = generate_summaries(
+        doc, 
+        section=None, 
+        chunk_ids=all_ids, # 전체 청크 ID를 전달하여 전체를 대상으로 요약
+        model=model
+    )
+    # ==========================================
+
 
     # 2. 키워드 추출 (전체 문서 기반으로 한 번)
     try:
@@ -862,9 +1066,8 @@ def generate_base_review(
         print(f"키워드 추출 실패: {e}. 기본 키워드를 사용합니다.")
         keywords = ["핵심 개념", "정의", "관계", "예시", "의의"]
 
-    # 3. 청크별 요약 및 퀴즈 생성 (Loop)
+    # 3. 청크별 퀴즈 생성 (Loop) - 요약은 제외하고 퀴즈만 생성
     review_output = ReviewOut(ox=[], short=[], discussion=[])
-    summary_parts = []
     
     # 기본 퀴즈 개수 (청크별로 적게 생성)
     counts = {"ox": 2, "short": 2, "discussion": 1} 
@@ -875,13 +1078,7 @@ def generate_base_review(
         if not chunk_text.strip(): 
             continue
         
-        # 3a. 청크별 요약 생성
-        # chunk_ids=[chunk_id]로 범위를 좁혀 해당 청크만 요약
-        summary_out_part = generate_summaries(doc, chunk_ids=[chunk_id], model=model)
-        
-        # 청크 경로/ID를 헤더로 붙여 요약 내용 수집
-        header = f"[{' › '.join(chunk.section_path or [chunk_id])}]\n"
-        summary_parts.append(header + summary_out_part.summary)
+        # 3a. 청크별 요약 생성 로직은 제거됨 (전체 요약으로 대체됨)
 
         # 3b. 청크별 퀴즈 생성
         try:
@@ -893,6 +1090,7 @@ def generate_base_review(
 
             # 결과 병합 및 sources 필드 정리 (청크 ID만 사용)
             def _fix_item_chunk(item: Dict[str, Any]) -> Dict[str, Any]:
+                # 퀴즈의 출처는 해당 청크 ID로 설정 (GPT가 반환한 sources 대신)
                 item["sources"] = _fix_sources(item.get("sources", []), all_ids, [chunk_id])
                 return item
                 
@@ -901,15 +1099,93 @@ def generate_base_review(
             review_output.discussion.extend([_fix_item_chunk(it) for it in (rv.get("discussion") or [])])
 
         except Exception as e:
-            # print(f"Warning: Quiz generation failed for chunk {chunk_id}: {e}") # 디버깅 필요 시 주석 해제
+            # print(f"Warning: Quiz generation failed for chunk {chunk_id}: {e}")
             continue
 
     # 4. 최종 Output 객체 생성
-    final_summary_out = SummaryOut(
-        summary="\n\n".join(summary_parts), # 청크별 요약을 개행으로 구분하여 하나의 문자열로 합침
-        sources=all_ids
-    )
+    # final_summary_out은 이제 전체 문서를 대상으로 생성된 요약 결과를 담고 있습니다.
     return Output(summaries=final_summary_out, review=review_output, meta={"model": model, "doc_id": doc.doc_id})
+
+# === [추가] 서술형 답안 채점 및 피드백 함수 ===
+
+# Cell 45의 score_discussion_answer 함수 최종 버전 (백엔드 적용 권장)
+
+def score_discussion_answer(
+    answer_data: AnswerIn,
+    model: str = "gpt-4o-mini"
+) -> ScoreResult:
+    """
+    사용자 답안을 문제의 루브릭과 가중치에 기반하여 채점하고 피드백 팁을 생성합니다.
+    (API 엔드포인트에 직접 연결될 핵심 함수)
+    """
+    q_data = answer_data.q_data
+    user_answer = answer_data.user_answer
+
+    # 1. Pydantic QuestionData 객체를 딕셔너리로 변환
+    # 이 변환은 .get() 접근과 _prompt_score_discussion 함수 호환성을 위해 필수입니다.
+    q_data_dict = q_data.model_dump() # Pydantic v1/v2 호환성 위해 dict() 사용 (v2는 model_dump() 권장)
+
+    # 2. 프롬프트 생성
+    prompt = _prompt_score_discussion(q_data_dict, user_answer) 
+    
+    # 3. LLM 호출 및 JSON 응답 파싱
+    try:
+        raw_data = _ask_gpt_json(
+            prompt, 
+            model=model, 
+            temperature=0.1, 
+            max_tokens=1000 
+        )
+    except Exception as e:
+        # 백엔드에서는 API 오류를 명확히 로깅해야 합니다.
+        print(f"[ERROR] 채점 API 호출 중 오류 발생: {e}")
+        # API 오류 시, 클라이언트에게 오류 메시지를 포함한 ScoreResult 반환
+        return ScoreResult(
+            score_breakdown=[], final_score=0.0, 
+            feedback_tip="채점 서비스 오류. 서버 로그를 확인하세요.", 
+            llm_assessment="API_FAIL"
+        )
+        
+    # 4. LLM의 계산 결과를 검증하고 최종 ScoreResult 객체로 반환
+    rubric_map = {r['key']: r['weight'] for r in q_data_dict.get('rubric', [])}
+    
+    if not raw_data.get("score_breakdown"):
+        return ScoreResult(score_breakdown=[], final_score=0.0, feedback_tip="LLM이 유효한 JSON을 반환하지 않았습니다.", llm_assessment="INVALID_RESPONSE")
+
+    # 5. 최종 점수 수동 계산 (가중치 적용)
+    total_score = 0.0
+    score_breakdown_out = []
+    
+    # 루브릭에 없는 항목은 무시하고, 루브릭에 있는 항목만 처리합니다.
+    for rubric_key, weight in rubric_map.items():
+        # LLM 응답에서 해당 key를 찾거나, 없으면 0점을 부여
+        item = next((i for i in raw_data["score_breakdown"] if i.get('key') == rubric_key), None)
+        
+        if item:
+            score_out_of_10 = item.get("score_out_of_10", 0.0)
+        else:
+            # LLM이 특정 루브릭 항목을 누락한 경우 (안전 장치)
+            score_out_of_10 = 0.0 
+
+        # 가중치 계산: (점수 / 10) * 가중치
+        weighted_score = (score_out_of_10 / 10.0) * weight
+        total_score += weighted_score
+        
+        score_breakdown_out.append({
+            'key': rubric_key,
+            'score_out_of_10': float(score_out_of_10),
+            'weight': float(weight)
+        })
+
+    # 최종 점수 (100점 만점 환산)
+    final_score = round(total_score * 100, 1)
+
+    return ScoreResult(
+        score_breakdown=score_breakdown_out,
+        final_score=final_score,
+        feedback_tip=raw_data.get("feedback_tip", "제공된 팁이 없습니다."),
+        llm_assessment=raw_data.get("llm_assessment", "N/A")
+    )
 
 def generate_custom_review(
     doc: PreprocessedDoc,
@@ -978,63 +1254,68 @@ def generate_custom_review(
     # 5) 서술형: 관계형으로 교체 생성
     # Cell 59의 generate_custom_review 함수 내부 (5) 서술형: 관계형으로 교체 생성 try: 블록 직후)
 
+   # Cell 12의 generate_custom_review 함수 내부 (5) 서술형: 관계형으로 교체 생성 try: 블록 전체를 다음으로 대체:
+
     # 5) 서술형: 관계형으로 교체 생성
     try:
-        user_concepts = list(keywords) if keywords else _extract_user_concepts_from_chunks(target_chunks)
+        # ⭐️⭐️⭐️ [핵심 수정: OX/Short을 요청했을 때는 서술형 생성을 건너뜀] ⭐️⭐️⭐️
         
-        # [수정] desired_n을 0으로 설정하면, generate_relation_discussion_from_chunks 내부에서 동적 계산을 따름
-        # 사용자가 명시적으로 0보다 큰 값을 주면 그 값을 상한선으로 사용
-        desired_n = int(counts_base.get("discussion", 0)) # 기본값을 0으로 설정
+        # desired_n은 서술형 문제의 상한선이 됩니다.
+        desired_n = int(counts_base.get("discussion", 0))
+
+        # OX 또는 Short 문제를 1개라도 요청했다면, 서술형 로직은 스킵합니다.
+        # 이렇게 하면 Cell A, B는 스킵되고, Cell C (ox=0, short=0)는 스킵되지 않습니다.
+        if (counts_base.get("ox", 0) > 0 or counts_base.get("short", 0) > 0) and desired_n == 0:
+            print(f"[DEBUG] Skipping relation generation because OX/Short were requested ({counts_base.get('ox', 0)}, {counts_base.get('short', 0)}) and discussion count is 0.")
+            pass
         
-        # 5-1) 1차: 관계형 생성기 (GPT 기반)
-        rel_payload = generate_relation_discussion_from_chunks(
-            book_id=doc.doc_id or "doc",
-            user_concepts=user_concepts,
-            target_chunks=target_chunks,
-            desired_discussion_n=desired_n, # 수정된 desired_n 사용
-            lda_K=8
-        )
-        # ... (나머지 로직은 그대로 유지)
-
-        # 5-1) 1차: 관계형 생성기 (GPT 기반)
-        rel_payload = generate_relation_discussion_from_chunks(
-            book_id=doc.doc_id or "doc",
-            user_concepts=user_concepts,
-            target_chunks=target_chunks,
-            desired_discussion_n=desired_n,
-            lda_K=8
-        )
-        status = rel_payload.get("status")
-        ok = status == "ok" and rel_payload.get("review", {}).get("discussion")
-
-        # [디버깅] 메인 관계형 생성 실패 상태 출력
-        if not ok:
-            print(f"[DEBUG] Main relation generation failed with status: {status}. Attempting local fallback.")
-
-        # 5-2) 실패/빈 결과면 폴백(로컬) 사용
-        if not ok:
-            rel_payload = _fallback_relation_discussion_from_chunks(
+        # ⭐️ Cell C처럼 discussion=0이고 ox=0, short=0인 경우,
+        # ⭐️ desired_n이 0이지만 로직을 실행하여 내부 동적 계산을 시도합니다.
+        else:
+            user_concepts = list(keywords) if keywords else _extract_user_concepts_from_chunks(target_chunks)
+            
+            # 5-1) 1차: 관계형 생성기 (GPT 기반)
+            rel_payload = generate_relation_discussion_from_chunks(
                 book_id=doc.doc_id or "doc",
                 user_concepts=user_concepts,
                 target_chunks=target_chunks,
-                desired_discussion_n=desired_n
+                desired_discussion_n=desired_n, # 0을 포함한 상한선 값 사용
+                lda_K=8
             )
-            ok = rel_payload.get("status") == "ok" and rel_payload.get("review", {}).get("discussion")
+            status = rel_payload.get("status")
+            ok = status == "ok" and rel_payload.get("review", {}).get("discussion")
 
-        if ok:
-            final_review_output.discussion = rel_payload["review"]["discussion"]
-        else:
-            print("[DEBUG] Local fallback also failed to generate discussion questions.")
+            # [디버깅] 메인 관계형 생성 실패 상태 출력
+            if not ok:
+                print(f"[DEBUG] Main relation generation failed with status: {status}. Attempting local fallback.")
+
+            # 5-2) 실패/빈 결과면 폴백(로컬) 사용
+            if not ok:
+                rel_payload = _fallback_relation_discussion_from_chunks(
+                    book_id=doc.doc_id or "doc",
+                    user_concepts=user_concepts,
+                    target_chunks=target_chunks,
+                    desired_discussion_n=desired_n # 0을 포함한 상한선 값 사용
+                )
+                ok = rel_payload.get("status") == "ok" and rel_payload.get("review", {}).get("discussion")
+
+            if ok:
+                # 0을 상한선으로 받았더라도, 동적 계산으로 문제가 생성됐다면 최종적으로 0개 이하로 잘립니다.
+                final_review_output.discussion = rel_payload["review"]["discussion"]
+            else:
+                print("[DEBUG] Local fallback also failed to generate discussion questions.")
 
     except Exception as e:
         print(f"[ERROR] 관계형 서술형 생성 중 치명적 오류 발생: {e}")
         # 최종 폴백: 완전 에러 시에도 최소 1문항 보장
         try:
+            # 이 최종 폴백은 desired_discussion_n에 관계없이 최소 1개를 보장해야 하므로 desired_n을 다시 max(1, ...)로 설정
+            fallback_n = max(1, int(counts_base.get("discussion", 1)))
             rel_payload = _fallback_relation_discussion_from_chunks(
                 book_id=doc.doc_id or "doc",
                 user_concepts=[],
                 target_chunks=target_chunks,
-                desired_discussion_n=max(1, int(counts_base.get("discussion", 1)))
+                desired_discussion_n=fallback_n
             )
             if rel_payload.get("status") == "ok":
                 final_review_output.discussion = rel_payload["review"]["discussion"]
@@ -1050,7 +1331,7 @@ PDF_PATH = "F:\\Joseph\\4-2\\윤리학\\알기_쉬운_윤리학_1장.pdf"
 pre_json = pdf_to_preprocessed_doc(PDF_PATH, doc_id="demo_pdf")
 doc = PreprocessedDoc(**pre_json)
 
-print("### 기본 모듈 실행 (300자 요약 및 핵심 퀴즈) ###") # [레이블 수정]
+print("### 기본 모듈 실행 (500자 요약 및 핵심 퀴즈) ###") # [레이블 수정]
 base_output = generate_base_review(doc, seed=42)
 print("---")
 print("**생성된 요약:**") # [레이블 수정]
@@ -1066,9 +1347,7 @@ for i, item in enumerate(base_output.review.short, 1):
     print(f"{i}. [단답] 질문: {item['q']}")
     print(f"   정답: {item['answer']}")
 
-# Cell A: 문서 로딩 및 OX 문제 생성(하이라이트 리뷰)
-
-# [주의: 이 셀은 PDF 로딩 및 전처리 셀 (Cell 61 등)이 실행된 후에 실행되어야 합니다.]
+# Cell A: 문서 로딩 및 OX 문제 생성
 
 try:
     # 1. 문서 내 모든 청크 ID를 추출합니다.
@@ -1080,7 +1359,7 @@ try:
     ox_output = generate_custom_review(
         doc, 
         chunk_ids=all_chunk_ids,
-        counts_override={"ox": 5, "short": 0, "discussion": 0}
+        counts_override={"ox": 3, "short": 0, "discussion": 0}
     )
     print("---")
     
@@ -1104,7 +1383,7 @@ try:
     short_output = generate_custom_review(
         doc, 
         chunk_ids=all_chunk_ids,
-        counts_override={"ox": 0, "short": 5, "discussion": 0}
+        counts_override={"ox": 0, "short": 3, "discussion": 0}
     )
     print("---")
     
@@ -1147,3 +1426,84 @@ try:
         
 except NameError:
     print("⚠️ 오류: 'doc' 객체가 정의되지 않았습니다. PDF 로딩 및 전처리 셀을 먼저 실행해야 합니다.")
+
+# Cell D: 서술형 채점 기능 테스트
+
+#[문제 예시] "무위와 부모의 책임, 그리고 통제 가능성이라는 개념을 바탕으로 윤리적 책임의 범위를 논하시오."
+test_q_data: Dict[str, Any] = {
+    "q": "윤리학에서 '도덕적 당위'와 '수단적 당위'의 관계를 설명하고, '보편성' 측면에서 도덕적 당위가 갖는 특징을 논하시오.",
+    "concept_ids": ["u1", "u2", "u3"], # 가상 개념 ID
+    "relation_label_free": "도덕적 당위와 수단적 당위의 구별 및 도덕적 당위의 보편성 특징",
+    "relation_type_norm": ["비교/대조", "정의/동일시"],
+    "facets": {"scope": "당위의 유형", "conditions": ["보편성", "목적의존성"]},
+    "rubric": [
+        {"key": "도덕적 당위의 개념 및 정의", "weight": 0.3},
+        {"key": "도덕적 당위와 수단적 당위의 구별 (목적 유무)", "weight": 0.3},
+        {"key": "도덕적 당위의 '보편성' 특징 설명", "weight": 0.4} # 심화 관계이므로 가중치를 높게 설정 (총합 1.0)
+    ]
+}
+
+# --- 2. 테스트용 가상 사용자 답안 ---
+# A: 정답을 잘 맞춘 모범 답안에 가까운 답안
+test_answer_a = """
+도덕적 당위는 인간이 마땅히 지켜야 할 도리를 의미하며, 어떤 목적을 전제하지 않고 그 자체로 보편적으로 적용됩니다. 
+반면, 수단적 당위는 '특정 목적을 달성하기 위한 수단으로서의 당위'를 뜻하므로, 목적이 없는 사람에게는 의미가 없습니다. 
+도덕적 당위의 핵심 특징은 시간과 공간, 특정 상황을 초월하여 모든 사람에게 예외 없이 적용되는 '보편성'을 가진다는 점입니다. 
+따라서 윤리학은 보편적인 도덕적 당위를 주된 관심사로 다룹니다.
+"""
+
+# B: 일부만 맞추거나 누락된 답안
+test_answer_b = """
+도덕적 당위는 도리를 의미합니다. 수단적 당위는 목적을 위한 수단입니다. 
+윤리적으로 중요한 것은 도덕적 당위이며, 모두에게 적용되지만 가끔 예외가 있을 수도 있습니다.
+"""
+
+# --- 3. 채점 실행 및 결과 출력 ---
+def run_scoring_test(q_data: Dict[str, Any], user_answer: str, answer_label: str):
+    """채점 함수를 호출하고 결과를 보기 좋게 출력하는 헬퍼 함수"""
+    print(f"============================================================")
+    print(f"🚀 테스트 케이스: {answer_label}")
+    print(f"------------------------------------------------------------")
+    print(f"Q: {q_data['q']}")
+    print(f"A: {textwrap.shorten(user_answer, width=70, placeholder='...')}")
+    print("-" * 60)
+    
+    # AnswerIn 모델 생성
+    answer_in = AnswerIn(
+        q_data=QuestionData(**q_data),
+        user_answer=user_answer
+    )
+    
+    # 채점 함수 호출
+    try:
+        score_result = score_discussion_answer(answer_in, model="gpt-4o-mini")
+
+        print(f"✅ 최종 점수: {score_result.final_score:.1f}점 / 100점")
+        print(f"평가 (LLM Assessment): {score_result.llm_assessment}")
+        print(f"피드백 팁 (Feedback Tip): {score_result.feedback_tip}")
+        print("-" * 60)
+        print("🔍 루브릭별 상세 채점 (10점 만점 기준):")
+        
+        # ⭐️⭐️⭐️ [핵심 수정 부분: item.key와 같은 점 표기법 사용] ⭐️⭐️⭐️
+        for item in score_result.score_breakdown:
+            print(f"  - {item.key:<40} | 점수: {item.score_out_of_10:.1f}/10.0 | 가중치: {item.weight:.2f}")
+            # 👆 item['key'] 대신 item.key를 사용
+            # 👆 item['score_out_of_10'] 대신 item.score_out_of_10을 사용
+            # 👆 item['weight'] 대신 item.weight를 사용
+        # ⭐️⭐️⭐️ -------------------------------------------------- ⭐️⭐️⭐️
+
+    except Exception as e:
+        print(f"❌ 채점 기능 호출 중 오류 발생: {e}")
+        
+# --- 테스트 실행 ---
+try:
+    # 모범 답안 테스트
+    run_scoring_test(test_q_data, test_answer_a, "A: 모범 답안 (고득점 예상)")
+    
+    # 불완전한 답안 테스트
+    run_scoring_test(test_q_data, test_answer_b, "B: 불완전 답안 (저득점 예상)")
+    
+except NameError:
+    print("\n⚠️ 오류: 필요한 함수(AnswerIn, QuestionData, score_discussion_answer 등)가 정의되지 않았습니다.")
+    print("      Cell 43, 45, 그리고 Cell 188 근처의 모든 함수 정의 셀이 실행되었는지 확인하세요.")
+
