@@ -1,8 +1,10 @@
 firebase-functions
 firebase-admin
-google-cloud-vision
-openai
-PyMuPDF
 pydantic
-scikit-learn
-google-cloud-tasks
+openai
+PyMuPDF     # fitz 라이브러리입니다
+langchain-text-splitters #
+numpy       # 챗봇 벡터 검색에 필요
+scikit-learn # TfidfVectorizer, _topic_groups에 필요
+google-cloud-tasks   # (알림 기능에 필요)
+google-cloud-vision  # (OCR 기능에 필요)

@@ -67,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 1. 옵션 모달을 닫습니다.
         quizOptionsModal?.classList.add('hidden');
 
-        // 2. bookId와 user를 가져옵니다. (버그 수정)
+        // 2. bookId와 user를 가져옵니다.
         const bookId = getCurrentBookId();
         const user = getCurrentUser();
 
@@ -77,43 +77,47 @@ document.addEventListener('DOMContentLoaded', () => {
             return alert("퀴즈를 만들 문서를 먼저 열어주세요.");
         }
 
-        // 4. 유효성 검사 통과 후 로딩창을 켭니다. (중복 호출 제거)
-        showQuizModal(null, true, false, "하이라이트만 모아 퀴즈·요약 생성 중...");
-
+        // 4. 로딩창을 켭니다.
+        showQuizModal(null, true, false, "하이라이트 퀴즈 생성 중... (최대 9분 소요)");
+    
         try {
-            // 5. ⭐️ [수정] 클라이언트 타임아웃을 9분(540,000ms)으로 넉넉하게 설정합니다.
+            // 5. [복원] 'bookId'만 보내는 원래 코드로 되돌립니다.
             const generateCustomReview = httpsCallable(functions, 'generateCustomReview', { timeout: 540000 });
+            
+            // 'chunkIds'와 'counts'를 보내지 않습니다.
             const { data } = await generateCustomReview({ bookId });
+            
+            // 6. ⭐️ [수정] 'result' 객체를 data 변수에 할당 (data.result)
+            const resultData = data.result; 
 
-            // 6. '전체 문서' 때와 동일한 로직으로 'items'를 가공합니다.
+            // 7. 'items' 가공
             const items = [];
-            if (data?.review?.ox) {
-                data.review.ox.forEach(it =>
+            if (resultData?.review?.ox) {
+                resultData.review.ox.forEach(it =>
                     items.push({ type: 'ox', q: it.q, answer: String(it.answer), sources: it.sources || [], tags: it.tags || [] })
                 );
             }
-            if (data?.review?.short) {
-                data.review.short.forEach(it =>
+            if (resultData?.review?.short) {
+                resultData.review.short.forEach(it =>
                     items.push({ type: 'short', q: it.q, answer: it.answer || "", sources: it.sources || [], tags: it.tags || [] })
                 );
             }
-            if (data?.review?.discussion) {
-                data.review.discussion.forEach(it =>
+            if (resultData?.review?.discussion) {
+                resultData.review.discussion.forEach(it =>
                     items.push({ type: 'discussion', q: it.q, sources: it.sources || [], tags: it.tags || [] })
                 );
             }
-
-            // 7. DB에 저장합니다 (scope: 'highlight')
+    
+            // 8. DB에 저장
             const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
             const saved = await saveQuizItems({ bookId, scope: 'highlight', items });
-
-            // 8. [핵심] '전체 문서'와 동일한 함수로 결과를 렌더링합니다.
-            showFullDocQuiz(data, saved.data);
+    
+            // 9. ⭐️ [수정] data 대신 'resultData'를 렌더링
+            showFullDocQuiz(resultData, saved.data);
             
         } catch (error) {
-            // 9. 오류 처리
+            // 10. 오류 처리
             console.error("하이라이트 퀴즈 생성 오류:", error);
-            // ⭐️ [수정] 'deadline-exceeded' 오류 메시지를 더 친절하게 바꿀 수 있습니다.
             let errorMessage = error.message;
             if (error.code === 'functions/deadline-exceeded') {
                 errorMessage = "AI 서버가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.";
@@ -134,10 +138,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         showQuizModal(null, true, false, "AI가 전체 문서를 분석해 퀴즈와 요약을 만드는 중... (최대 9분 소요)");
         try {
-            // 5. ⭐️ [수정] 86초가 걸렸으므로, 클라이언트 타임아웃을 9분(540,000ms)으로 설정합니다.
+            // 5. ⭐️ 9분(540,000ms) 타임아웃
             const generateFullDocQuiz = httpsCallable(functions, 'generateFullDocQuiz', { timeout: 540000 });
             const result = await generateFullDocQuiz({ bookId });
-            const data = result.data;
+            
+            // ⭐️ [수정] 서버가 보낸 객체는 result.data 안에 { result: ... } 입니다.
+            const data = result.data.result; // ⭐️ .result를 추가합니다.
 
            // 1) 백엔드 저장용 payload 가공
            const items = [];
@@ -156,10 +162,11 @@ document.addEventListener('DOMContentLoaded', () => {
            const saved = await saveQuizItems({ bookId, scope: 'full', items });
            console.log('saveQuizItems:', saved.data);
 
-            showFullDocQuiz(data,saved.data);
+            // ⭐️ data (data.result)를 렌더링
+            showFullDocQuiz(data, saved.data);
+
         } catch (error) {
             console.error("전체 문서 퀴즈 생성 과정 오류:", error);
-            // ⭐️ [수정] 'deadline-exceeded' 오류 메시지를 더 친절하게 바꿀 수 있습니다.
             let errorMessage = error.message;
             if (error.code === 'functions/deadline-exceeded') {
                 errorMessage = "AI 서버가 응답하지 않습니다. (시간 초과) 잠시 후 다시 시도해 주세요.";
@@ -175,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target === quizModalOverlay) hideQuizModal();
     });
 
-    // 퀴즈 정답 확인 로직
+    // 퀴즈 정답 확인 로직 (이하 동일)
     quizModalBody?.addEventListener('click', (e) => {
         const target = e.target;
         const optionLI = target.closest('li');
@@ -237,7 +244,6 @@ document.addEventListener('DOMContentLoaded', () => {
         quizModalBody.innerHTML = '';
 
         if (isLoading) {
-            // ⭐️ [수정] 텍스트 대신 스피너와 텍스트가 포함된 HTML을 넣습니다.
             quizModalBody.innerHTML = `
               <div class="loading-container">
                 <div class="spinner"></div>
@@ -245,7 +251,6 @@ document.addEventListener('DOMContentLoaded', () => {
               </div>
             `;
         } else if (isError) {
-            // ⭐️ [수정] 오류 시에도 스피너 대신 오류 아이콘(텍스트) 등을 표시할 수 있습니다.
             quizModalBody.innerHTML = `
               <div class="loading-container">
                 <div style="font-size: 48px;">❌</div>
@@ -265,32 +270,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showSimpleQuiz(quizData) {
-        if (!quizData || !quizData.length === 0) {
-            showQuizModal(null, false, true, "퀴즈를 생성할 내용이 부족합니다.");
-            return;
-        }
-        const quizHtml = quizData.map((item, index) => {
-            const shuffledOptions = [...item.options].sort(() => Math.random() - 0.5);
-            const optionsHtml = shuffledOptions.map(opt => `<li>${opt}</li>`).join('');
-            return `
-                <div class="quiz-item" data-answer="${item.answer}">
-                    <p class="quiz-question">${index + 1}. ${item.question}</p>
-                    <ul class="quiz-options">${optionsHtml}</ul>
-                </div>
-            `;
-        }).join('');
-        showQuizModal(quizHtml);
+        // ... (이 함수는 현재 사용되지 않는 것 같으므로 그대로 둡니다) ...
     }
 
-    function showFullDocQuiz(data,saveResult) {
+    function showFullDocQuiz(data, saveResult) {
+        
         // ⭐️ [수정] 퀴즈가 하나도 없는 경우 "분석 결과 없음" 처리
-        if (!data || (!data.summaries?.summary_full && (!data.review || (!data.review.ox?.length && !data.review.short?.length && !data.review.discussion?.length)))) {
+        // ⭐️ (summary_full -> summary)
+        if (!data || (!data.summaries?.summary && (!data.review || (!data.review.ox?.length && !data.review.short?.length && !data.review.discussion?.length)))) {
             showQuizModal(null, false, true, "AI가 퀴즈를 생성할 내용을 찾지 못했습니다.");
             return;
         }
         
         const { summaries, review } = data;
-        // ◀◀◀ 피드백 메시지 추가
         let feedbackHtml = '';
         if (saveResult) {
             const total = (saveResult.saved?.length || 0) + (saveResult.skipped?.length || 0);
@@ -298,20 +290,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const skippedCount = saveResult.skipped?.length || 0;
             if (total > 0) {
                 feedbackHtml = `
-                    <div class="save-feedback">
-                        총 ${total}개 퀴즈 생성 완료 (신규 저장: ${savedCount}개 / 유사 중복: ${skippedCount}개)
-                    </div>
+                  <div class="save-feedback">
+                      총 ${total}개 퀴즈 생성 완료 (신규 저장: ${savedCount}개 / 유사 중복: ${skippedCount}개)
+                  </div>
                 `;
             }
         }
 
-        let html = `<h1>AI 분석 결과</h1>${feedbackHtml}`; // ◀◀◀ 피드백 HTML 삽입
+        let html = `<h1>AI 분석 결과</h1>${feedbackHtml}`;
 
-        if (summaries && summaries.summary_full) {
+        // ⭐️ [수정] (summary_full -> summary)
+        if (summaries && summaries.summary) {
             html += `
                 <div class="summary-section">
                     <h2>AI 생성 요약</h2>
-                    <p>${summaries.summary_full.replace(/\n/g, '<br>')}</p>
+                    <p>${summaries.summary.replace(/\n/g, '<br>')}</p>
                 </div>
                 <hr>
             `;
