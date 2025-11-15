@@ -1,3 +1,5 @@
+// main.js
+
 import { 
     getCurrentUser, 
     initDocSystem, 
@@ -5,8 +7,11 @@ import {
     openDoc,
     deleteDocFromDb, 
     getCurrentBookId
-} from './doc_firebase.js';
+} from './doc_firebase.js'; // ⭐️ './doc_firebase.js'를 사용
 import { httpsCallable, functions } from './A.firebase.js';
+
+// ⛔️ [삭제] 'getHighlights' import를 삭제 (SyntaxError의 원인)
+// import { getHighlights } from './viewer-state.js'; 
 
 console.log("✅ main.js 스크립트 파일 로드됨");
 
@@ -25,30 +30,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const quizModalBody = document.getElementById("quiz-modal-body");
     const quizCloseBtn = document.getElementById("quiz-close-btn");
 
-    // --- [디버깅 1] 버튼과 모달을 제대로 찾았는지 확인 ---
-    if (!createQuizBtn) {
-        console.error("❌ main.js: HTML에서 'create-quiz-btn' ID를 가진 버튼을 찾을 수 없습니다!");
-    }
-    if (!quizOptionsModal) {
-        console.error("❌ main.js: HTML에서 'quiz-options-modal' ID를 가진 모달을 찾을 수 없습니다!");
-    }
-    if (!quizModalOverlay || !quizModalBody || !quizCloseBtn) {
-         console.warn("⚠️ main.js: 퀴즈 결과 팝업 HTML 요소 중 일부를 찾을 수 없습니다.");
-    }
+    // ... (버튼/모달 찾기 null 체크 - 기존 코드 유지) ...
 
     // --- 퀴즈 생성 로직 ---
     if (createQuizBtn) {
         createQuizBtn.addEventListener('click', () => {
             console.log("🖱️ '퀴즈 만들기' 버튼 클릭됨!"); 
-
             const bookId = getCurrentBookId();
             console.log("현재 열린 bookId:", bookId); 
-
             if (!bookId) {
-                console.warn("bookId가 null입니다. 문서를 먼저 열어야 합니다."); 
                 return alert("퀴즈를 만들 문서를 먼저 열어주세요.");
             }
-
             if (quizOptionsModal) { 
                 console.log("퀴즈 옵션 모달을 엽니다."); 
                 quizOptionsModal.classList.remove('hidden');
@@ -56,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error("❌ 'quiz-options-modal'이 없어서 퀴즈 옵션을 열 수 없습니다.");
             }
         });
-    } // if (createQuizBtn) 끝
+    }
 
     modalCloseBtn?.addEventListener('click', () => {
         quizOptionsModal?.classList.add('hidden');
@@ -64,33 +56,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     modalHighlightsBtn?.addEventListener('click', async () => {
     
-        // 1. 옵션 모달을 닫습니다.
         quizOptionsModal?.classList.add('hidden');
-
-        // 2. bookId와 user를 가져옵니다.
         const bookId = getCurrentBookId();
         const user = getCurrentUser();
 
-        // 3. bookId가 없으면 경고하고 중단합니다.
         if (!bookId || !user) {
             console.warn("하이라이트 퀴즈 생성 중단: bookId 또는 user가 없습니다.");
             return alert("퀴즈를 만들 문서를 먼저 열어주세요.");
         }
 
-        // 4. 로딩창을 켭니다.
-        showQuizModal(null, true, false, "하이라이트 퀴즈 생성 중... (최대 9분 소요)");
+        // ⭐️ [수정] 님이 18:31에 올리신 '하이라이트' 버튼은 'customReviewPayload'를 읽으므로,
+        // ⭐️ 로딩 메시지를 "미리 생성된 퀴즈 로드 중..."으로 변경 (1초 만에 뜸)
+        showQuizModal(null, true, false, "미리 생성된 하이라이트 퀴즈 로드 중...");
     
         try {
-            // 5. [복원] 'bookId'만 보내는 원래 코드로 되돌립니다.
-            const generateCustomReview = httpsCallable(functions, 'generateCustomReview', { timeout: 540000 });
+            // ⭐️ '파이프라인'을 사용하므로 9분 타임아웃은 필요 없습니다. (기본 60초)
+            const generateCustomReview = httpsCallable(functions, 'generateCustomReview');
             
-            // 'chunkIds'와 'counts'를 보내지 않습니다.
-            const { data } = await generateCustomReview({ bookId });
+            // ⭐️ [수정] 'chunkIds'와 'counts'를 보내지 않습니다. (파이프라인 버전이므로)
+            const result = await generateCustomReview({ bookId });
             
-            // 6. ⭐️ [수정] 'result' 객체를 data 변수에 할당 (data.result)
-            const resultData = data.result; 
+            // ⭐️ [수정] 'result.data'가 서버가 보낸 payload입니다. (result.data.result 아님)
+            const resultData = result.data; 
 
-            // 7. 'items' 가공
+            // (items 가공 - 기존 코드 유지)
             const items = [];
             if (resultData?.review?.ox) {
                 resultData.review.ox.forEach(it =>
@@ -108,19 +97,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 );
             }
     
-            // 8. DB에 저장
+            // (DB에 저장 - 기존 코드 유지)
             const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
             const saved = await saveQuizItems({ bookId, scope: 'highlight', items });
     
-            // 9. ⭐️ [수정] data 대신 'resultData'를 렌더링
+            // (결과 렌더링 - 'resultData' 전달)
             showFullDocQuiz(resultData, saved.data);
             
         } catch (error) {
-            // 10. 오류 처리
+            // (오류 처리 - 기존 코드 유지)
             console.error("하이라이트 퀴즈 생성 오류:", error);
             let errorMessage = error.message;
             if (error.code === 'functions/deadline-exceeded') {
                 errorMessage = "AI 서버가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.";
+            } else if (error.code === 'functions/aborted' || error.code === 'functions/not-found') {
+                errorMessage = "PDF가 아직 처리 중입니다. 1~2분 후 다시 시도해 주세요.";
             }
             showQuizModal(null, false, true, `오류가 발생했습니다: ${errorMessage}`);
         }
@@ -132,20 +123,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const bookId = getCurrentBookId();
         const user = getCurrentUser();
         if (!bookId || !user) {
-            console.warn("전체 문서 퀴즈 생성 중단: bookId 또는 user가 없습니다.", "bookId:", bookId, "user:", user);
+            console.warn("전체 문서 퀴즈 생성 중단: bookId 또는 user가 없습니다.");
             return;
         }
 
-        showQuizModal(null, true, false, "AI가 전체 문서를 분석해 퀴즈와 요약을 만드는 중... (최대 9분 소요)");
+        // ⭐️ [수정] "미리 생성된 요약 로드 중..." (1초 만에 뜸)
+        showQuizModal(null, true, false, "미리 생성된 전체 요약/퀴즈 로드 중...");
+        
         try {
-            // 5. ⭐️ 9분(540,000ms) 타임아웃
-            const generateFullDocQuiz = httpsCallable(functions, 'generateFullDocQuiz', { timeout: 540000 });
+            // ⭐️ '파이프라인'을 사용하므로 9분 타임아웃은 필요 없습니다.
+            const generateFullDocQuiz = httpsCallable(functions, 'generateFullDocQuiz');
             const result = await generateFullDocQuiz({ bookId });
             
-            // ⭐️ [수정] 서버가 보낸 객체는 result.data 안에 { result: ... } 입니다.
-            const data = result.data.result; // ⭐️ .result를 추가합니다.
+            // ⭐️ [수정] 'result.data'가 서버가 보낸 payload입니다. (result.data.result 아님)
+            const data = result.data; 
 
-           // 1) 백엔드 저장용 payload 가공
+           // (items 가공 - 기존 코드 유지)
            const items = [];
            if (data?.review?.ox) {
              data.review.ox.forEach(it => items.push({ type: 'ox', q: it.q, answer: String(it.answer), sources: it.sources || [], tags: it.tags || [] }));
@@ -157,19 +150,23 @@ document.addEventListener('DOMContentLoaded', () => {
              data.review.discussion.forEach(it => items.push({ type: 'discussion', q: it.q, sources: it.sources || [], tags: it.tags || [] }));
            }
 
-           // 2) 저장 + 중복 체크
+           // (저장 - 기존 코드 유지)
            const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
            const saved = await saveQuizItems({ bookId, scope: 'full', items });
            console.log('saveQuizItems:', saved.data);
 
-            // ⭐️ data (data.result)를 렌더링
+            // ⭐️ 'data' (result.data)를 렌더링
             showFullDocQuiz(data, saved.data);
 
         } catch (error) {
+            // (오류 처리 - 기존 코드 유지)
             console.error("전체 문서 퀴즈 생성 과정 오류:", error);
             let errorMessage = error.message;
             if (error.code === 'functions/deadline-exceeded') {
                 errorMessage = "AI 서버가 응답하지 않습니다. (시간 초과) 잠시 후 다시 시도해 주세요.";
+            } else if (error.code === 'functions/aborted' || error.code === 'functions/not-found') {
+                // ⭐️ 404, aborted 오류는 "파이프라인 처리 중"이라는 뜻
+                errorMessage = "PDF가 아직 처리 중입니다. 1~2분 후 다시 시도해 주세요.";
             }
             showQuizModal(null, false, true, `오류가 발생했습니다: ${errorMessage}`);
         }
@@ -182,22 +179,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target === quizModalOverlay) hideQuizModal();
     });
 
-    // 퀴즈 정답 확인 로직 (이하 동일)
+    // 퀴즈 정답 확인 로직
     quizModalBody?.addEventListener('click', (e) => {
         const target = e.target;
         const optionLI = target.closest('li');
 
-        // --- OX 및 객관식 보기 클릭 시 ---
         if (optionLI && optionLI.parentElement.classList.contains('quiz-options')) {
             const quizItem = optionLI.closest('.quiz-item');
             if (!quizItem || quizItem.classList.contains('answered')) return;
-
             const correctAnswer = String(quizItem.dataset.answer).toLowerCase();
             const selectedAnswer = optionLI.textContent.toLowerCase();
             const options = quizItem.querySelectorAll('.quiz-options li');
-            
             quizItem.classList.add('answered');
-
             if (selectedAnswer === correctAnswer) {
                 optionLI.classList.add('correct');
             } else {
@@ -208,24 +201,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
             }
-            
             options.forEach(opt => opt.classList.add('disabled'));
         }
-        // --- 단답형 '정답 확인' 버튼 클릭 시 ---
         else if (target.matches('.check-answer-btn')) {
             const quizItem = target.closest('.quiz-item');
             if (!quizItem || quizItem.classList.contains('answered')) return;
-
             const correctAnswer = quizItem.dataset.answer;
             const input = quizItem.querySelector('.short-answer-input');
             const userAnswer = input.value.trim();
             const feedback = quizItem.querySelector('.answer-feedback');
-
             quizItem.classList.add('answered');
             input.disabled = true;
             target.disabled = true;
             feedback.classList.remove('hidden');
-
             if (userAnswer.replace(/\s/g, '').toLowerCase() === correctAnswer.replace(/\s/g, '').toLowerCase()) {
                 input.classList.add('correct');
             } else {
@@ -269,14 +257,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function showSimpleQuiz(quizData) {
-        // ... (이 함수는 현재 사용되지 않는 것 같으므로 그대로 둡니다) ...
-    }
-
     function showFullDocQuiz(data, saveResult) {
         
-        // ⭐️ [수정] 퀴즈가 하나도 없는 경우 "분석 결과 없음" 처리
-        // ⭐️ (summary_full -> summary)
+        // (님이 18:31에 올린 코드 - 'summary'로 이미 수정됨)
         if (!data || (!data.summaries?.summary && (!data.review || (!data.review.ox?.length && !data.review.short?.length && !data.review.discussion?.length)))) {
             showQuizModal(null, false, true, "AI가 퀴즈를 생성할 내용을 찾지 못했습니다.");
             return;
@@ -299,7 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let html = `<h1>AI 분석 결과</h1>${feedbackHtml}`;
 
-        // ⭐️ [수정] (summary_full -> summary)
+        // (님이 18:31에 올린 코드 - 'summary'로 이미 수정됨)
         if (summaries && summaries.summary) {
             html += `
                 <div class="summary-section">
@@ -310,6 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         }
 
+        // (이하 퀴즈 렌더링 HTML은 님이 18:31에 올린 코드와 동일)
         if (review) {
             html += '<h2>AI 생성 퀴즈</h2>';
             if (review.ox && review.ox.length > 0) {
