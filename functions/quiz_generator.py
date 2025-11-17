@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import re
+import uuid
 import fitz  # PyMuPDF
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel
@@ -69,8 +70,10 @@ def pdf_to_preprocessed_doc(
     chunks: List[Chunk] = []
     for i, text_chunk in enumerate(split_texts):
         new_chunk = Chunk(
-            id=f"c{i}",
+            #id=f"c{i}",
+            id = str(uuid.uuid4()),
             text=text_chunk,
+            page_content=text_chunk,
             section_path=None, 
             anchors=[]
         )
@@ -197,7 +200,9 @@ class Chunk(BaseModel):
     section_path: Optional[List[str]] = None
     anchors: Optional[List[str]] = None
     embedding: Optional[List[float]] = None # 챗봇(RAG)용
-
+    metadata: Optional[Dict[str, Any]] = None
+    page_content: str
+    
 class PreprocessedDoc(BaseModel):
     doc_id: Optional[str] = None
     chunks: List[Chunk]

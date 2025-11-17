@@ -1,5 +1,3 @@
-// main.js
-
 import { 
     getCurrentUser, 
     initDocSystem, 
@@ -14,6 +12,11 @@ import { httpsCallable, functions } from './A.firebase.js';
 // import { getHighlights } from './viewer-state.js'; 
 
 console.log("✅ main.js 스크립트 파일 로드됨");
+
+// ⭐️ [챗봇] 챗봇 UI 초기화 여부 플래그
+let chatbotInitialized = false;
+// ⭐️ [챗봇] 채팅 내역 저장 배열
+let chatHistory = [];
 
 // DOM 로드 후 UI 이벤트 핸들러 연결
 document.addEventListener('DOMContentLoaded', () => {
@@ -330,5 +333,205 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         showQuizModal(html);
     }
+    
+    // ⭐️ [챗봇] 챗봇 UI 초기화 함수 호출
+    initChatbot();
 
 }); // ✨ DOMContentLoaded가 여기서 끝납니다.
+
+// 
+// 
+// 
+// --- ⭐️ [챗봇] 챗봇 관련 함수들 (파일 하단에 추가) ---
+// 
+// 
+// 
+/**
+ * 챗봇 UI의 모든 이벤트 리스너를 설정합니다.
+ */
+function initChatbot() {
+    if (chatbotInitialized) return;
+    chatbotInitialized = true;
+
+    const $ = (id) => document.getElementById(id);
+
+    const chatToggleBtn = $("chat-toggle-btn");
+    const chatWindow = $("chat-window");
+    const chatCloseBtn = $("chat-close-btn");
+    const chatMessages = $("chat-messages");
+    const chatInput = $("chat-input");
+    const chatSendBtn = $("chat-send-btn");
+
+    if (!chatToggleBtn || !chatWindow || !chatCloseBtn || !chatMessages || !chatInput || !chatSendBtn) {
+        console.warn("챗봇 UI 요소를 찾을 수 없어 초기화에 실패했습니다.");
+        return;
+    }
+
+    // 챗봇 창 열기
+    chatToggleBtn.addEventListener("click", () => {
+        chatWindow.classList.toggle("hidden");
+        chatToggleBtn.classList.toggle("hidden");
+    });
+
+    // 챗봇 창 닫기
+    chatCloseBtn.addEventListener("click", () => {
+        chatWindow.classList.add("hidden");
+        chatToggleBtn.classList.remove("hidden");
+    });
+
+    // 메시지 전송 버튼 클릭
+    chatSendBtn.addEventListener("click", handleSendChatMessage);
+
+    // Enter 키로 전송
+    chatInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleSendChatMessage();
+        }
+    });
+
+    /**
+     * 채팅 메시지를 전송하는 핸들러
+     */
+    async function handleSendChatMessage() {
+        const userText = chatInput.value.trim();
+        if (!userText || chatSendBtn.disabled) return;
+
+        // 1. (UI) 사용자 메시지 추가
+        addChatMessage('user', userText);
+        chatInput.value = "";
+        
+        // 2. [수정] 채팅 내역 배열에 사용자 메시지 추가
+        chatHistory.push({ role: "user", content: userText });
+
+        // 3. (UI) 로딩 메시지 추가
+        const loadingMsgId = `msg-${Date.now()}`;
+        const loadingElement = addChatMessage('bot', '답변을 생성 중입니다...', 'loading', loadingMsgId);
+
+        // 4. (Logic) doc_firebase.js에서 현재 bookId 가져오기
+        const currentBookId = getCurrentBookId();
+
+        if (!currentBookId) {
+            updateChatMessage(loadingElement, "오류: 먼저 문서를 열어주세요.");
+            chatHistory.pop(); // [수정] 실패 시, 보냈던 메시지 내역에서 제거
+            return;
+        }
+
+        try {
+            
+            // 👇 [수정 1] 페르소나 선택 <select>에서 값 읽어오기
+            const personaSelect = document.getElementById("chat-persona-select");
+            const selectedValue = personaSelect.value; // "professor", "socrates" 등
+
+            // 👇 [수정 2] 백엔드가 이해하는 '전체 프롬프트 텍스트'로 변환
+            const personaMap = {
+                "professor": "당신은 '해설형 챗봇(교수)'입니다. 사용자의 질문에 대해 교수의 입장에서 친절하고 상세하게 설명해주세요.",
+                "socrates": "당신은 '설명 유도형 챗봇(소크라테스)'입니다. 정답을 알려주지 말고, 사용자가 스스로 답을 찾도록 질문을 던지세요.",
+                "senior": "당신은 '주변 정보형 챗봇(선배)'입니다. 질문과 관련된 재밌는 배경지식이나 팁을 친근하게 알려주세요."
+            };
+            const systemPromptText = personaMap[selectedValue] || personaMap["professor"];
+
+            
+            // ⭐️ window.sendQueryToBot은 doc_firebase.js에 정의되어 있음
+            // 👇 [수정 3] systemPromptText를 함께 전달
+            const botAnswer = await window.sendQueryToBot(currentBookId, chatHistory, systemPromptText);
+            
+            // 6. (UI) 로딩 메시지를 실제 답변으로 교체
+            updateChatMessage(loadingElement, botAnswer);
+            
+            // 7. [수정] 채팅 내역 배열에 봇의 답변 추가
+            chatHistory.push({ role: "assistant", content: botAnswer });
+
+        } catch (error) {
+            console.error("챗봇 메시지 전송 중 오류:", error);
+            updateChatMessage(loadingElement, "답변 생성 중 오류가 발생했습니다.");
+            chatHistory.pop(); // [수정] 실패 시, 보냈던 메시지 내역에서 제거
+        }
+    }
+
+    /**
+     * 채팅 메시지를 화면에 추가 (헬퍼 함수)
+     * @param {'user' | 'bot'} sender
+     * @param {string} text
+     * @param {'loading' | undefined} type
+     * @param {string | undefined} id
+     * @returns {HTMLElement} 생성된 메시지 div 요소
+     */
+    function addChatMessage(sender, text, type, id) {
+        const msgDiv = document.createElement("div");
+        msgDiv.classList.add("chat-message", sender);
+        if (type === 'loading') {
+            msgDiv.classList.add("loading");
+        }
+        if (id) {
+            msgDiv.id = id;
+        }
+        
+        const p = document.createElement("p");
+        p.textContent = text;
+        msgDiv.appendChild(p);
+        
+        const chatMessages = document.getElementById("chat-messages");
+        if (chatMessages) {
+             chatMessages.appendChild(msgDiv);
+             // 새 메시지로 스크롤
+             chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        return msgDiv;
+    }
+
+    /**
+     * 기존 메시지 내용을 업데이트 (로딩 -> 답변)
+     * @param {HTMLElement} element
+     * @param {string} newText
+     */
+    function updateChatMessage(element, newText) {
+        if (element) {
+            element.classList.remove("loading");
+            const p = element.querySelector("p");
+            if (p) {
+                p.textContent = newText;
+            }
+             // 업데이트 후 스크롤
+            const chatMessages = document.getElementById("chat-messages");
+            if (chatMessages) {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        }
+    }
+}
+
+/**
+ * ⭐️ [챗봇] 챗봇 활성화/비활성화
+ * doc_firebase.js의 openDoc / resetToHome에서 호출합니다.
+ * (window에 노출시켜야 doc_firebase.js에서 호출 가능)
+ */
+window.setChatbotEnabled = function(enabled) {
+    const chatInput = document.getElementById("chat-input");
+    const chatSendBtn = document.getElementById("chat-send-btn");
+
+    if (chatInput && chatSendBtn) {
+        chatInput.disabled = !enabled;
+        chatSendBtn.disabled = !enabled;
+        
+        if (enabled) {
+            // [수정] 새 문서가 열리면 채팅 내역 초기화
+            chatHistory = []; 
+            chatInput.placeholder = "현재 문서에 대해 질문하세요...";
+            
+            // (옵션) 챗봇 창의 기존 메시지 삭제
+            const chatMessages = document.getElementById("chat-messages");
+            if (chatMessages) {
+                chatMessages.innerHTML = `
+                    <div class="chat-message bot">
+                        <p>안녕하세요! 현재 열려있는 문서에 대해 무엇이든 물어보세요.</p>
+                    </div>
+                `;
+            }
+            
+        } else {
+            chatInput.placeholder = "문서를 먼저 열어주세요.";
+            chatInput.value = "";
+        }
+    }
+}

@@ -26,7 +26,8 @@ storage_client = None
 vision_client = None
 openai_client = None
 tasks_client = None 
-
+supabase_client = None
+supabase_embeddings = None
 options.set_global_options(
     region="asia-northeast3",
     memory=options.MemoryOption.GB_1, 
@@ -34,20 +35,15 @@ options.set_global_options(
     secrets=["OPENAI_API_KEY"]
 )
 
-CORS_OPTIONS = options.CorsOptions(
-    cors_origins=[
-        "https://mybook-d143d.web.app",
-        "http://localhost:5000",
-        "http://127.0.0.1:5000"
-    ]
-)
+ALLOWED_ORIGIN = "https://mybook-d143d.web.app"
 
 # ---------------------------------------------
 # --- 2. ⭐️ [수정] 단일 처리 파이프라인 (artifacts 감시) ---
 # ---------------------------------------------
 @storage_fn.on_object_finalized(
     timeout_sec=540,
-    memory=options.MemoryOption.GB_2 
+    memory=options.MemoryOption.GB_2,
+    secrets=["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_KEY"]
 )
 def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
     """
@@ -143,20 +139,54 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
 
     # 7. [챗봇] 챗봇용 벡터 생성
     try:
-        print(f"--- 🤖 Checkpoint 5: OpenAI 임베딩 API 호출 시작 ---")
-        texts_to_embed = [chunk.text for chunk in processed_doc.chunks]
-        embeddings: List[List[float]] = get_openai_embeddings(texts_to_embed)
+        print(f"--- 🤖 Checkpoint 7: Supabase 클라이언트 지연 로딩 ---")
+        from langchain_openai import OpenAIEmbeddings
+        from langchain_community.vectorstores import SupabaseVectorStore
+        from supabase import create_client
+        # ⭐️ (추가) Supabase 클라이언트 지연 로딩 (test/main.py 로직)
+        global supabase_client, supabase_embeddings
+        if supabase_client is None:
+            supabase_url = os.environ.get("SUPABASE_URL")
+            supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+            if not supabase_url or not supabase_key:
+                raise Exception("SUPABASE_URL, SUPABASE_SERVICE_KEY 비밀 환경변수가 설정되지 않았습니다.")
+            supabase_client = create_client(supabase_url, supabase_key)
         
-        if not embeddings or len(embeddings) != len(processed_doc.chunks):
-            raise Exception("임베딩 결과가 청크 개수와 일치하지 않습니다.")
+        if supabase_embeddings is None:
+            supabase_embeddings = OpenAIEmbeddings(openai_api_key=os.environ.get("OPENAI_API_KEY"))
 
-        for i, chunk in enumerate(processed_doc.chunks):
-            chunk.embedding = embeddings[i]
+        # ⭐️ (추가) LangChain용 Supabase 벡터 스토어 객체 생성
+        vector_store = SupabaseVectorStore(
+            client=supabase_client,
+            embedding=supabase_embeddings,
+            table_name="documents",
+            query_name="match_documents"
+        )
+
+        print(f"--- ☁️ Supabase에 '{book_id}' 문서 업로드 시작 ---")
+
+        # ⭐️ (추가) 모든 청크에 'bookId' 메타데이터 추가 (process_pdf.py 로직)
+        for chunk in processed_doc.chunks:
+            chunk.metadata = {"bookId": book_id}
+
+        # ⭐️ (추가) Supabase에 기존 데이터 삭제
+        supabase_client.table("documents").delete().eq("metadata->>bookId", book_id).execute()
+        print(f"--- 🧹 Supabase 기존 '{book_id}' 데이터 삭제 완료 ---")
+
+        # ⭐️ (추가) Supabase에 새 데이터 업로드
+        vector_store.add_documents(processed_doc.chunks)
+        print(f"--- ✅ Supabase 업로드 완료 ---")
+        
+        # ⭐️ (중요) Firestore 저장 공간 절약을 위해, 임베딩 데이터는 제거
+        for chunk in processed_doc.chunks:
+            chunk.embedding = None
             
-        print("--- ✅ Checkpoint 6: OpenAI 임베딩 생성 및 할당 완료 ---")
+        print("--- ✅ Checkpoint 7: Supabase 업로드 및 로컬 임베딩 제거 완료 ---")
+
     except Exception as e:
-        print(f"Error during embedding generation: {e}")
-        doc_ref.set({"status": f"error_embedding: {e}"}, merge=True)
+        print(f"Error during Supabase upload or embedding: {e}")
+        print(traceback.format_exc()) # ⭐️ 디버깅을 위해 상세 로그 추가
+        doc_ref.set({"status": f"error_supabase_upload: {e}"}, merge=True)
         return
 
     # 8. [⭐️ 저장] 모든 '요리'를 Firestore에 저장
@@ -239,7 +269,6 @@ def _get_next_review_date(new_review_level: int) -> datetime:
 
 @https_fn.on_call(
     secrets=["OPENAI_API_KEY"],
-    cors=CORS_OPTIONS
 )
 def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
     """
@@ -272,7 +301,6 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
 
 @https_fn.on_call(
     secrets=["OPENAI_API_KEY"],
-    cors=CORS_OPTIONS, 
     memory=options.MemoryOption.GB_1
 )
 def generateCustomReview(req: https_fn.CallableRequest) -> https_fn.Response:
@@ -309,7 +337,6 @@ def generateCustomReview(req: https_fn.CallableRequest) -> https_fn.Response:
 # ---------------------------------------------
 @https_fn.on_call(
     secrets=["OPENAI_API_KEY"],
-    cors=CORS_OPTIONS
 )
 def scoreQuizAnswer(req: https_fn.CallableRequest) -> https_fn.Response:
     # ⭐️ [지연 로딩]
@@ -331,115 +358,167 @@ def scoreQuizAnswer(req: https_fn.CallableRequest) -> https_fn.Response:
 
 
 # ---------------------------------------------
-# --- 6. ⭐️ 챗봇(RAG) 함수 (유지) ---
+# --- . ⭐️ [교체] 챗봇(RAG) 함수 (Supabase 방식)(유지) ---
 # ---------------------------------------------
-
-def _find_similar_chunks(
-    query_vector: List[float], 
-    chunks: List["Chunk"], 
-    top_k: int = 3
-) -> List["Chunk"]:
-    """
-    [⭐️ 신규 헬퍼] Numpy를 사용해 'In-Function' 벡터 검색을 수행합니다.
-    """
-    import numpy as np # ⭐️ 지연 로딩
-    from quiz_generator import Chunk 
-    
-    if not query_vector or not chunks:
-        return []
-    query_vec = np.array(query_vector)
-    chunk_embeddings = []
-    valid_chunks = []
-    
-    for chunk in chunks:
-        if chunk.embedding:
-            chunk_embeddings.append(chunk.embedding)
-            valid_chunks.append(chunk)
-    if not chunk_embeddings:
-        print("Warning: Firestore에 유효한 임베딩이 없습니다.")
-        return []
-
-    chunk_matrix = np.array(chunk_embeddings)
-    dot_products = np.dot(chunk_matrix, query_vec)
-    chunk_norms = np.linalg.norm(chunk_matrix, axis=1)
-    query_norm = np.linalg.norm(query_vec)
-    norm_product = chunk_norms * query_norm
-    similarities = dot_products / (norm_product + 1e-9)
-    top_k_indices = np.argsort(similarities)[-top_k:][::-1]
-    
-    return [valid_chunks[i] for i in top_k_indices]
-
-
-@https_fn.on_call(
-    secrets=["OPENAI_API_KEY"],
-    cors=CORS_OPTIONS,
-    memory=1024
+@https_fn.on_request( # ⭐️ (변경) on_call -> on_request (JSON API 방식)
+    secrets=["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_KEY"], # ⭐️ (중요) 비밀키 추가
+    memory=options.MemoryOption.GB_1, # 1GB 메모리
+    timeout_sec=60 # 60초 타임아웃
 )
-def chatWithBook(req: https_fn.Request) -> https_fn.Response:
+def ragChat(req: https_fn.Request) -> https_fn.Response:
     """
-    [⭐️ 신규 챗봇 함수 (RAG)]
+    [⭐️ 신규 챗봇 함수 (Supabase RAG)]
+    - FastAPI(@app.post) 대신 @https_fn.on_request를 사용합니다.
+    - 랭체인 버그를 우회하고 Supabase RPC를 직접 호출합니다.
+    - 3가지 챗봇 페르소나(시스템 프롬프트)를 지원합니다.
     """
-    # ⭐️ [지연 로딩]
-    from quiz_generator import get_openai_embeddings, _get_client
-    
-    book_id = req.data.get("bookId")
-    query = req.data.get("query")
-    if not query:
-        raise https_fn.HttpsError(code="invalid-argument", message="query가 필요합니다.")
-    
-    doc_for_chat = _load_processed_doc_from_firestore(book_id)
-
-    try:
-        query_embedding = get_openai_embeddings([query])
-        if not query_embedding or not query_embedding[0]:
-            raise Exception("사용자 질문을 임베딩하는 데 실패했습니다.")
-        query_vector = query_embedding[0]
-    except Exception as e:
-        print(f"Error embedding query: {e}")
-        raise https_fn.HttpsError(code="internal", message="질문 처리 중 오류 발생")
-
-    similar_chunks = _find_similar_chunks(
-        query_vector, 
-        doc_for_chat.chunks,
-        top_k=3
-    )
-    if not similar_chunks:
-        context_text = "참고할 만한 컨텍스트를 찾지 못했습니다."
-    else:
-        context_text = "\n\n---\n\n".join([chunk.text for chunk in similar_chunks])
-
-    try:
-        client = _get_client()
-        system_prompt = (
-            "당신은 주어진 '참고 컨텍스트'를 기반으로 사용자의 질문에 답변하는 AI 챗봇입니다. "
-            "컨텍스트에 내용이 없으면 '책 내용만으로는 알 수 없습니다'라고 답변하세요."
-        )
-        user_prompt = f"""
-        [참고 컨텍스트]
-        {context_text}
-        ---
-        [사용자 질문]
-        {query}
-        """
-        rsp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            temperature=0.1,
-            max_tokens=1000,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        answer = rsp.choices[0].message.content
-        return {
-            "answer": answer,
-            "sources": [chunk.model_dump() for chunk in similar_chunks]
+    # --- 0. [추가] 수동 CORS 헤더 설정 ---
+    # ⭐️ CORS Preflight (OPTIONS) 요청에 응답
+    if req.method == "OPTIONS":
+        headers = {
+            "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization", # 👈 Authorization 헤더도 허용
+            "Access-Control-Max-Age": "3600",
         }
+        return https_fn.Response("", status=204, headers=headers)
+    response_headers = {
+    "Access-Control-Allow-Origin": ALLOWED_ORIGIN
+    }
+    # --- 1. 클라이언트 지연 로딩 ---
+    # (기존 main.py의 지연 로딩 패턴을 따름)
+    global supabase_client, supabase_embeddings, openai_client
+    
+    # ⭐️ (추가) Supabase 클라이언트 로딩
+    try:
+        from supabase import create_client
+        from langchain_openai import OpenAIEmbeddings
+        from openai import OpenAI
+        if supabase_client is None:
+            supabase_url = os.environ.get("SUPABASE_URL")
+            supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+            if not supabase_url or not supabase_key:
+                raise Exception("SUPABASE_URL, SUPABASE_SERVICE_KEY 비밀 환경변수가 설정되지 않았습니다.")
+            supabase_client = create_client(supabase_url, supabase_key)
+        
+        if supabase_embeddings is None:
+            # ⭐️ (추가) 임베딩 모델 로딩 (질문 벡터화용)
+            supabase_embeddings = OpenAIEmbeddings(openai_api_key=os.environ.get("OPENAI_API_KEY"))
+        
+        if openai_client is None:
+            # ⭐️ (추가) OpenAI 챗 클라이언트 로딩
+            openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
     except Exception as e:
-        print(f"Error during final GPT call: {e}")
-        raise https_fn.HttpsError(code="internal", message="답변 생성 중 오류 발생")
+        print(f"오류: 클라이언트 초기화 실패: {e}")
+        return https_fn.Response(json.dumps({"error": f"클라이언트 초기화 실패: {e}"}), status=500, mimetype="application/json", headers=response_headers)
+    # --- 2. 요청(Request) 파싱 ---
+    try:
+        # ⭐️ (변경) on_request는 req.get_json()을 사용
+        data = req.get_json(silent=True) 
+        if not data:
+             raise Exception("요청 본문(body)이 비어있습니다.")
 
+        base_system_prompt = data["system_prompt"]
+        chat_history_messages = data["messages"]
+        book_id = data["book_id"]
+        
+        if not chat_history_messages:
+            raise Exception("messages가 비어있습니다.")
+        if not book_id:
+            raise Exception("book_id가 필요합니다.")
+            
+        user_query = chat_history_messages[-1]["content"]
 
+    except Exception as e:
+        print(f"요청 파싱 오류: {e}")
+        return https_fn.Response(json.dumps({"error": f"잘못된 요청: {e}"}), status=422, mimetype="application/json", headers=response_headers)
+
+    # --- 3. Supabase RAG 검색 (test/main.py 로직) ---
+    try:
+        print(f"\n--- 🔍 Supabase RAG 검색 수행 (Book: {book_id}) ---")
+        print(f"검색어: {user_query}")
+
+        # 3-1. 사용자 질문을 "의미(벡터)"로 변환
+        query_embedding = supabase_embeddings.embed_query(user_query)
+
+        # 3-2. Supabase에 "물류창고 검색 함수(match_documents)" 실행 요청
+        filter_query = {"bookId": book_id}
+        match_count = 4
+        
+        response = supabase_client.rpc(
+            "match_documents",
+            {
+                "query_embedding": query_embedding,
+                "filter": filter_query,
+                "match_count": match_count
+            }
+        ).execute()
+        
+        # 3-3. 검색 결과 처리
+        docs_data = response.data
+        
+        if not docs_data:
+            print("--- ⚠️ RAG 검색 결과 없음 ---")
+            context = "해당 문서에서 질문과 관련된 내용을 찾을 수 없습니다."
+        else:
+            # (유사도 0.5 이상만 필터링)
+            filtered_docs = [
+                doc['content'] for doc in docs_data 
+                if doc['similarity'] > 0.5 
+            ]
+            if not filtered_docs:
+                print("--- ⚠️ RAG 검색 결과가 있으나, 유사도가 낮아 제외됨 ---")
+                context = "해당 문서에서 질문과 관련된 내용을 찾을 수 없습니다."
+            else:
+                context = "\n\n".join(filtered_docs)
+                print(f"--- ✅ RAG 검색 완료 ({len(filtered_docs)}개 조각) ---")
+
+    except Exception as e:
+        print(f"RAG 검색 오류: {traceback.format_exc()}")
+        return https_fn.Response(json.dumps({"error": f"RAG 검색 중 오류 발생: {e}"}), status=500, mimetype="application/json", headers=response_headers)
+
+    # --- 4. OpenAI 챗 호출 (test/main.py 로직) ---
+    try:
+        # 4-1. 최종 프롬프트 조합
+        final_system_prompt = f"""
+        {base_system_prompt}
+
+        ---
+        [시스템 RAG 지침]
+        - 위 (0-9번) 역할 원칙을 수행할 때, 반드시 아래 [문서 문맥]을 **최우선 근거**로 사용해야 합니다.
+        - [문서 문맥]은 사용자가 현재 보고 있는 PDF 문서에서 당신의 답변을 돕기 위해 추출한 관련 내용입니다.
+        - '해설형 챗봇(교수)' 역할일 경우: 이 문맥을 [참고: p.XX]의 근거로 사용하고, 핵심 개념을 설명하세요.
+        - '설명 유도형 챗봇(소크라테스)' 역할일 경우: 이 문맥을 '정답'으로 간주하고, 사용자의 설명이 이 문맥과 일치하는지 판단하는 근거로만 사용하세요. (정답을 절대 알려주지 마세요.)
+        - '주변 정보형 챗봇(선배)' 역할일 경우: 이 문맥과 관련된 재밌는 일화나 배경 지식을 찾아보세요.
+        - 만약 [문서 문맥]에 질문과 관련된 내용이 전혀 없다면, 당신의 역할에 맞게 행동하세요.
+          - (해설형): "죄송합니다. 해당 PDF 문서에서 관련 내용을 찾을 수 없습니다."라고 답변하세요.
+          - (설명 유도형): "그 부분은 문서에 내용이 없네. 네가 아는 대로 다시 설명해줄래?"라고 유도하세요.
+          - (주변 정보형): "오, 그건 문서에 없는 내용인데, 내가 아는 다른 재밌는 얘기 해줄까?"라고 답하세요.
+        - 절대 당신의 기존 지식을 [문서 문맥]보다 우선하여 답변하지 마세요.
+
+        [문서 문맥]
+        {context}
+        """
+
+        # 4-2. API에 보낼 메시지 목록 생성
+        messages_for_api = [
+            {"role": "system", "content": final_system_prompt}
+        ] + chat_history_messages
+        
+        # 4-3. OpenAI API 호출 (openai_client 사용)
+        completion = openai_client.chat.completions.create(
+            model="gpt-4o", # ⭐️ gpt-4o 사용 (gpt-4o-mini보다 똑똑함)
+            messages=messages_for_api
+        )
+        reply_content = completion.choices[0].message.content
+
+        # 5. 성공 응답 반환
+        return https_fn.Response(json.dumps({"reply": reply_content}), status=200, mimetype="application/json", headers=response_headers)
+
+    except Exception as e:
+        print(f"OpenAI API 호출 오류: {traceback.format_exc()}")
+        return https_fn.Response(json.dumps({"error": f"OpenAI API 호출 중 오류 발생: {e}"}), status=500, mimetype="application/json", headers=response_headers)
 # ---------------------------------------------
 # --- 7. (유지) 기존 기타 함수들 (OCR, 퀴즈 저장, 알림) ---
 # ---------------------------------------------
@@ -447,7 +526,6 @@ def chatWithBook(req: https_fn.Request) -> https_fn.Response:
 # 7-1. (유지) 하이라이트 기반 [간단] 퀴즈
 @https_fn.on_call(
     secrets=["OPENAI_API_KEY"],
-    cors=CORS_OPTIONS
 )
 def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
     import openai # ⭐️ 지연 로딩
@@ -480,7 +558,6 @@ def generateQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
 # 7-2. (유지) 이미지 영역 OCR (OpenAI Vision)
 @https_fn.on_call(
     secrets=["OPENAI_API_KEY"],
-    cors=CORS_OPTIONS
 )
 def runOcrOnSelection(req: https_fn.CallableRequest) -> https_fn.Response:
     import openai # ⭐️ 지연 로딩
@@ -513,7 +590,7 @@ def runOcrOnSelection(req: https_fn.CallableRequest) -> https_fn.Response:
 
 
 # 7-3. (유지) 퀴즈 저장 (중복 검사)
-@https_fn.on_call(cors=CORS_OPTIONS)
+@https_fn.on_call()
 def saveQuizItems(req: https_fn.CallableRequest) -> https_fn.Response:
     # ⭐️ [지연 로딩]
     from hashlib import sha256
@@ -717,33 +794,3 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
         except Exception as db_e:
             print(f"Firestore 오류 상태 저장 실패: {db_e}")
         return https_fn.Response(f"Internal Error: {e}", status=500)
-
-# 7-5. (유지) 테스트 알림
-@https_fn.on_call(
-    cors=CORS_OPTIONS
-)
-def testSendNotification(req: https_fn.CallableRequest) -> https_fn.Response:
-    global db
-    if db is None: db = firestore.client()
-    if req.auth is None:
-        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.UNAUTHENTICATED, message="로그인이 필요합니다.")
-    user_id = req.auth.uid
-    target_url = "/" 
-    try:
-        user_doc = db.collection('users').document(user_id).get()
-        if not user_doc.exists or not user_doc.to_dict().get('fcmToken'):
-            return {"status": "error", "message": "FCM 토큰을 찾을 수 없습니다."}
-        token = user_doc.to_dict()['fcmToken']
-        message = messaging.Message(
-            data={ 
-                "urlToOpen": target_url,
-                "title": "테스트 알림 🔔",
-                "body": "이 메시지가 보인다면 푸시 알림 기능이 정상적으로 동작하는 것입니다!"
-            },
-            token=token
-        )
-        messaging.send(message)
-        return {"status": "success"}
-    except Exception as e:
-        print(f"테스트 알림 전송 실패: {e}")
-        raise https_fn.HttpsError(code=https_fn.FunctionsErrorCode.INTERNAL, message="알림 전송 중 오류 발생")

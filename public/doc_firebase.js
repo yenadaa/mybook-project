@@ -7,7 +7,10 @@ import {
     GoogleAuthProvider, 
     signInWithRedirect, 
     signOut,
-    getRedirectResult
+    getRedirectResult,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    getIdToken
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { 
     getFirestore, 
@@ -39,6 +42,9 @@ import {
     getToken, 
     isSupported 
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
+import { 
+    getFunctions
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 // ⭐️ 님의 Firebase 설정
 const firebaseConfig = {
@@ -58,7 +64,7 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const messaging = getMessaging(app);
 const provider = new GoogleAuthProvider();
-
+const functions = getFunctions(app);
 // --- 전역 변수 ---
 const appId = "default-app-id";
 let currentUser = null;
@@ -102,19 +108,68 @@ document.addEventListener("DOMContentLoaded", () => {
     
     const loginBtn   = $("loginBtn");
     const logoutBtn  = $("logoutBtn");
+    const emailInput       = $("email-input");
+    const passwordInput    = $("password-input");
+    const loginModalOverlay     = $("login-modal-overlay");
+    const loginModalBody        = $("login-modal-body");
+    const loginModalCloseBtn    = $("login-modal-close-btn");
+    const loginModalBackBtn     = $("login-modal-back-btn");
+    const loginChoiceView       = $("login-choice-view");
+    const emailAuthView         = $("email-auth-view");
+    const googleLoginChoiceBtn  = $("google-login-choice-btn");
+    const emailLoginChoiceBtn   = $("email-login-choice-btn");
+    const emailLoginBtn    = $("email-login-btn");
+    const emailSignUpBtn   = $("email-signup-btn");
 
-    // 로그인 버튼 리스너
+    // 이ㅁㄹ 로그인 버튼 리스너
     if (loginBtn) {
-        loginBtn.addEventListener("click", async () => {
-            // (네이티브/웹 감지 로직 - 님이 추가하신 코드 유지)
+            loginBtn.addEventListener("click", () => {
+                // 구글 로그인을 바로 실행하지 않고, 모달을 엽니다.
+                if (loginModalOverlay) {
+                    loginModalOverlay.classList.remove("hidden");
+                    // 모달을 열 때 항상 '선택' 뷰부터 보이도록
+                    if (loginModalBody) loginModalBody.classList.remove("show-email-view");
+                }
+            });
+        }
+
+
+        if (loginModalCloseBtn) {
+        loginModalCloseBtn.addEventListener("click", () => {
+            if (loginModalOverlay) loginModalOverlay.classList.add("hidden");
+        });
+    }
+    // 모달 '뒤로' 버튼 (이메일 폼 -> 선택 뷰)
+    if (loginModalBackBtn) {
+        loginModalBackBtn.addEventListener("click", () => {
+            if (loginModalBody) loginModalBody.classList.remove("show-email-view");
+        });
+    }
+
+    // 모달: '구글 로그인' 선택
+    if (googleLoginChoiceBtn) {
+        googleLoginChoiceBtn.addEventListener("click", async () => {
+            // (기존 툴바 버튼의 로직을 이곳으로 이동)
             const isNativeApp = window.Capacitor && window.Capacitor.isNativePlatform();
 
             if (isNativeApp) {
                 // ... (네이티브 앱 로그인 로직) ...
             } else {
                 console.log("✅ WEB: 웹 (Redirect) 로그인 시도.");
+                // 모달을 즉시 닫아서 리디렉션 준비
+                if (loginModalOverlay) loginModalOverlay.classList.add("hidden"); 
                 await signInWithRedirect(auth, provider);
             }
+        });
+    }
+
+    // 모달: '이메일 로그인' 선택
+    if (emailLoginChoiceBtn) {
+        emailLoginChoiceBtn.addEventListener("click", () => {
+            // 이메일 폼 뷰를 보여줌
+            if (loginModalBody) loginModalBody.classList.add("show-email-view");
+            // ⬇️ (추가) 이메일 폼으로 자동 포커스
+            if (emailInput) emailInput.focus();
         });
     }
 
@@ -124,6 +179,50 @@ document.addEventListener("DOMContentLoaded", () => {
             signOut(auth).catch(e => console.error("로그아웃 실패:", e));
         });
     }
+    if (emailLoginBtn) {
+        emailLoginBtn.addEventListener("click", async () => {
+            const email = emailInput.value;
+            const password = passwordInput.value;
+            if (!email || !password) {
+                alert("이메일과 비밀번호를 입력하세요.");
+                return;
+            }
+            try {
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                console.log("✅ (Email) 로그인 성공:", userCredential.user);
+                // ⬇️ (추가) 성공 시 모달을 닫음
+                if (loginModalOverlay) loginModalOverlay.classList.add("hidden");
+            } catch (error) {
+                console.error("❌ (Email) 로그인 실패:", error);
+                handleAuthError(error); 
+            }
+        });
+    }
+
+    //이메일/비밀번호 회원가입 버튼 리스너
+    if (emailSignUpBtn) {
+            emailSignUpBtn.addEventListener("click", async () => {
+                const email = emailInput.value;
+                const password = passwordInput.value;
+                if (!email || !password) {
+                    alert("이메일과 비밀번호를 입력하세요.");
+                    return;
+                }
+                if (password.length < 6) {
+                    alert("비밀번호는 6자리 이상이어야 합니다.");
+                    return;
+                }
+                try {
+                    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                    console.log("✅ (Email) 회원가입 성공:", userCredential.user);
+                    // ⬇️ (추가) 성공 시 모달을 닫음
+                    if (loginModalOverlay) loginModalOverlay.classList.add("hidden");
+                } catch (error) {
+                    console.error("❌ (Email) 회원가입 실패:", error);
+                    handleAuthError(error);
+                }
+            });
+        }
 
     // 인증 상태 리스너 (핵심)
     onAuthStateChanged(auth, (user) => {
@@ -440,6 +539,7 @@ export async function openDoc(bookId) {
                 }
             }
         });
+        if (window.setChatbotEnabled) window.setChatbotEnabled(true);
 
     } catch (error) {
         console.error("Failed to open document:", error);
@@ -459,7 +559,7 @@ function resetToHome() {
     
     showEmptyState();
     if(window.setHighlightsData) window.setHighlightsData([]);
-    
+    if (window.setChatbotEnabled) window.setChatbotEnabled(false);
     // ⭐️ [파이프라인] 퀴즈 버튼 초기화
     const createQuizBtn = $("create-quiz-btn");
     if (createQuizBtn) {
@@ -517,5 +617,97 @@ window.saveHighlightChange = async function(type, highlightData) {
         console.error(`Firestore highlight '${type}' operation failed:`, error);
     }
 };
+/**
+* @param {Error} error Firebase Auth에서 발생한 오류 객체
+*/
+function handleAuthError(error) {
+    console.error("인증 오류 발생:", error.code, error.message);
+    switch (error.code) {
+        case 'auth/user-not-found':
+            alert("존재하지 않는 계정입니다. 이메일을 확인하거나 회원가입을 진행해주세요.");
+            break;
+        case 'auth/wrong-password':
+            alert("비밀번호가 틀렸습니다.");
+            break;
+        case 'auth/email-already-in-use':
+            alert("이미 사용 중인 이메일입니다.");
+            break;
+        case 'auth/invalid-email':
+            alert("유효하지 않은 이메일 주소입니다.");
+            break;
+        case 'auth/weak-password':
+            alert("비밀번호가 너무 약합니다. (최소 6자 이상)");
+            break;
+        default:
+            alert(`로그인/회원가입 중 오류가 발생했습니다: ${error.message}`);
+    }
+}
 
-console.log("✅ doc_firebase.js 로드 완료.");
+/**
+ * RAG 챗봇 백엔드(ragChat)를 HTTP fetch로 호출합니다.
+ * @param {string} bookId 
+ * @param {Array<Object>} messages - 채팅 내역 배열
+ * @param {string} systemPrompt - 챗봇 페르소나 프롬프트
+ * @returns {Promise<string>} 봇의 답변
+ */
+window.sendQueryToBot = async function(bookId, messages, systemPrompt) {
+    const RAG_CHAT_URL = "https://ragchat-kbtdkj4qza-du.a.run.app";
+
+    // 2. 인증 토큰 가져오기
+    const user = auth.currentUser;
+    if (!user) {
+        return "오류: 챗봇을 사용하려면 로그인이 필요합니다.";
+    }
+    let token;
+    try {
+        token = await getIdToken(user);
+    } catch (authError) {
+        console.error("Auth token error:", authError);
+        return "오류: 인증 토큰을 가져올 수 없습니다.";
+    }
+
+    // 3. 백엔드(ragChat)가 요구하는 Input 형식 생성
+    // ⭐️ 참고: 지금은 '해설형 챗봇'으로 프롬프트를 고정했습니다.
+    const defaultSystemPrompt = "당신은 '해설형 챗봇(교수)'입니다. 사용자의 질문에 대해 교수의 입장에서 친절하고 상세하게 설명해주세요.";
+    
+    // 👇 [수정 2] 'messages'가 이미 배열이므로 그대로 사용합니다.
+    // const messages = [
+    //     { "role": "user", "content": query }
+    // ];
+
+    const body = {
+        book_id: bookId, 
+        system_prompt: systemPrompt, // 👈 수정됨
+        messages: messages 
+    };
+
+    // 4. on_request 함수는 'fetch'로 직접 호출 (httpsOnCall 아님)
+    try {
+        console.log(`(챗봇) fetch 전송: ${RAG_CHAT_URL}`, body);
+        
+        const response = await fetch(RAG_CHAT_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` // ⭐️ 인증 헤더 필수
+            },
+            body: JSON.stringify(body)
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            // 백엔드에서 보낸 오류 메시지 (예: 422, 500)
+            throw new Error(result.error || `HTTP ${response.status} 오류`);
+        }
+
+        // 5. 백엔드가 보낸 'reply' 키에서 답변 추출
+        const answer = result.reply || "답변을 받지 못했습니다. (reply 키 부재)";
+        console.log("(챗봇) 답변 수신:", answer);
+        return answer;
+
+    } catch (error) {
+        console.error("❌ (챗봇) fetch 호출 실패:", error);
+        return `오류가 발생했습니다: ${error.message}`;
+    }
+};
