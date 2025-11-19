@@ -503,39 +503,41 @@ export async function openDoc(bookId) {
 
         // 3. ⭐️ [파이프라인] 'books' 컬렉션을 실시간으로 감시 (onSnapshot)
         const bookStatusRef = doc(db, "books", bookId);
+        /*안씀
         const createQuizBtn = $("create-quiz-btn"); // main.js에 있어야 함
         if (!createQuizBtn) {
             console.error("감시 실패: 'create-quiz-btn' 버튼을 찾을 수 없습니다.");
             return;
         }
+            */
 
         unsubscribeBookStatus = onSnapshot(bookStatusRef, (doc) => {
             if (!doc.exists()) {
                 // (문서는 있지만 'books'에 상태가 없음 = 파이프라인 실행 전)
-                createQuizBtn.disabled = true;
-                createQuizBtn.textContent = "PDF 처리 중... (최대 9분)";
+                //createQuizBtn.disabled = true;
+                //createQuizBtn.textContent = "PDF 처리 중... (최대 9분)";
                 console.log(`(파이프라인 감시) 'books/${bookId}' 문서 없음 (파이프라인 대기 중...)`);
             } else {
                 const status = doc.data()?.status;
                 console.log(`(파이프라인 감시) 'books/${bookId}' 상태 변경: ${status}`);
 
                 if (status === "processed_all_ok") {
-                    // ⭐️ 요리 완료!
+                    /*안씀
                     createQuizBtn.disabled = false;
-                    createQuizBtn.textContent = "AI 퀴즈/요약 만들기";
-                } else if (status === "processing") {
+                    createQuizBtn.textContent = "AI 퀴즈/요약 만들기";// */
+                } else if (status === "processing") {/*
                     // ⭐️ 요리 중!
                     createQuizBtn.disabled = true;
-                    createQuizBtn.textContent = "PDF 처리 중... (최대 9분)";
-                } else if (status && status.startsWith("error_")) {
+                    createQuizBtn.textContent = "PDF 처리 중... (최대 9분)"; */
+                } else if (status && status.startsWith("error_")) { /*
                     // ⭐️ 요리 실패!
                     createQuizBtn.disabled = true;
                     createQuizBtn.textContent = "PDF 처리 실패 (재업로드 필요)";
-                    console.error("파이프라인 오류:", status);
+                    console.error("파이프라인 오류:", status);*/
                 } else {
                     // (기타 상태 또는 processedData 없음)
-                    createQuizBtn.disabled = true;
-                    createQuizBtn.textContent = "PDF 처리 대기 중...";
+                    //createQuizBtn.disabled = true;
+                    //createQuizBtn.textContent = "PDF 처리 대기 중...";
                 }
             }
         });
@@ -549,24 +551,26 @@ export async function openDoc(bookId) {
 }
 
 // 홈으로 리셋 (뷰어 초기화)
-function resetToHome() {
+    function resetToHome() {
+/*
     if (unsubscribeHighlights) unsubscribeHighlights();
     if (unsubscribeBookStatus) unsubscribeBookStatus(); // ⭐️ 파이프라인 감시 중단
     currentBookId = null;
-
-    if (window.clearViewer) window.clearViewer();
+*/  if (window.clearViewer) window.clearViewer();
     else clearViewer();
     
     showEmptyState();
     if(window.setHighlightsData) window.setHighlightsData([]);
     if (window.setChatbotEnabled) window.setChatbotEnabled(false);
     // ⭐️ [파이프라인] 퀴즈 버튼 초기화
+    /*
     const createQuizBtn = $("create-quiz-btn");
     if (createQuizBtn) {
         createQuizBtn.disabled = true;
         createQuizBtn.textContent = "문서 열기 필요";
     }
-}
+        */
+    }
 
 // --- 하이라이트 저장 (기존 코드 유지) ---
 window.saveHighlightChange = async function(type, highlightData) {

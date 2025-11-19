@@ -23,12 +23,9 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log("✅ main.js DOMContentLoaded 이벤트 발생");
 
     // --- HTML 요소 가져오기 ---
-    const createQuizBtn = document.getElementById('create-quiz-btn');
-    const quizOptionsModal = document.getElementById('quiz-options-modal');
+    //const createQuizBtn = document.getElementById('create-quiz-btn'); 이제 안씀(11.19)
     const modalFullDocBtn = document.getElementById('modal-full-doc-btn');
-    const modalHighlightsBtn = document.getElementById('modal-highlights-btn');
-    const modalCloseBtn = document.getElementById('modal-close-btn');
-    
+    const modalHighlightsBtn = document.getElementById('modal-highlights-btn');    
     const quizModalOverlay = document.getElementById("quiz-modal-overlay");
     const quizModalBody = document.getElementById("quiz-modal-body");
     const quizCloseBtn = document.getElementById("quiz-close-btn");
@@ -36,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ... (버튼/모달 찾기 null 체크 - 기존 코드 유지) ...
 
     // --- 퀴즈 생성 로직 ---
+    /* 11.19 '퀴즈 만들기' 버튼은 더 이상 사용하지 않으므로 주석 처리
     if (createQuizBtn) {
         createQuizBtn.addEventListener('click', () => {
             console.log("🖱️ '퀴즈 만들기' 버튼 클릭됨!"); 
@@ -44,22 +42,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!bookId) {
                 return alert("퀴즈를 만들 문서를 먼저 열어주세요.");
             }
-            if (quizOptionsModal) { 
-                console.log("퀴즈 옵션 모달을 엽니다."); 
-                quizOptionsModal.classList.remove('hidden');
+        if (modalFullDocBtn) { 
+                modalFullDocBtn.click(); // 기존 전체 문서 퀴즈 실행 버튼을 대신 클릭
             } else {
-                console.error("❌ 'quiz-options-modal'이 없어서 퀴즈 옵션을 열 수 없습니다.");
+                console.error("❌ 'modal-full-doc-btn'이 없어서 퀴즈를 실행할 수 없습니다.");
             }
         });
     }
-
-    modalCloseBtn?.addEventListener('click', () => {
-        quizOptionsModal?.classList.add('hidden');
-    });
-
+*/    
     modalHighlightsBtn?.addEventListener('click', async () => {
-    
-        quizOptionsModal?.classList.add('hidden');
         const bookId = getCurrentBookId();
         const user = getCurrentUser();
 
@@ -120,9 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    modalFullDocBtn?.addEventListener('click', async () => {
-        quizOptionsModal?.classList.add('hidden');
-        
+    modalFullDocBtn?.addEventListener('click', async () => {        
         const bookId = getCurrentBookId();
         const user = getCurrentUser();
         if (!bookId || !user) {

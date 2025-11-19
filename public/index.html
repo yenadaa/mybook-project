@@ -19,10 +19,12 @@
 <body>
   <div class="app">
    <div class="toolbar">
-    <button id="create-quiz-btn" class="label-btn"><i class="fa-solid fa-magic-sparkles"></i> 퀴즈 만들기</button>
-      
-      <input id="file" class="file-input" type="file" accept="application/pdf" />
-      <span class="divider"></span>
+    <div class="group">
+      <button id="modal-full-doc-btn" title="전체 문서 퀴즈">전체 요약/퀴즈</button>
+      <button id="modal-highlights-btn" title="하이라이트 기반 퀴즈">하이라이트 퀴즈</button>
+    </div>
+    <input id="file" class="file-input" type="file" accept="application/pdf" />
+    <span class="divider"></span>
 
       <div class="group">
         <button id="prevPage" title="이전 페이지"><i class="fa-solid fa-chevron-left"></i></button>
