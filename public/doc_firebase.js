@@ -46,7 +46,7 @@ import {
     getFunctions
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
-// ⭐️ 님의 Firebase 설정
+// ⭐️ Firebase 설정
 const firebaseConfig = {
     apiKey: "AIzaSyAeWQaegsc3H01i8qkNoyFZX6CcaW-iJ2g",
     authDomain: "mybook-d143d.web.app",
@@ -65,6 +65,7 @@ const storage = getStorage(app);
 const messaging = getMessaging(app);
 const provider = new GoogleAuthProvider();
 const functions = getFunctions(app);
+
 // --- 전역 변수 ---
 const appId = "default-app-id";
 let currentUser = null;
@@ -79,7 +80,7 @@ const $ = (id) => document.getElementById(id);
 // --- 인증 및 UI 관리 ---
 document.addEventListener("DOMContentLoaded", () => {
     
-    // (팝업 차단 경고용 CSS - 님이 추가하신 코드 유지)
+    // (팝업 차단 경고용 CSS)
     if (!$('custom-alert-style')) {
         const style = document.createElement('style');
         style.id = 'custom-alert-style';
@@ -90,7 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
         document.head.appendChild(style);
     }
 
-    // (리디렉션 로그인 결과 처리 - 님이 추가하신 코드 유지)
+    // (리디렉션 로그인 결과 처리)
     getRedirectResult(auth)
         .then((result) => {
             if (result) {
@@ -121,25 +122,22 @@ document.addEventListener("DOMContentLoaded", () => {
     const emailLoginBtn    = $("email-login-btn");
     const emailSignUpBtn   = $("email-signup-btn");
 
-    // 이ㅁㄹ 로그인 버튼 리스너
+    // 로그인 버튼 리스너
     if (loginBtn) {
             loginBtn.addEventListener("click", () => {
-                // 구글 로그인을 바로 실행하지 않고, 모달을 엽니다.
                 if (loginModalOverlay) {
                     loginModalOverlay.classList.remove("hidden");
-                    // 모달을 열 때 항상 '선택' 뷰부터 보이도록
                     if (loginModalBody) loginModalBody.classList.remove("show-email-view");
                 }
             });
         }
 
-
-        if (loginModalCloseBtn) {
+    if (loginModalCloseBtn) {
         loginModalCloseBtn.addEventListener("click", () => {
             if (loginModalOverlay) loginModalOverlay.classList.add("hidden");
         });
     }
-    // 모달 '뒤로' 버튼 (이메일 폼 -> 선택 뷰)
+    // 모달 '뒤로' 버튼
     if (loginModalBackBtn) {
         loginModalBackBtn.addEventListener("click", () => {
             if (loginModalBody) loginModalBody.classList.remove("show-email-view");
@@ -149,14 +147,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // 모달: '구글 로그인' 선택
     if (googleLoginChoiceBtn) {
         googleLoginChoiceBtn.addEventListener("click", async () => {
-            // (기존 툴바 버튼의 로직을 이곳으로 이동)
             const isNativeApp = window.Capacitor && window.Capacitor.isNativePlatform();
-
             if (isNativeApp) {
                 // ... (네이티브 앱 로그인 로직) ...
             } else {
                 console.log("✅ WEB: 웹 (Redirect) 로그인 시도.");
-                // 모달을 즉시 닫아서 리디렉션 준비
                 if (loginModalOverlay) loginModalOverlay.classList.add("hidden"); 
                 await signInWithRedirect(auth, provider);
             }
@@ -166,9 +161,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // 모달: '이메일 로그인' 선택
     if (emailLoginChoiceBtn) {
         emailLoginChoiceBtn.addEventListener("click", () => {
-            // 이메일 폼 뷰를 보여줌
             if (loginModalBody) loginModalBody.classList.add("show-email-view");
-            // ⬇️ (추가) 이메일 폼으로 자동 포커스
             if (emailInput) emailInput.focus();
         });
     }
@@ -179,6 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
             signOut(auth).catch(e => console.error("로그아웃 실패:", e));
         });
     }
+
     if (emailLoginBtn) {
         emailLoginBtn.addEventListener("click", async () => {
             const email = emailInput.value;
@@ -190,7 +184,6 @@ document.addEventListener("DOMContentLoaded", () => {
             try {
                 const userCredential = await signInWithEmailAndPassword(auth, email, password);
                 console.log("✅ (Email) 로그인 성공:", userCredential.user);
-                // ⬇️ (추가) 성공 시 모달을 닫음
                 if (loginModalOverlay) loginModalOverlay.classList.add("hidden");
             } catch (error) {
                 console.error("❌ (Email) 로그인 실패:", error);
@@ -215,7 +208,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 try {
                     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                     console.log("✅ (Email) 회원가입 성공:", userCredential.user);
-                    // ⬇️ (추가) 성공 시 모달을 닫음
                     if (loginModalOverlay) loginModalOverlay.classList.add("hidden");
                 } catch (error) {
                     console.error("❌ (Email) 회원가입 실패:", error);
@@ -224,7 +216,7 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         }
 
-    // 인증 상태 리스너 (핵심)
+    // 인증 상태 리스너
     onAuthStateChanged(auth, (user) => {
         currentUser = user;
         const userDisplay = $("authStatus");
@@ -294,7 +286,7 @@ export function getCurrentBookId() {
 export function initDocSystem(uid) {
     if (unsubscribeDocs) unsubscribeDocs();
     if (unsubscribeHighlights) unsubscribeHighlights();
-    if (unsubscribeBookStatus) unsubscribeBookStatus(); // ⭐️ 파이프라인 감시 중단
+    if (unsubscribeBookStatus) unsubscribeBookStatus();
 
     const listEl = $("doc-list");
     if (!listEl) { console.error("doc-list element not found."); return; }
@@ -366,7 +358,7 @@ export async function createDocFromFile(file) {
         });
         const bookId = docRef.id;
         
-        // 2. Storage 업로드 (⭐️ 이 경로가 'on_pdf_upload'를 실행시킴)
+        // 2. Storage 업로드
         const storagePath = `artifacts/${appId}/users/${user.uid}/docs/${bookId}.pdf`;
         const storageRefInstance = storageRef(storage, storagePath);
         await storageUploadBytes(storageRefInstance, file);
@@ -430,7 +422,7 @@ export async function deleteDocFromDb(docId) {
         snapshot.forEach(doc => batch.delete(doc.ref));
         await batch.commit();
         
-        // 4. ⭐️ [파이프라인] 'books' 컬렉션의 처리된 데이터도 삭제
+        // 4. 처리된 데이터 삭제
         try {
             await deleteDoc(doc(db, "books", docId));
         } catch (e) { console.warn("Processed data delete failed:", e); }
@@ -443,18 +435,17 @@ export async function deleteDocFromDb(docId) {
     }
 }
 
-// ⭐️ [수정] openDoc 함수 (파이프라인 감시 기능 포함)
+// ⭐️ [수정] openDoc 함수 (파이프라인 감시 및 상태 표시)
 export async function openDoc(bookId) {
     const user = currentUser;
     if (!user || !bookId) return;
 
-    // 1. (기존) 다른 책을 열면, 이전 책의 감시(listener)를 중단
     if (unsubscribeHighlights) unsubscribeHighlights();
-    if (unsubscribeBookStatus) unsubscribeBookStatus(); // ⭐️ 파이프라인 감시 중단
+    if (unsubscribeBookStatus) unsubscribeBookStatus();
     
     currentBookId = bookId;
 
-    // (UI 업데이트)
+    // UI 업데이트
     document.querySelectorAll('.doc-row').forEach(el => el.classList.remove('active'));
     document.querySelector(`.doc-row[data-id="${bookId}"]`)?.classList.add('active');
 
@@ -474,19 +465,17 @@ export async function openDoc(bookId) {
         const url = await getStorageDownloadURL(storageRefInstance);
         console.log(`PDF Download URL: ${url}`);
         
-        // (PDF 다운로드 및 뷰어 렌더링)
         const response = await fetch(url);
         if (!response.ok) throw new Error(`PDF Download Failed: HTTP status ${response.status}`);
         const arrayBuffer = await response.arrayBuffer();
         
-        // (window.renderDocument는 viewer-renderer.js에 있다고 가정)
         if (window.renderDocument) {
             window.renderDocument(arrayBuffer);
         } else {
             console.error("window.renderDocument not found!");
         }
 
-        // (하이라이트 실시간 리스너 설정)
+        // 하이라이트 리스너
         const highlightsQuery = query(collection(db, "highlights"), where("bookId", "==", bookId), where("userId", "==", user.uid));
         unsubscribeHighlights = onSnapshot(highlightsQuery,
             (snapshot) => {
@@ -501,46 +490,64 @@ export async function openDoc(bookId) {
             }
         );
 
-        // 3. ⭐️ [파이프라인] 'books' 컬렉션을 실시간으로 감시 (onSnapshot)
+        // ⭐️ [파이프라인] 실시간 감시 및 진행상황 표시
         const bookStatusRef = doc(db, "books", bookId);
-        /*안씀
-        const createQuizBtn = $("create-quiz-btn"); // main.js에 있어야 함
-        if (!createQuizBtn) {
-            console.error("감시 실패: 'create-quiz-btn' 버튼을 찾을 수 없습니다.");
-            return;
-        }
-            */
+        const statusLabel = $("pipeline-status");
+        const btnFull = $("modal-full-doc-btn");
+        const btnHigh = $("modal-highlights-btn");
 
         unsubscribeBookStatus = onSnapshot(bookStatusRef, (doc) => {
             if (!doc.exists()) {
-                // (문서는 있지만 'books'에 상태가 없음 = 파이프라인 실행 전)
-                //createQuizBtn.disabled = true;
-                //createQuizBtn.textContent = "PDF 처리 중... (최대 9분)";
-                console.log(`(파이프라인 감시) 'books/${bookId}' 문서 없음 (파이프라인 대기 중...)`);
+                // 1. 업로드 직후 (아직 DB 기록 없음)
+                if (statusLabel) {
+                    statusLabel.textContent = "대기 중...";
+                    statusLabel.style.color = "var(--muted)";
+                }
+                if (btnFull) btnFull.disabled = true;
+                if (btnHigh) btnHigh.disabled = true;
             } else {
-                const status = doc.data()?.status;
-                console.log(`(파이프라인 감시) 'books/${bookId}' 상태 변경: ${status}`);
+                const data = doc.data();
+                const status = data?.status;
+                // ⭐️ 백엔드가 보내준 진행 상황 메시지 읽기
+                const progressMsg = data?.progressMessage || "처리 중..."; 
+
+                console.log(`(파이프라인) 상태: ${status}, 메시지: ${progressMsg}`);
 
                 if (status === "processed_all_ok") {
-                    /*안씀
-                    createQuizBtn.disabled = false;
-                    createQuizBtn.textContent = "AI 퀴즈/요약 만들기";// */
-                } else if (status === "processing") {/*
-                    // ⭐️ 요리 중!
-                    createQuizBtn.disabled = true;
-                    createQuizBtn.textContent = "PDF 처리 중... (최대 9분)"; */
-                } else if (status && status.startsWith("error_")) { /*
-                    // ⭐️ 요리 실패!
-                    createQuizBtn.disabled = true;
-                    createQuizBtn.textContent = "PDF 처리 실패 (재업로드 필요)";
-                    console.error("파이프라인 오류:", status);*/
+                    // ✅ 완료
+                    if (statusLabel) {
+                        statusLabel.textContent = "✅ 분석 완료"; 
+                        statusLabel.style.color = "green";
+                    }
+                    if (btnFull) btnFull.disabled = false;
+                    if (btnHigh) btnHigh.disabled = false;
+
+                } else if (status === "processing") {
+                    // ⏳ 진행 중 (동적 메시지)
+                    if (statusLabel) {
+                        statusLabel.textContent = `⏳ ${progressMsg}`; 
+                        statusLabel.style.color = "#eab308"; 
+                    }
+                    if (btnFull) btnFull.disabled = true;
+                    if (btnHigh) btnHigh.disabled = true;
+
+                } else if (status && status.startsWith("error_")) {
+                    // ❌ 에러
+                    if (statusLabel) {
+                        statusLabel.textContent = `❌ 오류: ${status}`;
+                        statusLabel.style.color = "red";
+                    }
+                    if (btnFull) btnFull.disabled = true;
+                    if (btnHigh) btnHigh.disabled = true;
                 } else {
-                    // (기타 상태 또는 processedData 없음)
-                    //createQuizBtn.disabled = true;
-                    //createQuizBtn.textContent = "PDF 처리 대기 중...";
+                    // 대기
+                    if (statusLabel) statusLabel.textContent = "준비 중...";
+                    if (btnFull) btnFull.disabled = true;
+                    if (btnHigh) btnHigh.disabled = true;
                 }
             }
         });
+
         if (window.setChatbotEnabled) window.setChatbotEnabled(true);
 
     } catch (error) {
@@ -550,27 +557,32 @@ export async function openDoc(bookId) {
     }
 }
 
-// 홈으로 리셋 (뷰어 초기화)
-    function resetToHome() {
-/*
+// ⭐️ [복구] 홈으로 리셋 함수
+function resetToHome() {
     if (unsubscribeHighlights) unsubscribeHighlights();
-    if (unsubscribeBookStatus) unsubscribeBookStatus(); // ⭐️ 파이프라인 감시 중단
+    if (unsubscribeBookStatus) unsubscribeBookStatus();
     currentBookId = null;
-*/  if (window.clearViewer) window.clearViewer();
+
+    if (window.clearViewer) window.clearViewer();
     else clearViewer();
     
     showEmptyState();
     if(window.setHighlightsData) window.setHighlightsData([]);
     if (window.setChatbotEnabled) window.setChatbotEnabled(false);
-    // ⭐️ [파이프라인] 퀴즈 버튼 초기화
-    /*
-    const createQuizBtn = $("create-quiz-btn");
-    if (createQuizBtn) {
-        createQuizBtn.disabled = true;
-        createQuizBtn.textContent = "문서 열기 필요";
+    
+    // 상태 라벨 및 버튼 초기화
+    const statusLabel = $("pipeline-status");
+    const btnFull = $("modal-full-doc-btn");
+    const btnHigh = $("modal-highlights-btn");
+
+    if (statusLabel) {
+        statusLabel.textContent = "문서 열기 필요";
+        statusLabel.style.color = "var(--muted)";
     }
-        */
-    }
+    if (btnFull) btnFull.disabled = true;
+    if (btnHigh) btnHigh.disabled = true;
+}
+
 
 // --- 하이라이트 저장 (기존 코드 유지) ---
 window.saveHighlightChange = async function(type, highlightData) {
@@ -621,9 +633,7 @@ window.saveHighlightChange = async function(type, highlightData) {
         console.error(`Firestore highlight '${type}' operation failed:`, error);
     }
 };
-/**
-* @param {Error} error Firebase Auth에서 발생한 오류 객체
-*/
+
 function handleAuthError(error) {
     console.error("인증 오류 발생:", error.code, error.message);
     switch (error.code) {
@@ -649,15 +659,10 @@ function handleAuthError(error) {
 
 /**
  * RAG 챗봇 백엔드(ragChat)를 HTTP fetch로 호출합니다.
- * @param {string} bookId 
- * @param {Array<Object>} messages - 채팅 내역 배열
- * @param {string} systemPrompt - 챗봇 페르소나 프롬프트
- * @returns {Promise<string>} 봇의 답변
  */
 window.sendQueryToBot = async function(bookId, messages, systemPrompt) {
     const RAG_CHAT_URL = "https://ragchat-kbtdkj4qza-du.a.run.app";
 
-    // 2. 인증 토큰 가져오기
     const user = auth.currentUser;
     if (!user) {
         return "오류: 챗봇을 사용하려면 로그인이 필요합니다.";
@@ -670,22 +675,12 @@ window.sendQueryToBot = async function(bookId, messages, systemPrompt) {
         return "오류: 인증 토큰을 가져올 수 없습니다.";
     }
 
-    // 3. 백엔드(ragChat)가 요구하는 Input 형식 생성
-    // ⭐️ 참고: 지금은 '해설형 챗봇'으로 프롬프트를 고정했습니다.
-    const defaultSystemPrompt = "당신은 '해설형 챗봇(교수)'입니다. 사용자의 질문에 대해 교수의 입장에서 친절하고 상세하게 설명해주세요.";
-    
-    // 👇 [수정 2] 'messages'가 이미 배열이므로 그대로 사용합니다.
-    // const messages = [
-    //     { "role": "user", "content": query }
-    // ];
-
     const body = {
         book_id: bookId, 
-        system_prompt: systemPrompt, // 👈 수정됨
+        system_prompt: systemPrompt, 
         messages: messages 
     };
 
-    // 4. on_request 함수는 'fetch'로 직접 호출 (httpsOnCall 아님)
     try {
         console.log(`(챗봇) fetch 전송: ${RAG_CHAT_URL}`, body);
         
@@ -693,7 +688,7 @@ window.sendQueryToBot = async function(bookId, messages, systemPrompt) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}` // ⭐️ 인증 헤더 필수
+                'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify(body)
         });
@@ -701,11 +696,9 @@ window.sendQueryToBot = async function(bookId, messages, systemPrompt) {
         const result = await response.json();
 
         if (!response.ok) {
-            // 백엔드에서 보낸 오류 메시지 (예: 422, 500)
             throw new Error(result.error || `HTTP ${response.status} 오류`);
         }
 
-        // 5. 백엔드가 보낸 'reply' 키에서 답변 추출
         const answer = result.reply || "답변을 받지 못했습니다. (reply 키 부재)";
         console.log("(챗봇) 답변 수신:", answer);
         return answer;

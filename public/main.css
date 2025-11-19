@@ -565,15 +565,11 @@ input[type="range"] { accent-color: var(--accent); }
 }
 
 #login-modal-body {
-
   max-width: 400px;
 
   /* 뷰 전환을 위해 overflow hidden */
-
   overflow: hidden;
-
   position: relative;
-
 }
 
 
@@ -581,271 +577,158 @@ input[type="range"] { accent-color: var(--accent); }
 #login-choice-view,
 
 #email-auth-view {
-
   transition: all 0.3s ease-in-out;
-
 }
-
-
 
 /* 이메일 폼이 옆으로 숨어있다가 나옴 */
 
 #email-auth-view {
-
   position: absolute;
-
   top: 0;
-
   left: 0;
-
   width: 100%;
-
   padding: 24px; /* modal-body의 padding과 동일하게 */
-
   box-sizing: border-box;
-
   transform: translateX(100%); /* 오른쪽 밖에 숨기기 */
-
   opacity: 0;
-
 }
-
-
 
 /* .show-email-view가 적용되면 뷰 전환 */
 
 #login-modal-body.show-email-view #login-choice-view {
-
   transform: translateX(-100%); /* 왼쪽으로 숨기기 */
-
   opacity: 0;
-
 }
 
 #login-modal-body.show-email-view #email-auth-view {
-
   position: relative; /* 다시 보이게 */
-
   transform: translateX(0);
-
   opacity: 1;
-
 }
-
-
-
 
 
 /* -- 버튼 스타일 -- */
 
 .modal-actions-vertical {
-
   display: flex;
-
   flex-direction: column;
-
   gap: 12px;
-
   margin-top: 24px;
-
 }
 
 .modal-actions-vertical button {
-
   padding: 12px;
-
   font-size: 15px;
-
   font-weight: 600;
-
   border-radius: 6px;
-
   border: 1px solid var(--border-dark);
-
   background: var(--panel);
-
   color: var(--fg);
-
   cursor: pointer;
-
   text-align: left;
-
   display: flex;
-
   align-items: center;
-
   gap: 10px;
-
 }
 
 .modal-actions-vertical button:hover {
-
   background: var(--panel-light);
-
 }
 
 .modal-actions-vertical button i {
-
   width: 20px;
-
   text-align: center;
-
 }
-
-
 
 /* -- 이메일 폼 스타일 (재사용) -- */
 
 #email-auth-view .form-group {
-
   margin-bottom: 10px;
-
 }
 
 #email-auth-view label {
-
   display: block;
-
   font-size: 13px;
-
   font-weight: 500;
-
   margin-bottom: 4px;
-
   color: var(--fg-light);
-
 }
 
 #email-auth-view input[type="email"],
 
 #email-auth-view input[type="password"] {
-
   width: 100%;
-
   padding: 10px;
-
   border-radius: 4px;
-
   border: 1px solid var(--border-dark);
-
   background: var(--bg);
-
   color: var(--fg);
-
   box-sizing: border-box;
-
 }
 
 #email-auth-view .button-group {
-
   display: flex;
-
   gap: 8px;
-
   margin-top: 16px;
-
 }
 
 #email-auth-view .button-group button {
-
   flex: 1;
-
   padding: 10px;
-
   border: none;
-
   border-radius: 4px;
-
   cursor: pointer;
-
   font-weight: 600;
-
 }
 
 
 
 /* (로그인/가입 버튼 CSS는 이전 것과 동일하게 적용됩니다) */
-
 /* main.css에 #email-login-btn 등의 스타일이 이미 있다면 */
-
 /* 이 CSS가 덮어쓰거나, 기존 스타일을 따라갑니다. */
 
 #email-login-btn {
-
   background-color: var(--primary);
-
   color: white;
-
 }
 
 #email-login-btn:hover {
-
   background-color: var(--primary-dark);
-
 }
 
 #email-signup-btn {
-
   background-color: var(--panel-dark);
-
   color: var(--fg);
-
 }
 
 #email-signup-btn:hover {
-
   background-color: var(--border-dark);
-
 }
-
-
-
 
 
 .modal-back-btn {
-
   position: absolute;
-
   top: 20px;
-
   left: 20px;
-
   background: none;
-
   border: none;
-
   font-size: 16px;
-
   color: var(--fg-light);
-
   cursor: pointer;
-
   padding: 4px;
-
 }
 
 .modal-back-btn:hover {
-
   color: var(--fg);
-
 }
-
-
 
 /* (추가) 기존 모달 hidden 클래스 확인 */
 
 .modal-overlay.hidden {
-
   display: none;
-
 }
 
-
-
 /*챗봇 토글 버튼*/
-
-
-
 
 .chat-toggle-btn {
   position: fixed;
@@ -866,7 +749,6 @@ input[type="range"] { accent-color: var(--accent); }
 
 
 /* 챗봇 창 */
-
 .chat-window {
     position: absolute;
     top: 0;               /* 👈 사이드바의 맨 위 */
@@ -875,138 +757,89 @@ input[type="range"] { accent-color: var(--accent); }
     height: 100%;         /* 👈 사이드바의 전체 높이 */
     z-index: 100;         /* 👈 노트 목록(notes)보다 위에 보이도록 */
 
-   
-
     /* (아래는 기존과 동일) */
-
     background-color: white;
-
     border: 1px solid #ccc;
-
     border-radius: 10px;
-
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-
     display: flex;
-
     flex-direction: column;
-
 }
 
 
 
 .chat-header {
-
     display: flex;
-
     align-items: center; /* 수직 정렬 */
-
     padding: 10px 10px; /* 패딩 약간 조정 */
-
     background-color: #f1f1f1;
-
     border-bottom: 1px solid #ccc;
-
     border-radius: 10px 10px 0 0;
-
 }
 
 .chat-persona-select {
-
     flex-grow: 1; /* 남은 공간 모두 차지 */
-
     border: none;
-
     background-color: transparent; /* 헤더 배경색과 동일하게 */
-
     font-size: 16px;
-
     font-weight: bold;
-
     padding: 5px;
-
     margin-right: 10px;
-
 }
 
 .chat-persona-select:focus {
-
     outline: none;
-
 }
 
 .chat-header h3 {
-
     margin: 0;
-
 }
 
 #chat-close-btn {
-
     background: none;
-
     border: none;
-
     font-size: 24px;
-
     cursor: pointer;
-
     flex-shrink: 0; /* 줄어들지 않게 */
-
 }
 
 
 
 /* 메시지 영역 */
-
 .chat-messages {
-
     flex-grow: 1;
-
-    padding: 15px;
-
+    padding: 20px;         /* 전체 창 여백 늘림 */
     overflow-y: auto;
-
     display: flex;
-
     flex-direction: column;
-
-    gap: 10px;
-
+    gap: 16px;             /* 메시지 사이 간격을 10px -> 16px로 넓힘 */
 }
-
 
 
 .chat-message {
-
-    max-width: 80%;
-
-    padding: 10px;
-
-    border-radius: 15px;
-
+    max-width: 85%;
+    padding: 14px 18px;
+    border-radius: 18px;
     word-wrap: break-word;
 
+    font-size : 16px;
+    line-height: 1.6;
+    font-weight : 500;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
 }
 
 .chat-message p {
-
     margin: 0;
-
 }
 
 
 
 /* 봇 메시지 (왼쪽) */
-
 .chat-message.bot {
-
-    background-color: #f0f0f0;
-
+    background-color: #f3f4f6; /* 눈이 편한 연한 회색 */
+    color: #333;               /* 글자색 진한 회색 */
     align-self: flex-start;
-
-    border-bottom-left-radius: 0;
-
+    border-bottom-left-radius: 4px;
 }
 
 
@@ -1014,15 +847,10 @@ input[type="range"] { accent-color: var(--accent); }
 /* 유저 메시지 (오른쪽) */
 
 .chat-message.user {
-
-    background-color: var(--primary-color);
-
-    color: white;
-
+    background-color: var(--primary-color); /* 파란색 */
+    color: #fff;               /* 흰색 글자 */
     align-self: flex-end;
-
-    border-bottom-right-radius: 0;
-
+    border-bottom-right-radius: 4px;
 }
 
 
@@ -1030,45 +858,34 @@ input[type="range"] { accent-color: var(--accent); }
 /* 로딩 인디케이터 */
 
 .chat-message.loading p {
-
     font-style: italic;
-
     color: #888;
-
 }
 
 
 
 /* 입력 영역 */
-
 .chat-input-area {
-
     display: flex;
-
     padding: 10px;
-
     border-top: 1px solid #ccc;
-
 }
 
 #chat-input {
-
     flex-grow: 1;
-
     border: 1px solid #ccc;
-
-    border-radius: 5px;
-
-    padding: 8px;
-
+    border-radius: 24px;       /* 입력창 둥글게 */
+    padding: 12px 16px;        /* 입력창 내부 여백 확대 */
+    font-size: 16px;           /* 입력 글자 크기 확대 */
 }
 
 #chat-send-btn {
-
     margin-left: 10px;
-
-    padding: 8px 12px;
-
+    padding: 10px 16px;
+    font-size: 16px;           /* 전송 버튼 글자도 확대 */
+    border-radius: 8px;
+    background-color: var(--primary-color);
+    color: white;
 }
 
 .right-grid-container {

@@ -47,13 +47,13 @@ ALLOWED_ORIGIN = "https://mybook-d143d.web.app"
 )
 def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
     """
-    [⭐️ 최종 파이프라인]
+    [⭐️ 최종 파이프라인 + 진행상황 알림]
     """
     # ⭐️ [지연 로딩]
     from quiz_generator import (
         PreprocessedDoc, Chunk, Output, ReviewOut, SummaryOut,
         pdf_to_preprocessed_doc, generate_base_review, 
-        generate_custom_review, get_openai_embeddings
+        generate_custom_review
     )
 
     global storage_client, db
@@ -62,40 +62,42 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
 
     file_path = event.data.name
     
-    # 1. 'artifacts/' 경로 감시
     if not file_path or not file_path.startswith("artifacts/") or not file_path.lower().endswith(".pdf"):
-        print(f"Ignoring file (Not in 'artifacts/' or not PDF): {file_path}")
         return
 
-    # 2. 'artifacts/' 경로에서 user_id와 book_id 추출
     try:
         parts = file_path.split("/")
         user_id = parts[3]
         book_id = parts[5].replace(".pdf", "")
     except IndexError:
-        print(f"Invalid path structure: {file_path}")
         return
 
     print(f"--- 🚀 '단일 처리 파이프라인' 시작 (Book ID: {book_id}) ---")
-    
     doc_ref = db.collection("books").document(book_id)
-    doc_ref.set({
-        "status": "processing",
-        "owner_uid": user_id,
-        "createdAt": firestore.SERVER_TIMESTAMP
-    }, merge=True)
+
+    # ⭐️ [헬퍼 함수] 진행 상황 업데이트용
+    def update_status(msg):
+        print(f"--- 📢 [Progress] {msg} ---")
+        doc_ref.set({
+            "status": "processing",
+            "progressMessage": msg,  # 👈 이 필드를 프론트에서 읽습니다.
+            "owner_uid": user_id,
+            "lastUpdated": firestore.SERVER_TIMESTAMP
+        }, merge=True)
+
+    # 1. 시작 알림
+    update_status("PDF 다운로드 및 분석 준비 중...")
 
     # 3. PDF 다운로드
     try:
         blob = storage_client.blob(file_path)
         pdf_bytes = blob.download_as_bytes()
-        print(f"--- 📥 Checkpoint 1: PDF 다운로드 성공 ---")
+        update_status("텍스트 추출 및 전처리 중...") # 👈 업데이트
     except Exception as e:
-        print(f"Error downloading PDF: {e}")
         doc_ref.set({"status": f"error_download: {e}"}, merge=True)
         return
 
-    # 4. 텍스트 청크 생성 (1단계)
+    # 4. 텍스트 청크 생성
     try:
         processed_doc: "PreprocessedDoc" = pdf_to_preprocessed_doc(
             pdf_bytes=pdf_bytes,
@@ -103,9 +105,8 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
         )
         if not processed_doc.chunks:
              raise ValueError('PDF에서 텍스트를 추출할 수 없습니다.')
-        print(f"--- ✅ Checkpoint 2: 텍스트 추출/처리 성공 ({len(processed_doc.chunks)}개 청크) ---")
+        update_status(f"AI 요약 및 기본 퀴즈 생성 중... ({len(processed_doc.chunks)}개 구간)") # 👈 업데이트
     except Exception as e:
-        print(f"Error in pdf_to_preprocessed_doc: {e}")
         doc_ref.set({"status": f"error_processing: {e}"}, merge=True)
         return
 
@@ -115,9 +116,8 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
             processed_doc, 
             model="gpt-4o-mini"
         )
-        print(f"--- ✅ Checkpoint 3: '전체 요약' 생성 성공 ---")
+        update_status("심화(하이라이트) 퀴즈 생성 중...") # 👈 업데이트
     except Exception as e:
-        print(f"Error in generate_base_review: {e}")
         doc_ref.set({"status": f"error_base_review: {e}"}, merge=True)
         return
 
@@ -131,31 +131,26 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
             counts_override={"ox": 0, "short": 0, "discussion": 10},
             model="gpt-4o-mini"
         )
-        print(f"--- ✅ Checkpoint 4: '하이라이트(루브릭)' 퀴즈 생성 성공 ---")
+        update_status("챗봇용 지식(Vector) 업로드 중...") # 👈 업데이트
     except Exception as e:
-        print(f"Error in generate_custom_review: {e}")
         doc_ref.set({"status": f"error_custom_review: {e}"}, merge=True)
         return
 
     # 7. [챗봇] 챗봇용 벡터 생성
     try:
-        print(f"--- 🤖 Checkpoint 7: Supabase 클라이언트 지연 로딩 ---")
         from langchain_openai import OpenAIEmbeddings
         from langchain_community.vectorstores import SupabaseVectorStore
         from supabase import create_client
-        # ⭐️ (추가) Supabase 클라이언트 지연 로딩 (test/main.py 로직)
+        
         global supabase_client, supabase_embeddings
         if supabase_client is None:
             supabase_url = os.environ.get("SUPABASE_URL")
             supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
-            if not supabase_url or not supabase_key:
-                raise Exception("SUPABASE_URL, SUPABASE_SERVICE_KEY 비밀 환경변수가 설정되지 않았습니다.")
             supabase_client = create_client(supabase_url, supabase_key)
         
         if supabase_embeddings is None:
             supabase_embeddings = OpenAIEmbeddings(openai_api_key=os.environ.get("OPENAI_API_KEY"))
 
-        # ⭐️ (추가) LangChain용 Supabase 벡터 스토어 객체 생성
         vector_store = SupabaseVectorStore(
             client=supabase_client,
             embedding=supabase_embeddings,
@@ -163,33 +158,22 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
             query_name="match_documents"
         )
 
-        print(f"--- ☁️ Supabase에 '{book_id}' 문서 업로드 시작 ---")
-
-        # ⭐️ (추가) 모든 청크에 'bookId' 메타데이터 추가 (process_pdf.py 로직)
         for chunk in processed_doc.chunks:
             chunk.metadata = {"bookId": book_id}
 
-        # ⭐️ (추가) Supabase에 기존 데이터 삭제
         supabase_client.table("documents").delete().eq("metadata->>bookId", book_id).execute()
-        print(f"--- 🧹 Supabase 기존 '{book_id}' 데이터 삭제 완료 ---")
-
-        # ⭐️ (추가) Supabase에 새 데이터 업로드
         vector_store.add_documents(processed_doc.chunks)
-        print(f"--- ✅ Supabase 업로드 완료 ---")
         
-        # ⭐️ (중요) Firestore 저장 공간 절약을 위해, 임베딩 데이터는 제거
         for chunk in processed_doc.chunks:
             chunk.embedding = None
             
-        print("--- ✅ Checkpoint 7: Supabase 업로드 및 로컬 임베딩 제거 완료 ---")
+        update_status("모든 데이터 저장 및 마무리 중...") # 👈 업데이트
 
     except Exception as e:
-        print(f"Error during Supabase upload or embedding: {e}")
-        print(traceback.format_exc()) # ⭐️ 디버깅을 위해 상세 로그 추가
         doc_ref.set({"status": f"error_supabase_upload: {e}"}, merge=True)
         return
 
-    # 8. [⭐️ 저장] 모든 '요리'를 Firestore에 저장
+    # 8. [⭐️ 저장] 완료
     try:
         final_custom_output = Output(
             summaries=SummaryOut(summary="", sources=all_chunk_ids), 
@@ -202,13 +186,12 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
             "baseReviewPayload": base_review_output.model_dump(),
             "customReviewPayload": final_custom_output.model_dump(),
             "status": "processed_all_ok",
+            "progressMessage": "✅ 분석 완료! 퀴즈를 풀어보세요.", # 👈 최종 메시지
             "lastProcessed": firestore.SERVER_TIMESTAMP,
             "owner_uid": user_id
         }, merge=True) 
         
-        print(f"--- ✅ FINAL: Firestore 'books/{book_id}'에 모든 데이터 저장 완료 ---")
     except Exception as e:
-        print(f"Error saving to Firestore: {e}")
         doc_ref.set({"status": f"error_saving: {e}"}, merge=True)
         return
 
