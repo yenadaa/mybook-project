@@ -341,7 +341,7 @@ def scoreQuizAnswer(req: https_fn.CallableRequest) -> https_fn.Response:
 
 
 # ---------------------------------------------
-# --- . ⭐️ [교체] 챗봇(RAG) 함수 (Supabase 방식)(유지) ---
+# --- 6. ⭐️ [교체] 챗봇(RAG) 함수 (BM25 + Supabase 하이브리드 + 페르소나) ---
 # ---------------------------------------------
 @https_fn.on_request( # ⭐️ (변경) on_call -> on_request (JSON API 방식)
     secrets=["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_KEY"], # ⭐️ (중요) 비밀키 추가
@@ -350,158 +350,181 @@ def scoreQuizAnswer(req: https_fn.CallableRequest) -> https_fn.Response:
 )
 def ragChat(req: https_fn.Request) -> https_fn.Response:
     """
-    [⭐️ 신규 챗봇 함수 (Supabase RAG)]
-    - FastAPI(@app.post) 대신 @https_fn.on_request를 사용합니다.
-    - 랭체인 버그를 우회하고 Supabase RPC를 직접 호출합니다.
-    - 3가지 챗봇 페르소나(시스템 프롬프트)를 지원합니다.
+    [⭐️ 업데이트된 챗봇]
+    - 1순위: BM25 검색 (정확한 키워드 & 페이지 번호 확보)
+    - 2순위: 벡터 검색 (키워드가 없을 때 의미 검색 fallback)
+    - 페르소나(교수/소크라테스/선배) 유지 + [p.페이지] 인용 기능 추가
     """
-    # --- 0. [추가] 수동 CORS 헤더 설정 ---
-    # ⭐️ CORS Preflight (OPTIONS) 요청에 응답
+    # --- 0. CORS 헤더 설정 ---
     if req.method == "OPTIONS":
         headers = {
             "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
             "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization", # 👈 Authorization 헤더도 허용
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
             "Access-Control-Max-Age": "3600",
         }
         return https_fn.Response("", status=204, headers=headers)
-    response_headers = {
-    "Access-Control-Allow-Origin": ALLOWED_ORIGIN
-    }
-    # --- 1. 클라이언트 지연 로딩 ---
-    # (기존 main.py의 지연 로딩 패턴을 따름)
+    
+    response_headers = {"Access-Control-Allow-Origin": ALLOWED_ORIGIN}
+
+    # --- 1. 초기화 및 로딩 ---
     global supabase_client, supabase_embeddings, openai_client
     
-    # ⭐️ (추가) Supabase 클라이언트 로딩
+    # ⭐️ 지연 로딩: quiz_generator에서 BM25 함수 가져오기
+    from quiz_generator import search_chunks_with_bm25, PreprocessedDoc
+
     try:
         from supabase import create_client
         from langchain_openai import OpenAIEmbeddings
         from openai import OpenAI
+        
         if supabase_client is None:
             supabase_url = os.environ.get("SUPABASE_URL")
             supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
-            if not supabase_url or not supabase_key:
-                raise Exception("SUPABASE_URL, SUPABASE_SERVICE_KEY 비밀 환경변수가 설정되지 않았습니다.")
             supabase_client = create_client(supabase_url, supabase_key)
         
         if supabase_embeddings is None:
-            # ⭐️ (추가) 임베딩 모델 로딩 (질문 벡터화용)
             supabase_embeddings = OpenAIEmbeddings(openai_api_key=os.environ.get("OPENAI_API_KEY"))
         
         if openai_client is None:
-            # ⭐️ (추가) OpenAI 챗 클라이언트 로딩
             openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
     except Exception as e:
-        print(f"오류: 클라이언트 초기화 실패: {e}")
-        return https_fn.Response(json.dumps({"error": f"클라이언트 초기화 실패: {e}"}), status=500, mimetype="application/json", headers=response_headers)
-    # --- 2. 요청(Request) 파싱 ---
-    try:
-        # ⭐️ (변경) on_request는 req.get_json()을 사용
-        data = req.get_json(silent=True) 
-        if not data:
-             raise Exception("요청 본문(body)이 비어있습니다.")
+        return https_fn.Response(json.dumps({"error": f"초기화 실패: {e}"}), status=500, headers=response_headers)
 
-        base_system_prompt = data["system_prompt"]
-        chat_history_messages = data["messages"]
-        book_id = data["book_id"]
+    # --- 2. 요청 파싱 ---
+    try:
+        data = req.get_json(silent=True)
+        if not data: raise Exception("Body is empty")
         
-        if not chat_history_messages:
-            raise Exception("messages가 비어있습니다.")
-        if not book_id:
-            raise Exception("book_id가 필요합니다.")
+        base_system_prompt = data.get("system_prompt", "")
+        chat_history = data.get("messages", [])
+        book_id = data.get("book_id")
+        user_query = chat_history[-1]["content"] if chat_history else ""
+
+        if not book_id or not user_query:
+            raise Exception("book_id 또는 질문 내용이 없습니다.")
+
+    except Exception as e:
+        return https_fn.Response(json.dumps({"error": str(e)}), status=422, headers=response_headers)
+
+    # --- 3. ⭐️ [핵심] 하이브리드 검색 (BM25 -> Vector) ---
+    context_text = ""
+    found_via_bm25 = False
+
+    try:
+        # [Step 3-1] BM25 검색 시도 (페이지 번호를 위해 원본 문서 로드 필요)
+        try:
+            # Firestore에서 전체 문서 데이터 로드 (main.py 상단에 정의된 헬퍼 함수 사용)
+            doc_obj = _load_processed_doc_from_firestore(book_id)
             
-        user_query = chat_history_messages[-1]["content"]
+            # BM25로 검색 수행
+            bm25_chunks = search_chunks_with_bm25(doc_obj, user_query, top_k=4)
+            
+            if bm25_chunks:
+                print(f"--- ✅ BM25 검색 성공 ({len(bm25_chunks)}개) ---")
+                found_via_bm25 = True
+                
+                # [PAGE 번호] 달아주기 로직
+                context_list = []
+                for c in bm25_chunks:
+                    # 메타데이터 확인 (없으면 '?' 처리)
+                    page_info = "?"
+                    if c.metadata and "page_number" in c.metadata:
+                        page_info = str(c.metadata["page_number"])
+                    
+                    # GPT에게 줄 텍스트 포맷팅 (여기에 [PAGE n]이 들어감)
+                    context_list.append(f"[PAGE {page_info}] {c.text}")
+                
+                context_text = "\n\n".join(context_list)
+                
+        except Exception as bm25_e:
+            print(f"⚠️ BM25 검색 건너뜀 (오류 또는 문서 로드 실패): {bm25_e}")
+            # 실패하면 context_text가 비어있으므로 아래 벡터 검색으로 넘어감
 
-    except Exception as e:
-        print(f"요청 파싱 오류: {e}")
-        return https_fn.Response(json.dumps({"error": f"잘못된 요청: {e}"}), status=422, mimetype="application/json", headers=response_headers)
-
-    # --- 3. Supabase RAG 검색 (test/main.py 로직) ---
-    try:
-        print(f"\n--- 🔍 Supabase RAG 검색 수행 (Book: {book_id}) ---")
-        print(f"검색어: {user_query}")
-
-        # 3-1. 사용자 질문을 "의미(벡터)"로 변환
-        query_embedding = supabase_embeddings.embed_query(user_query)
-
-        # 3-2. Supabase에 "물류창고 검색 함수(match_documents)" 실행 요청
-        filter_query = {"bookId": book_id}
-        match_count = 4
-        
-        response = supabase_client.rpc(
-            "match_documents",
-            {
-                "query_embedding": query_embedding,
-                "filter": filter_query,
-                "match_count": match_count
-            }
-        ).execute()
-        
-        # 3-3. 검색 결과 처리
-        docs_data = response.data
-        
-        if not docs_data:
-            print("--- ⚠️ RAG 검색 결과 없음 ---")
-            context = "해당 문서에서 질문과 관련된 내용을 찾을 수 없습니다."
-        else:
-            # (유사도 0.5 이상만 필터링)
-            filtered_docs = [
-                doc['content'] for doc in docs_data 
-                if doc['similarity'] > 0.5 
-            ]
-            if not filtered_docs:
-                print("--- ⚠️ RAG 검색 결과가 있으나, 유사도가 낮아 제외됨 ---")
-                context = "해당 문서에서 질문과 관련된 내용을 찾을 수 없습니다."
+        # [Step 3-2] BM25 결과가 없으면 -> Supabase 벡터 검색 (기존 로직 Fallback)
+        if not context_text:
+            print("--- 🔍 벡터 검색(Supabase) 시도 ---")
+            query_vec = supabase_embeddings.embed_query(user_query)
+            
+            # Supabase RPC 호출
+            rpc_res = supabase_client.rpc("match_documents", {
+                "query_embedding": query_vec,
+                "filter": {"bookId": book_id},
+                "match_count": 4
+            }).execute()
+            # ⭐️ [수정] 벡터 검색 결과에도 [PAGE n] 태그 붙이기
+            valid_docs = []
+            for d in rpc_res.data:
+                if d['similarity'] > 0.5:
+                    # 메타데이터에서 페이지 번호 꺼내기
+                    meta = d.get('metadata', {})
+                    page_num = meta.get('page_number', '?')
+                    
+                    # GPT가 읽을 수 있게 포맷팅
+                    labeled_text = f"[PAGE {page_num}] {d['content']}"
+                    valid_docs.append(labeled_text)
+            
+            if valid_docs:
+                context_text = "\n\n".join(valid_docs)
+                print(f"--- ✅ 벡터 검색 성공 ({len(valid_docs)}개) ---")
             else:
-                context = "\n\n".join(filtered_docs)
-                print(f"--- ✅ RAG 검색 완료 ({len(filtered_docs)}개 조각) ---")
+                context_text = "문서에서 관련 내용을 찾을 수 없습니다."
 
     except Exception as e:
-        print(f"RAG 검색 오류: {traceback.format_exc()}")
-        return https_fn.Response(json.dumps({"error": f"RAG 검색 중 오류 발생: {e}"}), status=500, mimetype="application/json", headers=response_headers)
+        print(f"검색 프로세스 오류: {traceback.format_exc()}")
+        context_text = "검색 중 오류가 발생하여 문서를 참조하지 못했습니다."
 
-    # --- 4. OpenAI 챗 호출 (test/main.py 로직) ---
+    # --- 4. OpenAI 응답 생성 ---
     try:
-        # 4-1. 최종 프롬프트 조합
+        # 4-1. [통합 프롬프트] 페르소나 + 페이지 인용 규칙
         final_system_prompt = f"""
         {base_system_prompt}
 
         ---
         [시스템 RAG 지침]
         - 위 (0-9번) 역할 원칙을 수행할 때, 반드시 아래 [문서 문맥]을 **최우선 근거**로 사용해야 합니다.
-        - [문서 문맥]은 사용자가 현재 보고 있는 PDF 문서에서 당신의 답변을 돕기 위해 추출한 관련 내용입니다.
-        - '해설형 챗봇(교수)' 역할일 경우: 이 문맥을 [참고: p.XX]의 근거로 사용하고, 핵심 개념을 설명하세요.
-        - '설명 유도형 챗봇(소크라테스)' 역할일 경우: 이 문맥을 '정답'으로 간주하고, 사용자의 설명이 이 문맥과 일치하는지 판단하는 근거로만 사용하세요. (정답을 절대 알려주지 마세요.)
-        - '주변 정보형 챗봇(선배)' 역할일 경우: 이 문맥과 관련된 재밌는 일화나 배경 지식을 찾아보세요.
-        - 만약 [문서 문맥]에 질문과 관련된 내용이 전혀 없다면, 당신의 역할에 맞게 행동하세요.
-          - (해설형): "죄송합니다. 해당 PDF 문서에서 관련 내용을 찾을 수 없습니다."라고 답변하세요.
-          - (설명 유도형): "그 부분은 문서에 내용이 없네. 네가 아는 대로 다시 설명해줄래?"라고 유도하세요.
-          - (주변 정보형): "오, 그건 문서에 없는 내용인데, 내가 아는 다른 재밌는 얘기 해줄까?"라고 답하세요.
-        - 절대 당신의 기존 지식을 [문서 문맥]보다 우선하여 답변하지 마세요.
+        - [문서 문맥]에는 각 텍스트 조각마다 **[PAGE 숫자]**가 표시되어 있습니다. 이를 보고 실제 페이지 번호를 파악하세요.
+
+        [역할별 행동 지침]
+        1. **'해설형 챗봇(교수)'** 역할일 경우: 
+           - 핵심 개념을 친절하게 설명하세요.
+           - 답변의 근거가 되는 문장 끝에 반드시 **[p.페이지번호]** 형식으로 출처를 명시하세요.
+           - 예시: "이 이론은 BSM 모델에 기반합니다 [p.12]." (문맥의 [PAGE 12]를 참고)
+
+        2. **'설명 유도형 챗봇(소크라테스)'** 역할일 경우: 
+           - 이 문맥을 '정답'으로 간주하되, **절대 정답을 먼저 말하지 마세요.**
+           - 사용자가 문맥의 내용과 일치하게 설명하는지 확인하고, 틀렸다면 질문을 던져 유도하세요.
+           - 출처 표기는 굳이 하지 않아도 됩니다.
+
+        3. **'주변 정보형 챗봇(선배)'** 역할일 경우: 
+           - 이 문맥과 관련된 배경 지식이나 실무 팁을 섞어서 재미있게 말하세요.
+           - "아, 이거 책 [p.15]에 나오는 내용인데~" 처럼 자연스럽게 언급하세요.
+
+        [예외 처리]
+        - 만약 [문서 문맥]에 질문과 관련된 내용이 전혀 없다면:
+           - (해설형): "죄송합니다. 해당 PDF 문서에서 관련 내용을 찾을 수 없습니다."
+           - (설명 유도형): "그 부분은 문서에 없네. 네가 아는 대로 설명해줄래?"
+           - (주변 정보형): "그건 책에 없는데, 내가 아는 썰 풀어줄까?"
+        - 절대 당신의 기존 지식을 [문서 문맥]보다 우선하여 사실인 것처럼 말하지 마세요.
 
         [문서 문맥]
-        {context}
+        {context_text}
         """
 
-        # 4-2. API에 보낼 메시지 목록 생성
-        messages_for_api = [
-            {"role": "system", "content": final_system_prompt}
-        ] + chat_history_messages
+        # 4-2. 메시지 구성
+        messages_for_api = [{"role": "system", "content": final_system_prompt}] + chat_history
         
-        # 4-3. OpenAI API 호출 (openai_client 사용)
         completion = openai_client.chat.completions.create(
-            model="gpt-4o", # ⭐️ gpt-4o 사용 (gpt-4o-mini보다 똑똑함)
+            model="gpt-4o",
             messages=messages_for_api
         )
-        reply_content = completion.choices[0].message.content
-
-        # 5. 성공 응답 반환
-        return https_fn.Response(json.dumps({"reply": reply_content}), status=200, mimetype="application/json", headers=response_headers)
+        reply = completion.choices[0].message.content
+        
+        return https_fn.Response(json.dumps({"reply": reply}), status=200, headers=response_headers)
 
     except Exception as e:
-        print(f"OpenAI API 호출 오류: {traceback.format_exc()}")
-        return https_fn.Response(json.dumps({"error": f"OpenAI API 호출 중 오류 발생: {e}"}), status=500, mimetype="application/json", headers=response_headers)
+        return https_fn.Response(json.dumps({"error": f"GPT 오류: {e}"}), status=500, headers=response_headers)
 # ---------------------------------------------
 # --- 7. (유지) 기존 기타 함수들 (OCR, 퀴즈 저장, 알림) ---
 # ---------------------------------------------

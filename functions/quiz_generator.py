@@ -18,6 +18,7 @@ import hashlib
 import itertools
 import collections
 import math
+from rank_bm25 import BM25Okapi
 
 # ---------------------------------------------
 # --- 1. PDF 처리 (fitz + LangChain) ---
@@ -861,6 +862,7 @@ def generate_custom_review(
     doc: PreprocessedDoc,
     section: Optional[str] = None,
     chunk_ids: Optional[List[str]] = None,
+    search_query: Optional[str] = None, # [NEW] 검색어 파라미터
     keywords: Optional[List[str]] = None,
     model: str = "gpt-4o-mini",
     seed: Optional[int] = None,
@@ -868,35 +870,40 @@ def generate_custom_review(
 ) -> ReviewOut:
     """
     [⭐️ 성능 개선 버전]
-    - 하이라이트 텍스트를 모두 합쳐 API를 2~3번만 호출합니다.
-    - (generate_base_review와 거의 동일하게 작동합니다)
+    section, chunk_ids 외에도 'search_query'를 통해 
+    BM25로 관련 청크를 자동 검색하여 문제를 출제할 수 있습니다.
     """
     all_ids = _normalize_ids(doc)
-
-    # 1) 대상 청크
-    if section:
-        target_chunks = [c for c in doc.chunks if section in " / ".join(c.section_path or [])]
+    # -------------------------------------------------------
+    # 1. 대상 청크 선택 로직 (하나의 if-elif 구조로 통합)
+    # -------------------------------------------------------
+    target_chunks = []
+    if search_query:
+        # [Case 1] 검색어가 있으면 BM25로 찾기
+        target_chunks = search_chunks_with_bm25(doc, search_query, top_k=4)       
     elif chunk_ids:
+        # [Case 2] ID 리스트가 있으면 그걸로 찾기
         id_set = set(chunk_ids)
-        target_chunks = [c for c in doc.chunks if c.id in id_set]
+        target_chunks = [c for c in doc.chunks if c.id in id_set]  
+    elif section:
+        # [Case 3] 섹션명이 있으면 그걸로 찾기
+        target_chunks = [c for c in doc.chunks if section in " / ".join(c.section_path or [])]
     else:
-        # chunk_ids가 없으면 빈 값 반환
+        # [Case 4] 아무것도 없으면 빈 값 반환
         return ReviewOut(ox=[], short=[], discussion=[])
-
+    # 선택된 청크가 하나도 없으면 빈 값 반환
     if not target_chunks:
-        # 대상 청크가 비어있으면 빈 값 반환
         return ReviewOut(ox=[], short=[], discussion=[])
-
-    # 2) 키워드 (하이라이트 텍스트를 모두 합쳐서 1번만 추출)
-    
-    # ⭐️ [최적화] 모든 하이라이트 텍스트를 하나로 합침
+    # -------------------------------------------------------
+    # 2. 키워드 및 문제 생성 (기존 코드 유지)
+    # -------------------------------------------------------
+    # 모든 하이라이트 텍스트를 하나로 합침
     selected_text = "\n\n".join([c.text for c in target_chunks])
-    
     if keywords:
         kws = keywords
     else:
         try:
-            # ⭐️ [API 호출 1] 키워드 1회 추출
+            # [API 호출 1] 키워드 1회 추출
             raw_keywords = _ask_gpt_json(_prompt_keywords(selected_text), model=model, temperature=0.2, max_tokens=200)
             kws = raw_keywords.get("keywords", [])
         except Exception:
@@ -904,7 +911,6 @@ def generate_custom_review(
 
     # 3) 개수 (counts_override가 없으면 기본값 사용)
     counts_base = counts_override or {"ox":3, "short":3, "discussion":3}
-    
     final_review_output = ReviewOut(ox=[], short=[], discussion=[])
     
     # 4) [⭐️ 최적화] OX/단답: 'for' 루프 제거
@@ -1071,3 +1077,31 @@ def score_discussion_answer(
         feedback_tip=raw_data.get("feedback_tip", "제공된 팁이 없습니다."),
         llm_assessment=raw_data.get("llm_assessment", "N/A")
     )
+
+# ---------------------------------------------
+# --- 6. BM25 키워드 검색 (search_chunks_with_bm25) --- (전체 데이터 검색하는게 부담스러워 교수님 피드백 기반 수정함)
+# ---------------------------------------------
+def search_chunks_with_bm25(doc: PreprocessedDoc, query: str, top_k: int = 3) -> List[Chunk]:
+    """
+    [BM25 키워드 검색]
+    사용자 질문(query)과 관련성이 높은 청크를 '키워드 매칭' 확률로 찾아냅니다.
+    전체 텍스트를 다 읽지 않고, 인덱싱된 토큰을 기반으로 검색하므로 빠르고 정확합니다.
+    """
+    if not doc.chunks:
+        return []
+
+    # 1. 텍스트 토큰화 (한국어는 형태소 분석기가 좋지만, 간단히 띄어쓰기 기준으로 처리해도 됨)
+    # 공백 기준으로 단어를 쪼개서 리스트로 만듦
+    tokenized_corpus = [chunk.text.split() for chunk in doc.chunks]
+
+    # 2. BM25 인덱스 생성 (이 과정이 '책 뒤의 색인'을 만드는 과정)
+    bm25 = BM25Okapi(tokenized_corpus)
+
+    # 3. 쿼리 토큰화 및 검색
+    tokenized_query = query.split()
+    
+    # 상위 top_k개 청크를 추출
+    top_chunks = bm25.get_top_n(tokenized_query, doc.chunks, n=top_k)
+    
+    print(f"--- 🔍 BM25 검색 결과: '{query}' 관련 청크 {len(top_chunks)}개 추출 완료 ---")
+    return top_chunks

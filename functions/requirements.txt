@@ -11,3 +11,4 @@ google-cloud-vision  # (OCR 기능에 필요)
 supabase
 langchain-community
 langchain-openai
+rank-bm25
