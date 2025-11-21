@@ -136,11 +136,13 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
         doc_ref.set({"status": f"error_custom_review: {e}"}, merge=True)
         return
 
-    # 7. [챗봇] 챗봇용 벡터 생성
+# 7. [챗봇] 챗봇용 벡터 생성
     try:
         from langchain_openai import OpenAIEmbeddings
         from langchain_community.vectorstores import SupabaseVectorStore
         from supabase import create_client
+        # ⭐️ [추가] LangChain 표준 문서 객체 임포트
+        from langchain_core.documents import Document 
         
         global supabase_client, supabase_embeddings
         if supabase_client is None:
@@ -158,18 +160,35 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
             query_name="match_documents"
         )
 
+        # ⭐️ [수정] 커스텀 Chunk 객체를 LangChain Document 객체로 명시적 변환
+        docs_to_upload = []
         for chunk in processed_doc.chunks:
-            chunk.metadata = {"bookId": book_id}
-
-        supabase_client.table("documents").delete().eq("metadata->>bookId", book_id).execute()
-        vector_store.add_documents(processed_doc.chunks)
-        
-        for chunk in processed_doc.chunks:
-            chunk.embedding = None
+            # 메타데이터 구성
+            metadata = {"bookId": book_id}
+            if chunk.metadata and "page_number" in chunk.metadata:
+                 metadata["page_number"] = chunk.metadata["page_number"]
             
-        update_status("모든 데이터 저장 및 마무리 중...") # 👈 업데이트
+            # Document 객체 생성
+            doc = Document(
+                page_content=chunk.text,  # 실제 텍스트 내용
+                metadata=metadata         # 메타데이터
+            )
+            docs_to_upload.append(doc)
+
+        # 기존 데이터 삭제
+        supabase_client.table("documents").delete().eq("metadata->>bookId", book_id).execute()
+        
+        # 변환된 문서 리스트 업로드
+        if docs_to_upload:
+            vector_store.add_documents(docs_to_upload)
+            print(f"--- ✅ Supabase에 {len(docs_to_upload)}개 벡터 저장 완료 ---")
+        else:
+            print("--- ⚠️ 업로드할 텍스트 청크가 없습니다. ---")
+            
+        update_status("모든 데이터 저장 및 마무리 중...")
 
     except Exception as e:
+        print(f"Supabase Upload Error Details: {e}") # 에러 로그 자세히 출력
         doc_ref.set({"status": f"error_supabase_upload: {e}"}, merge=True)
         return
 
