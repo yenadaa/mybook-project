@@ -358,4 +358,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     console.log("Event listeners added.");
     state.updateButtons();
+    // ⭐️ [추가] 백지 복습 모드 진입 버튼
+    // -------------------------------------------------------
+    const btnWhiteboard = document.getElementById('btn-whiteboard');
+    
+    if (btnWhiteboard) {
+        btnWhiteboard.addEventListener('click', () => {
+            // 1. 현재 열린 책 ID 가져오기 (viewer-state.js나 전역 변수 등에서)
+            // (주의: viewer-state.js에 bookId가 없다면 doc_firebase.js의 함수를 써야 함)
+            
+            // 가장 쉬운 방법: URL이나 전역 변수 확인
+            // 만약 doc_firebase.js를 import하기 어렵다면, 
+            // main.js에서 window.currentBookId = ... 로 저장해두는 게 좋습니다.
+            
+            const bookId = window.currentBookId; // (main.js나 doc_firebase.js에서 설정해줘야 함)
+
+            if (!bookId) {
+                alert("먼저 문서를 열어주세요!");
+                return;
+            }
+
+            // 2. 백지 복습 페이지로 이동 (bookId 전달)
+            window.location.href = `whiteboard.html?bookId=${bookId}`;
+        });
+    }
 });

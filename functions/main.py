@@ -362,19 +362,19 @@ def scoreQuizAnswer(req: https_fn.CallableRequest) -> https_fn.Response:
 # ---------------------------------------------
 # --- 6. ⭐️ [교체] 챗봇(RAG) 함수 (BM25 + Supabase 하이브리드 + 페르소나) ---
 # ---------------------------------------------
-@https_fn.on_request( # ⭐️ (변경) on_call -> on_request (JSON API 방식)
-    secrets=["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_KEY"], # ⭐️ (중요) 비밀키 추가
-    memory=options.MemoryOption.GB_1, # 1GB 메모리
-    timeout_sec=60 # 60초 타임아웃
+@https_fn.on_request(
+    secrets=["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_KEY"],
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=60
 )
 def ragChat(req: https_fn.Request) -> https_fn.Response:
     """
-    [⭐️ 업데이트된 챗봇]
-    - 1순위: BM25 검색 (정확한 키워드 & 페이지 번호 확보)
-    - 2순위: 벡터 검색 (키워드가 없을 때 의미 검색 fallback)
-    - 페르소나(교수/소크라테스/선배) 유지 + [p.페이지] 인용 기능 추가
+    [⭐️ 최종 챗봇]
+    1. BM25 & 벡터 검색으로 문서 내용 확보 (페이지 번호 [PAGE n] 부착)
+    2. Firestore에서 '사용자 하이라이트' 가져오기
+    3. 프롬프트에 '하이라이트 우선 순위' + '페르소나' + '페이지 인용' 규칙 모두 통합
     """
-    # --- 0. CORS 헤더 설정 ---
+    # --- 0. CORS 헤더 ---
     if req.method == "OPTIONS":
         headers = {
             "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
@@ -386,10 +386,10 @@ def ragChat(req: https_fn.Request) -> https_fn.Response:
     
     response_headers = {"Access-Control-Allow-Origin": ALLOWED_ORIGIN}
 
-    # --- 1. 초기화 및 로딩 ---
-    global supabase_client, supabase_embeddings, openai_client
+    # --- 1. 초기화 ---
+    global supabase_client, supabase_embeddings, openai_client, db
+    if db is None: db = firestore.client()
     
-    # ⭐️ 지연 로딩: quiz_generator에서 BM25 함수 가져오기
     from quiz_generator import search_chunks_with_bm25, PreprocessedDoc
 
     try:
@@ -427,66 +427,54 @@ def ragChat(req: https_fn.Request) -> https_fn.Response:
     except Exception as e:
         return https_fn.Response(json.dumps({"error": str(e)}), status=422, headers=response_headers)
 
-    # --- 3. ⭐️ [핵심] 하이브리드 검색 (BM25 -> Vector) ---
+    # --- 3. 하이브리드 검색 (BM25 -> Vector) & 페이지 번호 처리 ---
     context_text = ""
-    found_via_bm25 = False
-
+    
     try:
-        # [Step 3-1] BM25 검색 시도 (페이지 번호를 위해 원본 문서 로드 필요)
+        # [Step 3-1] BM25 검색 시도
         try:
-            # Firestore에서 전체 문서 데이터 로드 (main.py 상단에 정의된 헬퍼 함수 사용)
             doc_obj = _load_processed_doc_from_firestore(book_id)
-            
-            # BM25로 검색 수행
             bm25_chunks = search_chunks_with_bm25(doc_obj, user_query, top_k=4)
             
             if bm25_chunks:
-                print(f"--- ✅ BM25 검색 성공 ({len(bm25_chunks)}개) ---")
-                found_via_bm25 = True
-                
-                # [PAGE 번호] 달아주기 로직
                 context_list = []
                 for c in bm25_chunks:
-                    # 메타데이터 확인 (없으면 '?' 처리)
-                    page_info = "?"
+                    # ⭐️ [수정] 페이지 번호 없으면 무조건 '1' (프론트엔드 오류 방지)
+                    page_num = 1
                     if c.metadata and "page_number" in c.metadata:
-                        page_info = str(c.metadata["page_number"])
+                        try: page_num = int(c.metadata["page_number"])
+                        except: page_num = 1
                     
-                    # GPT에게 줄 텍스트 포맷팅 (여기에 [PAGE n]이 들어감)
-                    context_list.append(f"[PAGE {page_info}] {c.text}")
+                    context_list.append(f"[PAGE {page_num}] {c.text}")
                 
                 context_text = "\n\n".join(context_list)
+                print(f"--- ✅ BM25 검색 성공 ({len(bm25_chunks)}개) ---")
                 
         except Exception as bm25_e:
-            print(f"⚠️ BM25 검색 건너뜀 (오류 또는 문서 로드 실패): {bm25_e}")
-            # 실패하면 context_text가 비어있으므로 아래 벡터 검색으로 넘어감
+            print(f"⚠️ BM25 검색 건너뜀: {bm25_e}")
 
-        # [Step 3-2] BM25 결과가 없으면 -> Supabase 벡터 검색 (기존 로직 Fallback)
+        # [Step 3-2] 벡터 검색 (BM25 실패 시 Fallback)
         if not context_text:
             print("--- 🔍 벡터 검색(Supabase) 시도 ---")
             query_vec = supabase_embeddings.embed_query(user_query)
-            
-            # Supabase RPC 호출
             rpc_res = supabase_client.rpc("match_documents", {
                 "query_embedding": query_vec,
                 "filter": {"bookId": book_id},
                 "match_count": 4
             }).execute()
-            # ⭐️ [수정] 벡터 검색 결과에도 [PAGE n] 태그 붙이기
+            
             valid_docs = []
             for d in rpc_res.data:
                 if d['similarity'] > 0.5:
-                    # 메타데이터에서 페이지 번호 꺼내기
+                    # ⭐️ [수정] 벡터 검색도 페이지 번호 없으면 '1'로 고정
                     meta = d.get('metadata', {})
-                    page_num = meta.get('page_number', '?')
+                    try: page_num = int(meta.get('page_number', 1))
+                    except: page_num = 1
                     
-                    # GPT가 읽을 수 있게 포맷팅
-                    labeled_text = f"[PAGE {page_num}] {d['content']}"
-                    valid_docs.append(labeled_text)
+                    valid_docs.append(f"[PAGE {page_num}] {d['content']}")
             
             if valid_docs:
                 context_text = "\n\n".join(valid_docs)
-                print(f"--- ✅ 벡터 검색 성공 ({len(valid_docs)}개) ---")
             else:
                 context_text = "문서에서 관련 내용을 찾을 수 없습니다."
 
@@ -494,15 +482,38 @@ def ragChat(req: https_fn.Request) -> https_fn.Response:
         print(f"검색 프로세스 오류: {traceback.format_exc()}")
         context_text = "검색 중 오류가 발생하여 문서를 참조하지 못했습니다."
 
-    # --- 4. OpenAI 응답 생성 ---
+    # --- 4. [추가] 사용자 하이라이트(밑줄) 가져오기 ---
+    user_highlights_text = ""
     try:
-        # 4-1. [통합 프롬프트] 페르소나 + 페이지 인용 규칙
+        highlight_docs = db.collection('highlights')\
+            .where('bookId', '==', book_id)\
+            .limit(15)\
+            .stream() # 최신 15개만 가져옴 (토큰 절약)
+            
+        h_list = []
+        for doc in highlight_docs:
+            data = doc.to_dict()
+            if data.get('text'):
+                h_list.append(f"- {data['text']}")
+        
+        if h_list:
+            user_highlights_text = "\n".join(h_list)
+            print(f"--- ✅ 사용자 하이라이트 {len(h_list)}개 로드 ---")
+    except Exception as hl_e:
+        print(f"하이라이트 로드 실패: {hl_e}")
+
+    # --- 5. OpenAI 응답 생성 (프롬프트 통합) ---
+    try:
         final_system_prompt = f"""
         {base_system_prompt}
 
         ---
+        [시스템 지침: 사용자 맞춤형 답변]
+        1. 아래 [사용자가 밑줄 친 핵심 내용]은 사용자가 공부하면서 중요하다고 표시한 부분입니다.
+        2. 답변을 구성할 때, 이 내용들이 질문과 관련이 있다면 **최우선적으로 인용하고 강조**해서 설명하세요.
+
         [시스템 RAG 지침]
-        - 위 (0-9번) 역할 원칙을 수행할 때, 반드시 아래 [문서 문맥]을 **최우선 근거**로 사용해야 합니다.
+        - 위 역할 원칙을 수행할 때, 반드시 아래 [문서 문맥]을 근거로 사용해야 합니다.
         - [문서 문맥]에는 각 텍스트 조각마다 **[PAGE 숫자]**가 표시되어 있습니다. 이를 보고 실제 페이지 번호를 파악하세요.
 
         [역할별 행동 지침]
@@ -527,11 +538,13 @@ def ragChat(req: https_fn.Request) -> https_fn.Response:
            - (주변 정보형): "그건 책에 없는데, 내가 아는 썰 풀어줄까?"
         - 절대 당신의 기존 지식을 [문서 문맥]보다 우선하여 사실인 것처럼 말하지 마세요.
 
+        [사용자가 밑줄 친 핵심 내용]
+        {user_highlights_text}
+
         [문서 문맥]
         {context_text}
         """
 
-        # 4-2. 메시지 구성
         messages_for_api = [{"role": "system", "content": final_system_prompt}] + chat_history
         
         completion = openai_client.chat.completions.create(
@@ -819,3 +832,122 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
         except Exception as db_e:
             print(f"Firestore 오류 상태 저장 실패: {db_e}")
         return https_fn.Response(f"Internal Error: {e}", status=500)
+
+# --------------------------------------------------------
+# ⭐️ 백지 복습 채점 함수 (CORS 오류 수정 버전)
+# --------------------------------------------------------
+@https_fn.on_request(
+    secrets=["OPENAI_API_KEY"],
+    memory=options.MemoryOption.GB_1,
+    timeout_sec=60
+)
+def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
+    
+    # 1. [핵심] CORS 헤더 정의
+    # ALLOWED_ORIGIN은 main.py 상단에 정의된 주소("https://mybook-d143d.web.app")를 씁니다.
+    # 테스트 중에는 "*" (모두 허용)로 해도 됩니다.
+    headers = {
+        "Access-Control-Allow-Origin": ALLOWED_ORIGIN, 
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+
+    # 2. [핵심] Preflight 요청(OPTIONS) 처리
+    # 브라우저가 "보내도 돼?" 하고 먼저 물어보는 요청에 "응 보내!"라고 답하는 부분
+    if req.method == "OPTIONS":
+        return https_fn.Response("", status=204, headers=headers)
+
+    # --- 기존 로직 시작 ---
+    import json
+    from openai import OpenAI
+    from quiz_generator import search_chunks_with_bm25, PreprocessedDoc
+    
+    global db, openai_client
+    if db is None: db = firestore.client()
+    if openai_client is None: openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+    try:
+        data = req.get_json(silent=True)
+        if not data:
+             return https_fn.Response("Body is empty", status=400, headers=headers) # 헤더 추가
+
+        book_id = data.get("bookId")
+        base64_image = data.get("imageData")
+
+        if not book_id or not base64_image:
+            return https_fn.Response("bookId or imageData missing", status=400, headers=headers) # 헤더 추가
+
+        # 1. 필기 인식 (Vision)
+        vision_resp = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "이 이미지에 손글씨로 적힌 내용을 있는 그대로 텍스트로 변환해줘. 다른 말은 하지 말고 텍스트만 줘."},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
+                    ]
+                }
+            ],
+            max_tokens=300
+        )
+        user_text = vision_resp.choices[0].message.content.strip()
+        print(f"📝 사용자 필기 인식 결과: {user_text}")
+
+        if not user_text or len(user_text) < 2:
+            return https_fn.Response(json.dumps({
+                "score": 0, 
+                "feedback": "내용을 인식할 수 없습니다. 글씨를 조금 더 또렷하게 써주세요!"
+            }), status=200, headers=headers) # 헤더 추가
+
+        # 2. 정답지 찾기 (BM25 검색)
+        doc_obj = _load_processed_doc_from_firestore(book_id)
+        relevant_chunks = search_chunks_with_bm25(doc_obj, user_text, top_k=3)
+        
+        if not relevant_chunks:
+             return https_fn.Response(json.dumps({
+                "score": 0, 
+                "feedback": "작성하신 내용과 관련된 부분을 책에서 찾을 수 없습니다. 엉뚱한 내용을 쓰신 건 아닌가요?"
+            }), status=200, headers=headers) # 헤더 추가
+
+        ground_truth = "\n\n".join([c.text for c in relevant_chunks])
+
+        # 3. 채점 (GPT-4o)
+        grading_prompt = f"""
+        너는 친절한 학습 튜터야. 사용자가 '백지 복습'을 위해 기억나는 대로 적은 내용과, 실제 교재 내용을 비교해서 채점해줘.
+
+        [교재 원문 (정답지)]
+        {ground_truth}
+
+        [사용자가 적은 내용]
+        {user_text}
+
+        [채점 기준]
+        1. 점수(0~100점): 사용자가 교재의 핵심 개념을 얼마나 정확하게 기억해냈는지 평가.
+        2. 피드백: 
+           - 잘한 점 (칭찬)
+           - 틀린 내용 교정 (Fact Check)
+           - 빠뜨린 핵심 키워드 지적
+        
+        [출력 형식 (JSON)]
+        {{
+            "score": 85,
+            "feedback": "..."
+        }}
+        """
+
+        grading_resp = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": grading_prompt}],
+            response_format={"type": "json_object"}
+        )
+        
+        result_json = json.loads(grading_resp.choices[0].message.content)
+        
+        # ⭐️ 성공 응답에도 headers를 꼭 넣어야 합니다!
+        return https_fn.Response(json.dumps(result_json), status=200, headers=headers)
+
+    except Exception as e:
+        print(f"Error: {e}")
+        # ⭐️ 에러 응답에도 headers를 꼭 넣어야 합니다!
+        return https_fn.Response(json.dumps({"error": str(e)}), status=500, headers=headers)

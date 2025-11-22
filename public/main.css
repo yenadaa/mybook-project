@@ -30,6 +30,16 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .zoom-label { min-width: 54px; text-align: center; }
 
 .main { display: grid; grid-template-columns: 260px 1fr 360px; height: calc(100vh - 56px); background: var(--bg); color: var(--fg); }
+/* ⭐️ [추가] 태블릿/모바일 화면용 설정 (화면 너비가 1200px 이하일 때) */
+@media (max-width: 1200px) {
+    .main {
+        /* 오른쪽 챗봇 영역을 0px로 만들어서 숨김 -> 가운데 PDF가 넓어짐 */
+        grid-template-columns: 200px 1fr 0px; 
+        
+        /* 만약 왼쪽 목록도 줄이고 PDF만 보고 싶다면 아래 주석을 푸세요 */
+        /* grid-template-columns: 0px 1fr 0px; */
+    }
+}
 .sidebar { border-right: 1px solid #e5e5e5; background: var(--panel); overflow: hidden; display: grid; grid-template-rows: 44px 1fr; }
 .dark .sidebar { border-right-color:#2b2f36; }
 .sidebar-tabs { display: grid; grid-auto-flow: column; }

@@ -1,8 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Mybook</string>
-    <string name="title_activity_main">Mybook</string>
-    <string name="package_name">com.mybook.app</string>
-    <string name="custom_url_scheme">com.mybook.app</string>
-    <string name="web_client_id">427068485624-50uoevqo9vli0022hrosrtq04gifl3ep.apps.googleusercontent.com</string>
-</resources>

@@ -435,7 +435,7 @@ export async function deleteDocFromDb(docId) {
     }
 }
 
-// ⭐️ [수정] openDoc 함수 (파이프라인 감시 및 상태 표시)
+// ⭐️ [수정] openDoc 함수 (파이프라인 감시, 버튼 표시, 전역변수 설정)
 export async function openDoc(bookId) {
     const user = currentUser;
     if (!user || !bookId) return;
@@ -444,6 +444,15 @@ export async function openDoc(bookId) {
     if (unsubscribeBookStatus) unsubscribeBookStatus();
     
     currentBookId = bookId;
+    
+    // ⭐️ [추가 1] 전역 변수 설정 (viewer_ui.js나 whiteboard가 접근할 수 있게)
+    window.currentBookId = bookId; 
+
+    // ⭐️ [추가 2] '백지 복습' 버튼 보이게 하기
+    const btnWhiteboard = document.getElementById('btn-whiteboard');
+    if (btnWhiteboard) {
+        btnWhiteboard.style.display = 'inline-block'; // 또는 'flex', 'block'
+    }
 
     // UI 업데이트
     document.querySelectorAll('.doc-row').forEach(el => el.classList.remove('active'));
@@ -562,6 +571,12 @@ function resetToHome() {
     if (unsubscribeHighlights) unsubscribeHighlights();
     if (unsubscribeBookStatus) unsubscribeBookStatus();
     currentBookId = null;
+    window.currentBookId = null; // [추가] 전역 변수 초기화
+
+    const btnWhiteboard = document.getElementById('btn-whiteboard');
+    if (btnWhiteboard) {
+        btnWhiteboard.style.display = 'none';
+    }
 
     if (window.clearViewer) window.clearViewer();
     else clearViewer();
