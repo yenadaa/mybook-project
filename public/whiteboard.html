@@ -8,81 +8,122 @@
         body { margin: 0; overflow: hidden; background: #f0f0f0; display: flex; flex-direction: column; height: 100vh; }
         
         /* 상단 툴바 */
-        .toolbar { padding: 10px; background: white; display: flex; gap: 10px; border-bottom: 1px solid #ccc; }
-        button { padding: 10px 20px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; }
+        .toolbar { padding: 10px; background: white; display: flex; gap: 10px; border-bottom: 1px solid #ccc; align-items: center; overflow-x: auto; }
+        button { padding: 10px 20px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap; }
         .btn-primary { background: #3b82f6; color: white; }
+        .btn-secondary { background: #e5e7eb; color: #374151; }
         .btn-danger { background: #ef4444; color: white; }
 
+        /* 답변 제출 모드일 때 버튼 스타일 (초록색) */
+        .btn-answer { 
+            background: #10b981 !important; 
+            border-color: #10b981 !important;
+            color: white !important;
+            font-weight: bold;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+        }
+
         /* 그림판 영역 */
-        #canvas-container { flex: 1; position: relative; background: white; margin: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        #canvas-container { flex: 1; position: relative; background: white; margin: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
         canvas { display: block; touch-action: none; /* 태블릿 터치 스크롤 방지 (중요!) */ }
         
         /* 로딩 오버레이 */
-        #loading { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); color: white; justify-content: center; align-items: center; font-size: 24px; z-index: 999; }
+        #loading { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); color: white; justify-content: center; align-items: center; font-size: 24px; z-index: 999; flex-direction: column; gap: 15px; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #fff; border-top: 4px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-
     <div class="toolbar">
-        <button onclick="clearCanvas()" class="btn-danger">지우기</button>
-        <button onclick="submitReview()" class="btn-primary">📝 채점받기</button>
         <button onclick="goBack()" class="btn-secondary">⬅ 닫기</button>
+        
+        <input type="color" id="colorPicker" value="#000000" title="펜 색상" style="height: 40px; cursor: pointer;">
+        
+        <button onclick="setTool('pen')" class="btn-secondary">✏️ 펜</button>
+        <button onclick="setTool('eraser')" class="btn-secondary">🧹 지우개</button>
+        
+        <button onclick="clearCanvas()" class="btn-danger">전체 지우기</button>
+        <button onclick="requestHint()" class="btn-secondary">💡 힌트 보기</button>
+        
+        <button id="btn-submit" onclick="submitReview()" class="btn-primary">📝 채점받기</button>
+    </div>
+
+    <div id="challenge-area" style="display:none; position:absolute; top:70px; left:50%; transform:translateX(-50%); background:#eef2ff; padding:15px; border-radius:10px; box-shadow:0 4px 15px rgba(0,0,0,0.2); border:2px solid #3b82f6; max-width: 90%; width: 600px; z-index:100;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <strong style="color:#3b82f6; font-size: 1.1em;">🤔 소크라테스 심화 질문</strong>
+            <button onclick="closeChallenge()" style="padding:4px 8px; font-size:12px; background:#ddd;">대화 종료</button>
+        </div>
+        <p id="challenge-text" style="margin:0; font-weight:500; line-height: 1.5; color: #333;">...</p>
+        <p style="margin-top:10px; font-size: 0.9em; color: #666;">👇 아래 빈 공간에 답변을 쓰고 [답변 제출]을 눌러보세요!</p>
     </div>
 
     <div id="canvas-container">
         <canvas id="drawingCanvas"></canvas>
     </div>
 
-    <div id="loading">채점 중입니다... 🤖</div>
+    <div id="loading">
+        <div class="spinner"></div>
+        <span>AI가 분석 중입니다... 🤖</span>
+    </div>
 
     <script>
-
+        // --- 1. 초기 설정 및 네비게이션 ---
         function goBack() {
-        // 그냥 뒤로가기 하면 다시 PDF 화면이 나옵니다.
-        window.history.back();
-        // 또는 window.location.href = "index.html"
-    }
+            window.history.back();
+        }
 
-
-    
-        // 1. URL에서 파라미터 추출 (?bookId=xxxxx)
         const urlParams = new URLSearchParams(window.location.search);
         const currentBookId = urlParams.get('bookId');
 
         if (!currentBookId) {
             alert("문서 정보가 없습니다. 메인 화면으로 돌아갑니다.");
-            window.location.href = "index.html"; // 쫓아내기
+            window.location.href = "index.html";
         }
+
+        // --- 2. 캔버스 설정 ---
         const canvas = document.getElementById('drawingCanvas');
         const ctx = canvas.getContext('2d');
         const container = document.getElementById('canvas-container');
+        let currentTool = 'pen';
+        let currentChallengeQuestion = null; // 현재 심화 질문 상태
 
-        // 캔버스 크기 맞추기
+        // 캔버스 크기 맞추기 (리사이즈 시 데이터 유지)
         function resize() {
+            // 1. 현재 그림 백업
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            if (canvas.width > 0 && canvas.height > 0) {
+                tempCtx.drawImage(canvas, 0, 0);
+            }
+
+            // 2. 크기 변경
             canvas.width = container.clientWidth;
             canvas.height = container.clientHeight;
-            ctx.lineWidth = 2;
+
+            // 3. 그림 복구
+            if (tempCanvas.width > 0 && tempCanvas.height > 0) {
+                ctx.drawImage(tempCanvas, 0, 0);
+            }
+
+            // 4. 스타일 재설정 (리사이즈하면 초기화되므로)
+            setTool(currentTool);
+            ctx.strokeStyle = document.getElementById('colorPicker').value;
             ctx.lineCap = 'round';
-            ctx.strokeStyle = 'black';
         }
         window.addEventListener('resize', resize);
-        resize(); // 초기 실행
+        // 초기 실행 (약간의 지연을 주어 컨테이너가 잡힌 후 실행)
+        setTimeout(resize, 100);
 
-        // 그리기 로직 (마우스 + 터치 지원)
+        // --- 3. 그리기 로직 ---
         let isDrawing = false;
 
-        function startDraw(e) {
-            isDrawing = true;
-            draw(e);
-        }
-        function endDraw() {
-            isDrawing = false;
-            ctx.beginPath(); // 경로 끊기
-        }
+        function startDraw(e) { isDrawing = true; draw(e); }
+        function endDraw() { isDrawing = false; ctx.beginPath(); }
+        
         function draw(e) {
             if (!isDrawing) return;
-            
-            // 마우스 vs 터치 좌표 계산
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
             const rect = canvas.getBoundingClientRect();
@@ -93,47 +134,143 @@
             ctx.moveTo(clientX - rect.left, clientY - rect.top);
         }
 
-        // 이벤트 리스너 (PC + Mobile)
         canvas.addEventListener('mousedown', startDraw);
         canvas.addEventListener('mouseup', endDraw);
         canvas.addEventListener('mousemove', draw);
-        
         canvas.addEventListener('touchstart', startDraw);
         canvas.addEventListener('touchend', endDraw);
         canvas.addEventListener('touchmove', draw);
 
+        // --- 4. 도구 기능 ---
         function clearCanvas() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
         }
 
-        // 🚀 서버로 전송
-        // 2. 서버 전송 함수 수정
-        async function submitReview() {
-            // 하드코딩했던 ID 대신, 위에서 받은 ID 사용
-            const bookId = currentBookId;
-            const imageData = canvas.toDataURL('image/png').split(',')[1]; // Base64 추출
+        function setTool(tool) {
+            currentTool = tool;
+            if (tool === 'pen') {
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.lineWidth = 2;
+            } else if (tool === 'eraser') {
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.lineWidth = 20;
+            }
+        }
 
+        document.getElementById('colorPicker').addEventListener('change', (e) => {
+            ctx.strokeStyle = e.target.value;
+            setTool('pen'); 
+        });
+
+        // --- 5. 서버 통신 (핵심) ---
+        
+        // ✅ 본인의 Cloud Functions URL (수정됨)
+        const API_URL = "https://gradeblankpaper-kbtdkj4qza-du.a.run.app";
+
+        // [채점 / 답변 제출]
+        async function submitReview() {
+            const imageData = canvas.toDataURL('image/png').split(',')[1];
+            document.getElementById('loading').style.display = 'flex';
+
+            const payload = {
+                bookId: currentBookId,
+                imageData: imageData,
+                targetQuestion: currentChallengeQuestion 
+            };
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                // 에러 처리
+                if (result.error) throw new Error(result.error);
+
+                // A. 소크라테스 답변 피드백
+                if (currentChallengeQuestion) {
+                    alert(`[🤖 튜터 피드백]\n\n${result.feedback}`);
+                    
+                    if (result.next_question) {
+                        setChallengeMode(result.next_question); // 대화 계속
+                    } else {
+                        closeChallenge(); // 대화 종료
+                    }
+                } 
+                // B. 일반 채점 결과
+                else {
+                    let msg = `📝 [채점 결과: ${result.score}점]\n\n${result.feedback}`;
+                    
+                    if (result.missed_keywords && result.missed_keywords.length > 0) {
+                        msg += `\n\n💡 [놓친 핵심 키워드]\n${result.missed_keywords.join(', ')}`;
+                    }
+                    
+                    alert(msg);
+
+                    if (result.challenge_question) {
+                        setChallengeMode(result.challenge_question);
+                        // setTimeout을 줘서 alert 닫힌 뒤에 뜨게 함
+                        setTimeout(() => alert("🔥 훌륭합니다! 심화 질문이 도착했습니다. 상단 박스를 확인하세요."), 500);
+                    }
+                }
+
+            } catch (e) {
+                alert("통신 오류: " + e);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // [힌트 요청]
+        async function requestHint() {
+            const imageData = canvas.toDataURL('image/png').split(',')[1];
             document.getElementById('loading').style.display = 'flex';
 
             try {
-                // 아래 URL은 본인 Cloud Functions 주소로 변경
-                const response = await fetch("https://gradeblankpaper-kbtdkj4qza-du.a.run.app", {
+                const response = await fetch(API_URL, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ 
-                        bookId: bookId, 
-                        imageData: imageData 
+                        bookId: currentBookId, 
+                        imageData: imageData,
+                        isHint: true 
                     })
                 });
                 
                 const result = await response.json();
-                alert(`[채점 결과]\n점수: ${result.score}점\n\n피드백: ${result.feedback}`);
-                
-            } catch (error) {
-                alert("에러 발생: " + error);
+                if (result.feedback) {
+                    alert(`💡 [AI 힌트]\n\n${result.feedback}`);
+                } else {
+                    alert("힌트를 생성할 수 없습니다. 내용을 조금 더 작성해보세요.");
+                }
+            } catch (e) {
+                alert("에러 발생: " + e);
             } finally {
                 document.getElementById('loading').style.display = 'none';
             }
+        }
+
+        // --- 6. UI 모드 전환 ---
+        function setChallengeMode(question) {
+            currentChallengeQuestion = question;
+            document.getElementById('challenge-text').textContent = question;
+            document.getElementById('challenge-area').style.display = 'block';
+            
+            const btn = document.getElementById('btn-submit');
+            btn.textContent = "💬 답변 제출";
+            btn.classList.add('btn-answer');
+        }
+
+        function closeChallenge() {
+            currentChallengeQuestion = null;
+            document.getElementById('challenge-area').style.display = 'none';
+            
+            const btn = document.getElementById('btn-submit');
+            btn.textContent = "📝 채점받기";
+            btn.classList.remove('btn-answer');
         }
     </script>
 </body>

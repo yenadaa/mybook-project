@@ -379,7 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // 2. 백지 복습 페이지로 이동 (bookId 전달)
-            window.location.href = `whiteboard.html?bookId=${bookId}`;
+            window.location.href = `whiteboard.html?bookId=${bookId}&v=2`;
         });
     }
 });
