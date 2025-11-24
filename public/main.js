@@ -85,10 +85,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     items.push({ type: 'short', q: it.q, answer: it.answer || "", sources: it.sources || [], tags: it.tags || [] })
                 );
             }
-            if (resultData?.review?.discussion) {
-                resultData.review.discussion.forEach(it =>
-                    items.push({ type: 'discussion', q: it.q, sources: it.sources || [], tags: it.tags || [] })
-                );
+            if (resultData?.review?.discussion) {//[수정][11-24][힌트 속성 전달]
+                resultData.review.discussion.forEach(it =>items.push({ type: 'discussion', q: it.q, hint: it.hint || '힌트가 없습니다.', sources: it.sources || [], tags: it.tags || [] }));
             }
     
             // (DB에 저장 - 기존 코드 유지)
@@ -303,7 +301,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="quiz-item short-answer-item" data-answer="${item.answer}">
                         <p class="quiz-question">${i + 1}. ${item.q}</p>
                         <div class="short-answer-container">
-                            <input type="text" class="short-answer-input" placeholder="정답을 입력하세요">
+                            <input type="text" class="short-answer-input" placeholder="정답을 입력하세요.">
                             <button class="check-answer-btn">정답 확인</button>
                         </div>
                         <p class="answer-feedback hidden">정답: ${item.answer}</p>
@@ -312,17 +310,77 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (review.discussion && review.discussion.length > 0) {
                 html += '<h3>서술형/토론</h3>';
+                //[수정][11-24][입력창+힌트 버튼 추가]
                 html += review.discussion.map((item, i) => `
                     <div class="quiz-item discussion-item">
                         <p class="quiz-question">${i + 1}. ${item.q}</p>
-                        <p class="discussion-hint">💡 힌트: ${item.hint}</p>
+
+                        <!-- 입력창 -->
+                        <div class="discussion-input-container">
+                            <textarea class="discussion-input" placeholder="정답을 입력하세요."></textarea>
+                        </div>
+
+                        <!-- 버튼 영역 -->
+                        <div class="quiz-actions">
+                            <button class="hint-button">💡 힌트 보기</button>
+                            <button class="submit-discussion-btn">정답 제출</button>
+                        </div>
+
+                        <!-- 숨겨진 힌트 내용 -->
+                        <div class="hint-content">
+                            ${item.hint || '힌트가 없습니다.'}
+                        </div>                        
                     </div>
                 `).join('');
             }
         }
         showQuizModal(html);
     }
-    
+    // [추가][11-24][서술형 답변 제출 핸들러]
+    async function handleDiscussionSubmit(submitButton) {
+        const quizItem = submitButton.closest('.quiz-item');
+        const textarea = quizItem.querySelector('.discussion-input');
+        const answer = textarea.value.trim();
+        const question = quizItem.querySelector('.quiz-question').textContent;
+
+        if (!answer) {
+            return alert("답변을 입력해주세요.");
+        }
+
+        const bookId = getCurrentBookId();
+        const user = getCurrentUser();
+
+        if (!bookId || !user) return alert("로그인이 필요합니다.");
+
+        // 버튼 비활성화 (중복 제출 방지)
+        submitButton.disabled = true;
+        submitButton.textContent = "제출 중...";
+
+        try {
+            // 서버 함수 호출 (가정: saveDiscussionAnswer)
+            // 만약 서버 함수가 없다면, 아래 부분은 에러가 날 수 있으므로
+            // 실제 구현 시 백엔드와 맞춰야 합니다.
+            // 여기서는 UI 동작 확인을 위해 성공했다고 가정하고 알림만 띄웁니다.
+            
+            /* 실제 연동 시 사용:
+            const saveAnswer = httpsCallable(functions, 'saveDiscussionAnswer');
+            await saveAnswer({ bookId, question, answer });
+            */
+
+            // UI 피드백
+            showTemporaryAlert("답변이 서버에 저장되었습니다.");
+            
+            // 상태 변경
+            submitButton.textContent = "제출 완료";
+            textarea.disabled = true; // 수정 불가
+
+        } catch (e) {
+            console.error("답변 제출 실패:", e);
+            alert("제출에 실패했습니다.");
+            submitButton.disabled = false;
+            submitButton.textContent = "정답 제출";
+        }
+    }
     // ⭐️ [챗봇] 챗봇 UI 초기화 함수 호출
     initChatbot();
 

@@ -6,6 +6,33 @@ import * as search from './viewer-search.js';
 import * as highlights from './viewer-highlight-manager.js';
 import * as utils from './viewer-utils.js';
 
+// [추가][11-24][알림 메시지를 화면에 잠시 보여주는 함수]
+let alertTimeout;
+export function showTemporaryAlert(msg) {
+    // 기존 알림이 있으면 제거
+    const old = document.getElementById('temp-alert');
+    if (old) old.remove();
+    clearTimeout(alertTimeout);
+
+    // 새 알림 생성
+    const div = document.createElement('div');
+    div.id = 'temp-alert';
+    div.textContent = msg;
+    div.style.cssText = `
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.8); color: white; padding: 10px 20px;
+        border-radius: 20px; font-size: 14px; z-index: 9999;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2); transition: opacity 0.3s;
+    `;
+    document.body.appendChild(div);
+
+    // 2초 뒤 제거
+    alertTimeout = setTimeout(() => {
+        div.style.opacity = '0';
+        setTimeout(() => div.remove(), 300);
+    }, 2000);
+}
+
 // ====== Micro-interactions: ripple ======
 function attachRipplesTo(selector) {
     document.querySelectorAll(selector).forEach(btn => {
