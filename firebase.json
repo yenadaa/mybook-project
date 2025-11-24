@@ -1,0 +1,40 @@
+{
+"functions": [
+{
+"source": "functions",
+"codebase": "default",
+"runtime": "python311",
+"ignore": [
+"venv",
+".git",
+"firebase-debug.log",
+"firebase-debug.*.log"
+]
+}
+],
+"hosting": {
+"public": "public",
+"ignore": [
+"firebase.json",
+"**/.*",
+"**/node_modules/**"
+],
+"rewrites": [
+  {
+    "source": "**",
+    "destination": "/index.html"
+}
+],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "Cross-Origin-Opener-Policy",
+            "value": "same-origin-allow-popups"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,62 @@
+A.firebase.js- Firebase SDK를 초기화하고 연결합니다. db, auth, storage 등 핵심 객체를 생성해서 다른 파일들이 가져다 쓸 수 있게 합니다. 건들지 마시오
+doc_firebase.js - . 뷰어(UI)와 Firebase(서버)를 연결합니다.
+
+주요 기능:
+
+인증: 로그인, 로그아웃, 사용자 상태(currentUser)를 관리합니다.
+
+문서 관리: initDocSystem (문서 목록 로드), createDocFromFile (PDF 업로드), deleteDocFromDb (문서 삭제)
+
+데이터 로딩: openDoc (PDF와 저장된 하이라이트를 Firestore에서 불러와 뷰어에 전달)
+
+데이터 저장: window.saveHighlightChange (뷰어에서 그린 하이라이트를 받아 Firestore에 저장)
+
+main.js - 퀴즈 UI를 전담합니다.
+
+주요 기능:
+
+'퀴즈 만들기' 버튼 클릭 이벤트 처리
+
+퀴즈 옵션 모달(하이라이트/전체)을 띄우고, 선택에 따라 백엔드(generateCustomReview 등)를 호출합니다.
+
+백엔드로부터 받은 퀴즈 결과를 팝업창에 예쁘게 표시합니다.
+
+viewer-main.js (진입점) - 다른 8개의 viewer *함수 호출합니다 왠만하면..건들지 마시오
+viewer-state.js - 뷰어의 모든 공용 변수 저장소입니다.pdfDoc (열린 PDF), highlights = [] (하이라이트 배열), currentPage (현재 페이지), els (DOM 요소 모음) 등을 저장합니다.
+viewer-renderer.js - PDF 문서를 화면에 그리는(렌더링) 모든 작업을 담당합니다.
+
+주요 기능: renderDocument (PDF 로드), renderPage (페이지 그리기), renderThumb (썸네일 그리기)
+
+viewer-ui.js- UI이벤트
+viewer-main.js를 제외한 모든 뷰어 UI 이벤트를 처리합니다.
+
+주요 기능: 줌, 펜/지우개/태그 버튼 클릭, 키보드 단축키, renderNotes (오른쪽 노트 패널 그리기), Undo/Redo 로직
+
+viewer-drawing.js (그리기 이벤트)
+
+사용자의 '실시간 그리기' 이벤트를 처리합니다.
+
+주요 기능: 캔버스 위에서 pointerdown, pointermove, pointerup (마우스/펜 드래그) 이벤트를 감지하여 선을 그리고, redrawStrokesForPage (하이라이트 배열을 보고 다시 그리기) 
+viewer-highlight-manager.js (데이터 관리)
+
+역할: 그리기/지우기 **'데이터'**를 관리하고 저장을 요청합니다.
+
+주요 기능:
+
+execAddHighlight: 그리기가 끝나면 state.highlights 배열에 데이터를 추가합니다.
+
+removeHighlights: 지우개가 작동하면 배열에서 데이터를 삭제합니다.
+
+데이터 변경이 완료되면 doc_firebase.js의 window.saveHighlightChange를 호출하여 "이것 좀 저장해줘"라고 요청합니다.
+
+viewer-ocr.js (OCR)
+
+역할: Tesseract.js(페이지 전체)와 Cloud Vision(영역 선택) OCR 기능을 전담합니다.
+
+viewer-search.js (검색)
+
+역할: PDF 문서 내 텍스트 검색 기능을 담당합니다.
+
+viewer-utils.js (유틸리티)
+
+역할: 여러 뷰어 모듈에서 공통으로 사용하는 계산 함수(좌표 계산, 영역 겹치는지 확인 등) 모음입니다.
