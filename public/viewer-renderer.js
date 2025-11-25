@@ -275,9 +275,23 @@ export function clearViewer() {
     pagesCache.clear();
 }
 
+//[함수 전체 수정][11-25]
 export function scrollToPage(p) {
     const el = document.querySelector(`.page-wrap[data-page="${p}"]`);
-    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); state.setCurrentPage(p); updateToolbar(); }
+    const viewer = document.querySelector('.viewer');
+    if (el && viewer) { 
+        state.setCurrentPage(p); 
+        updateToolbar();         
+        
+        //scrollIntoView 대신 scrollTop을 직접 계산하여 이동
+        const targetTop = el.offsetTop - 10; //페이지 래퍼의 상단 위치 (약간의 여백 -10px)
+        
+        //viewer의 스크롤 위치를 직접 조작
+        viewer.scrollTop = targetTop;
+        
+        // 부드러운 스크롤
+        viewer.scrollTo({ top: targetTop, behavior: 'smooth' }); 
+    }
 }
 
 export async function rerenderAll() {

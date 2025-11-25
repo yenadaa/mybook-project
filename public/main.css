@@ -5,13 +5,16 @@ font-weight: normal;
 font-style: normal;
 }
 
-html, body { height: 100%; padding: 0; margin: 0; }
-body { -webkit-font-smoothing: antialiased; line-height: 1.5; overflow: hidden; font-family: 'Apple SD Gothic Neo', arial, sans-serif;--primary-color: #3b82f6; }
+html, body {height: 100%;padding: 0;margin: 0;overflow: hidden !important;}/*[수정][11-25][스크롤 막고 높이 고정]*/
+body { -webkit-font-smoothing: antialiased; line-height: 1.5; font-family: 'Apple SD Gothic Neo', arial, sans-serif;--primary-color: #3b82f6; }
 button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 * { box-sizing: border-box; }
 
-.app { display: grid; grid-template-rows: 56px 1fr; height: 100%; }
-.toolbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #e5e5e5; background: var(--toolbar-bg); color: var(--fg); }
+/*[수정][11-25][툴바 상단에 고정시킨 만큼 패딩탑에도 그만큼 적용]*/
+.app {display: block;height: 100vh;padding-top: 56px;}
+
+/*[수정][11-25][툴바를 상단에 고정]*/
+.toolbar { position: fixed;top: 0;left: 0;width: 100%;height: 56px;z-index: 9999; /* 최상단에 표시 */display: flex; align-items: center; gap: 12px;padding: 8px 12px; border-bottom: 1px solid #e5e5e5; background: var(--toolbar-bg); color: var(--fg);}
 
 :root { --bg: #f6f7fb; --fg: #111; --panel: #fff; --toolbar-bg: #fff; --accent: #3b82f6; --muted: #8a8a8a; --chip:#eef2ff; }
 .dark { --bg: #0f1217; --fg: #f2f2f2; --panel: #171a21; --toolbar-bg: #131722; --accent: #60a5fa; --muted: #b9c0cc; --chip:#1f2937; }
@@ -29,7 +32,8 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .jump-input { width: 68px; padding: 6px 8px; border: 1px solid #e6e6e6; border-radius: 8px; background: var(--panel); color: var(--fg); }
 .zoom-label { min-width: 54px; text-align: center; }
 
-.main { display: grid; grid-template-columns: 260px 1fr 360px; height: calc(100vh - 56px); background: var(--bg); color: var(--fg); }
+/*[수정][11-25][기존 app역할]*/
+.main { height: 100%;display: grid;grid-template-columns: 260px 1fr 360px;background: var(--bg);color: var(--fg);}
 /* ⭐️ [추가] 태블릿/모바일 화면용 설정 (화면 너비가 1200px 이하일 때) */
 @media (max-width: 1200px) {
     .main {
@@ -133,7 +137,7 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .outline li { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .outline li:hover { background: rgba(99,102,241,.08); }
 
-.viewer { position: relative; overflow: auto; }
+.viewer {position: relative; overflow: auto;/* [11-25][수정][높이를 100%로 설정하여 부모(.main)의 높이 채움] */height: 100%;}
 .pages { position: relative; padding: 20px 0 200px; display: grid; justify-content: center; gap: 18px; }
 .page-wrap { position: relative; }
 .page { display: block; background: white; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
@@ -161,16 +165,12 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 
 .empty { height: 100%; display: grid; place-items: center; color: var(--muted); }
 
-.toolbar .group > *, .chip-btn, .label-btn, .right-tabs button, .sidebar-tabs button {
-position: relative; overflow: hidden;
-transition: transform .18s cubic-bezier(.25,.1,.25,1), background-color .22s, box-shadow .22s, color .22s, opacity .22s;
-outline: none;
-}
+.toolbar .group > *, .chip-btn, .label-btn, .right-tabs button, .sidebar-tabs button {position: relative; overflow: hidden;transition: transform .18s cubic-bezier(.25,.1,.25,1), background-color .22s, box-shadow .22s, color .22s, opacity .22s;outline: none;}
 .toolbar .group > *:hover, .chip-btn:hover, .label-btn:hover, .right-tabs button:hover, .sidebar-tabs button:hover, .doc-add:hover { background: rgba(0,0,0,.035); }
 .dark .toolbar .group > *:hover, .dark .chip-btn:hover, .dark .label-btn:hover, .dark .right-tabs button:hover, .dark .sidebar-tabs button:hover, .dark .doc-add:hover { background: rgba(255,255,255,.045); }
 .toolbar .group > *:active, .chip-btn:active, .label-btn:active, .right-tabs button:active, .sidebar-tabs button:active { transform: scale(.985); }
 .toolbar .group > *.active, .right-tabs button.active, .sidebar-tabs button.active { box-shadow: inset 0 0 0 1.5px var(--accent); background: rgba(99,102,241,.06); }
-
+#loginBtn,#logoutBtn{min-width:100px;}/*[추가][11-25][로그인 로그아웃 버튼 최소너비 설정(글자 가로정렬)]*/
 .textLayer span {
 position: absolute;
 white-space: pre;
@@ -576,8 +576,8 @@ input[type="range"] { accent-color: var(--accent); }
 /* (추가) 기존 모달 hidden 클래스 확인 */
 .modal-overlay.hidden {display: none;}
 
-/*챗봇 토글 버튼*/
-.chat-toggle-btn {position: fixed;bottom: 60px;right: 20px;width: 60px;height: 60px;border-radius: 50%;background-color: var(--primary-color);color: white;font-size: 24px;border: none;cursor: pointer;box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);z-index: 1001;}
+/*챗봇 토글 버튼[수정][11-25][크기,위치 조정]*/ 
+.chat-toggle-btn {position: fixed;bottom: 100px;right: 40px;width: 70px;height: 60px;border-radius: 50%;background-color: var(--primary-color);color: white;font-size: 30px;border: none;cursor: pointer;box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);z-index: 1001;}
 /* 챗봇 창 */
 .chat-window {position: absolute;top: 0;/* 👈 사이드바의 맨 위 */right: 0;/* 👈 사이드바의 맨 오른쪽 */width: 100%;/* 👈 사이드바의 전체 너비 */height: 100%;/* 👈 사이드바의 전체 높이 */z-index: 100;/* 👈 노트 목록(notes)보다 위에 보이도록 */background-color: white;border: 1px solid #ccc;border-radius: 10px;box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);display: flex;flex-direction: column;}
 .chat-header {display: flex;align-items: center; /* 수직 정렬 */padding: 10px 10px; /* 패딩 약간 조정 */background-color: #f1f1f1;border-bottom: 1px solid #ccc;border-radius: 10px 10px 0 0;}
@@ -595,12 +595,12 @@ input[type="range"] { accent-color: var(--accent); }
 .chat-message.user {background-color: var(--primary-color); /* 파란색 */color: #fff;align-self: flex-end;border-bottom-right-radius: 4px;}
 /* 로딩 인디케이터 */
 .chat-message.loading p {font-style: italic;color: #888;}
-/* 입력 영역 */
-.chat-input-area {display: flex;padding: 10px;border-top: 1px solid #ccc;}
+/* 입력 영역 [수정][11-25][챗봇 입력창 위아래 여백]*/
+.chat-input-area {display: flex;padding: 10px;border-top: 1px solid #ccc; margin-bottom: 55px; padding-top: 65px;}
 
-#chat-input {flex-grow: 1;border: 1px solid #ccc;border-radius: 24px;padding: 12px 16px;font-size: 16px;}
+#chat-input {flex-grow: 1;border: 1px solid #ccc;border-radius: 20px;padding: 12px 16px;font-size: 18px;}
 
-#chat-send-btn {margin-left: 10px;padding: 10px 16px;font-size: 16px;/* 전송 버튼 글자도 확대 */border-radius: 8px;background-color: var(--primary-color);color: white;}
+#chat-send-btn {margin-left: 10px;padding: 11px;font-size: 17px;/* 전송 버튼 글자도 확대 */border-radius: 8px;background-color: var(--primary-color);color: white;}
 .right-grid-container {display: grid; grid-template-rows: 44px 1fr 44px; height: 100%; /* 부모(aside.right) 높이를 꽉 채움 */}
 
 
