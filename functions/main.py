@@ -162,13 +162,33 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
 
         # ⭐️ [수정] 커스텀 Chunk 객체를 LangChain Document 객체로 명시적 변환
         docs_to_upload = []
-        for chunk in processed_doc.chunks:
-            # 메타데이터 구성
-            metadata = {"bookId": book_id}
-            if chunk.metadata and "page_number" in chunk.metadata:
-                 metadata["page_number"] = chunk.metadata["page_number"]
+        
+        # enumerate를 써서 몇 번째 조각인지(i)도 같이 가져옵니다.
+        for i, chunk in enumerate(processed_doc.chunks): 
             
-            # Document 객체 생성
+            # 1. 기본 메타데이터 (bookId, chunk_index)
+            metadata = {
+                "bookId": book_id,
+                "chunk_index": i 
+            }
+
+            # 2. 페이지 번호 찾기 (대소문자/키 이름 유연하게 대응)
+            if chunk.metadata:
+                # Case A: LangChain 표준 키 'page' (보통 0부터 시작하므로 +1 해줌)
+                if "page" in chunk.metadata:
+                    metadata["page"] = chunk.metadata["page"] + 1
+                
+                # Case B: 사용자가 만든 키 'page_number'
+                elif "page_number" in chunk.metadata:
+                    metadata["page"] = chunk.metadata["page_number"]
+                
+                # Case C: 페이지 정보가 아예 없을 때
+                else:
+                    metadata["page"] = "unknown"
+            else:
+                 metadata["page"] = "unknown"
+            
+            # 3. Document 객체 생성
             doc = Document(
                 page_content=chunk.text,  # 실제 텍스트 내용
                 metadata=metadata         # 메타데이터

@@ -19,6 +19,8 @@ import itertools
 import collections
 import math
 from rank_bm25 import BM25Okapi
+import base64
+
 
 # ---------------------------------------------
 # --- 1. PDF 처리 (fitz + LangChain) ---
@@ -26,67 +28,153 @@ from rank_bm25 import BM25Okapi
 
 class PdfReadError(Exception): pass
 
+def _encode_image_base64(pix_map) -> str:
+    """PyMuPDF의 Pixmap을 base64 문자열로 변환"""
+    return base64.b64encode(pix_map.tobytes()).decode("utf-8")
+
+def _ask_gpt_json_vision(base64_image: str, prompt: str, model: str = "gpt-4o") -> Dict[str, Any]:
+    """GPT-4o Vision에게 이미지와 프롬프트를 보내 텍스트를 받아옴"""
+    client = _get_client()
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            },
+                        },
+                    ],
+                }
+            ],
+            max_tokens=2000, 
+        )
+        content = response.choices[0].message.content
+        return {"content": content}
+    except Exception as e:
+        print(f"GPT Vision Error: {e}")
+        return {"content": ""}
+
+def _check_is_math_page_with_mini(text: str) -> bool:
+    """
+    [정찰병] GPT-4o-mini를 이용해 수식 포함 여부를 판단 (민감하게 설정됨)
+    """
+    # 텍스트가 너무 적으면(표지 등) 패스
+    if len(text.strip()) < 30:
+        return False
+
+    client = _get_client()
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini", 
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are a strict math detector. Identify if the text contains ANY mathematical notation (formulas, equations, symbols like ∫, ∑, √, 𝜎). Even if text is messy/broken, return true if it looks like math."
+                },
+                {
+                    "role": "user", 
+                    "content": f"""
+                    Analyze this text. Does it contain math formulas?
+                    CRITERIA:
+                    1. Symbols like =, +, - used in equations.
+                    2. Greek letters or calculus symbols.
+                    3. Linearized math text (e.g. "x 2 + y 2").
+                    
+                    Text chunk:
+                    {text[:800]} 
+                    
+                    Output JSON: {{"is_math": true}} or {{"is_math": false}}
+                    """
+                }
+            ],
+            response_format={"type": "json_object"},
+            temperature=0, 
+            max_tokens=50
+        )
+        result = json.loads(response.choices[0].message.content)
+        return result.get("is_math", False)
+        
+    except Exception as e:
+        print(f"Mini Scout Error: {e}")
+        return True # 에러나면 안전하게 Vision 호출
+
+# ---------------------------------------------
+# [복구됨] 2. 메인 PDF 처리 함수 (스마트 하이브리드 모드)
+# ---------------------------------------------
 def pdf_to_preprocessed_doc(
     pdf_bytes: bytes,
     doc_id: Optional[str] = None,
 ) -> PreprocessedDoc:
-    """
-    [챗봇 방식과 통합된 새 파이프라인]
-    PDF 바이트를 입력받아, fitz로 텍스트를 추출하고 
-    LangChain으로 쪼갠 뒤, PreprocessedDoc 객체로 반환합니다.
-    """
-    all_text = ""
+    
     try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf") 
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as e:
-        print(f"fitz PDF 열기 오류: {e}")
-        raise PdfReadError(f"fitz PDF 처리 오류: {e}") 
-
-    for page_num in range(len(doc)):
-        try:
-            page = doc.load_page(page_num)
-            text = page.get_text("text")
-            all_text += text
-            all_text += "\n\n"
-        except Exception as page_e:
-            print(f"Warning: {page_num} 페이지 처리 중 오류: {page_e}")
-            continue
-    doc.close()
-
-    if not all_text.strip():
-        print("Warning: PDF에서 텍스트를 추출하지 못했습니다 (빈 문서).")
-        return PreprocessedDoc(doc_id=doc_id, chunks=[])
-
-    try:
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=100,
-            separators=["\n\n", "\n", " ", ""]
-        )
-        split_texts: List[str] = text_splitter.split_text(all_text)
-    except Exception as e:
-        print(f"LangChain 텍스트 분할 중 오류: {e}")
-        split_texts = [all_text] if all_text else []
+        raise PdfReadError(f"PDF 열기 실패: {e}")
 
     chunks: List[Chunk] = []
-    for i, text_chunk in enumerate(split_texts):
-        new_chunk = Chunk(
-            #id=f"c{i}",
-            id = str(uuid.uuid4()),
-            text=text_chunk,
-            page_content=text_chunk,
-            section_path=None, 
-            anchors=[]
-        )
-        chunks.append(new_chunk)
-    
-    print(f"--- ✅ PDF 처리 완료 (PyMuPDF + LangChain): 총 {len(chunks)}개 청크 생성 ---")
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
 
-    return PreprocessedDoc(
-        doc_id=doc_id,
-        chunks=chunks
-    )
+    print(f"--- 🚦 스마트 하이브리드 모드 시작 (총 {len(doc)}페이지) ---")
 
+    for page_num, page in enumerate(doc):
+        try:
+            # 1. 일단 텍스트 긁기 (무료)
+            raw_text = page.get_text("text")
+            
+            # 2. 정찰병(Mini)에게 판단 요청 (원래대로 복구됨!)
+            use_vision = _check_is_math_page_with_mini(raw_text)
+            
+            final_text = ""
+            source_type = "pdf-text"
+
+            if use_vision:
+                # 🚨 정찰병: 수식 발견 -> Vision 가동
+                print(f"   📸 [P.{page_num+1}] 수식 감지! Vision 변환 중...")
+                
+                mat = fitz.Matrix(2, 2)
+                pix = page.get_pixmap(matrix=mat)
+                base64_image = _encode_image_base64(pix)
+                
+                response = _ask_gpt_json_vision(
+                    base64_image=base64_image,
+                    prompt="Extract text. Convert math formulas to LaTeX ($...$). Tables to Markdown.",
+                    model="gpt-4o"
+                )
+                final_text = response.get("content", "")
+                source_type = "gpt-4o-vision"
+                
+            else:
+                # 🍀 정찰병: 수식 없음 -> 텍스트 그대로 사용
+                final_text = raw_text
+
+            if not final_text.strip():
+                continue
+
+            # 3. 청크 저장
+            split_texts = text_splitter.split_text(final_text)
+            for text_chunk in split_texts:
+                chunks.append(Chunk(
+                    id=str(uuid.uuid4()),
+                    text=text_chunk,
+                    page_content=text_chunk,
+                    metadata={
+                        "page": page_num + 1,
+                        "source": source_type,
+                        "bookId": doc_id
+                    }
+                ))
+
+        except Exception as e:
+            print(f"Error on page {page_num}: {e}")
+            continue
+
+    return PreprocessedDoc(doc_id=doc_id, chunks=chunks)
 # ---------------------------------------------
 # --- 2. OpenAI 클라이언트 및 헬퍼 ---
 # ---------------------------------------------
