@@ -8,55 +8,157 @@
     <link rel="stylesheet" href="main.css">
     
     <style>
-        /* 이 페이지 전용의 최소한의 레이아웃 스타일 */
-        body {
-            background-color: var(--bg, #f4f4f4); /* main.css 변수 활용 */
+        /* --- 1. 전체 페이지 레이아웃 설정 --- */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden; /* 전체 페이지 스크롤 방지 (내부 스크롤 사용) */
+            background-color: var(--bg, #f4f4f4);
             font-family: sans-serif;
             color: var(--fg, #111);
         }
-        .quiz-page-container {
-            max-width: 800px; /* 퀴즈 페이지 너비 */
-            margin: 20px auto; /* 중앙 정렬 */
-            padding: 20px 30px;
-            background-color: var(--panel, #fff); /* main.css 변수 활용 */
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+
+        /* 좌우 배치를 위한 컨테이너 */
+        .quiz-layout {
+            display: flex;
+            height: 100vh; /* 화면 전체 높이 사용 */
         }
-        h1 {
-            color: var(--fg);
-            border-bottom: 2px solid var(--border-light);
+
+        /* --- 2. 왼쪽 사이드바 (네비게이션) --- */
+        .quiz-sidebar {
+            width: 260px; /* 고정 너비 */
+            background-color: #f8f9fa;
+            border-right: 1px solid #ddd;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            box-sizing: border-box;
+            overflow-y: hidden; /* 버튼 영역만 스크롤 되게 하기 위해 */
+        }
+
+        .quiz-sidebar h2 {
+            font-size: 1.2rem;
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #333;
+            border-bottom: 2px solid #ddd;
             padding-bottom: 10px;
         }
+
+        /* 문항 번호 버튼들이 들어갈 그리드 영역 */
+        .sidebar-nav {
+            flex: 1; /* 남은 높이 차지 */
+            overflow-y: auto; /* 버튼 많으면 여기만 스크롤 */
+            display: grid;
+            grid-template-columns: repeat(4, 1fr); /* 4열 배치 */
+            gap: 8px;
+            align-content: start;
+            padding-right: 5px; /* 스크롤바 공간 */
+        }
+
+        /* 개별 문항 버튼 스타일 */
+        .nav-btn {
+            padding: 8px 0;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s;
+            color: #555;
+        }
+        .nav-btn:hover { background: #e9ecef; }
+        .nav-btn.completed { background: #28a745; color: white; border-color: #28a745; } /* 푼 문제 */
+        .nav-btn.active { border: 2px solid #007bff; color: #007bff; } /* 현재 보고 있는 문제 (선택사항) */
+
+        /* 결과 제출 버튼 */
+        .submit-session-btn {
+            margin-top: 20px;
+            padding: 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.2s;
+        }
+        .submit-session-btn:hover { background-color: #0056b3; }
+
+
+        /* --- 3. 오른쪽 메인 콘텐츠 (퀴즈 영역) --- */
+        .quiz-main {
+            flex: 1; /* 나머지 너비 차지 */
+            background-color: var(--panel, #fff);
+            padding: 40px;
+            overflow-y: auto; /* ⭐️ 핵심: 내용이 길면 여기에만 스크롤 생김 */
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        .quiz-main h1 {
+            margin-top: 0;
+            border-bottom: 2px solid var(--border-light, #eee);
+            padding-bottom: 15px;
+            font-size: 1.8rem;
+        }
+
+        #quiz-content {
+            max-width: 800px;
+            margin: 0 auto;
+            padding-bottom: 100px; /* 맨 아래 여유 공간 */
+        }
+
+        /* 로딩 텍스트 */
         .loading {
             text-align: center;
-            padding: 40px;
-            color: var(--muted);
-            font-size: 1.1rem;
+            padding: 50px;
+            font-size: 1.2rem;
+            color: #888;
         }
-        html, body{
-            height : auto;
-            min-height : 100%;
-            overflow-y: auto;
-        }
-        #quiz-content{
-            height: auth;
-            overflow : visible;
-            padding-bottom : 100px;
+
+        /* 모바일 대응 (반응형) */
+        @media (max-width: 768px) {
+            .quiz-layout { flex-direction: column; }
+            .quiz-sidebar { 
+                width: 100%; 
+                height: auto; 
+                max-height: 180px; /* 높이 제한 */
+                border-right: none;
+                border-bottom: 1px solid #ddd;
+                flex-shrink: 0;
+            }
+            .sidebar-nav { overflow-y: auto; }
+            .quiz-main { padding: 20px; }
         }
     </style>
 </head>
 <body>
 
-    <div class="quiz-page-container">
-        <h1>오늘의 복습 퀴즈</h1>
-        
-        <div id="quiz-content">
-            <p class="loading">퀴즈를 불러오는 중입니다...</p>
-        </div>
+    <div class="quiz-layout">
+        <aside class="quiz-sidebar">
+            <h2>문항 이동</h2>
+            <div id="sidebar-nav" class="sidebar-nav"></div>
+            
+            <button id="submit-session-btn" class="submit-session-btn">
+                결과 제출하기
+            </button>
+        </aside>
+
+        <main class="quiz-main">
+            <h1>오늘의 복습 퀴즈</h1>
+            
+            <div id="quiz-content">
+                <p class="loading">퀴즈를 불러오는 중입니다...</p>
+            </div>
+        </main>
     </div>
 
     <script src="A.firebase.js" type="module"></script>
-    
     <script src="quiz-page.js" type="module"></script>
 
 </body>

@@ -237,23 +237,42 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 });
 
-// --- 푸시 알림 ---
-async function requestPermissionAndSaveToken(uid) {
-    if (await isSupported()) {
-        try {
-            const vapidKey = "BJUxXLJCZi0NhC-HHQwAx3zYgTpPsoD5smYhRSOQw81-_Ciiw_r_yJRyPuYNHItyfLjIXlQkHcxo7pyXsb-YVHg";
-            const token = await getToken(messaging, { vapidKey: vapidKey });
-            if (token) {
-                const userDocRef = doc(db, "users", uid);
-                await setDoc(userDocRef, { fcmToken: token }, { merge: true });
-                console.log('FCM 토큰이 Firestore에 저장되었습니다.');
-            }
-        } catch (error) {
-            console.error("FCM 토큰 처리 중 오류 발생: ", error);
-        }
+// --- 푸시 알림 ---[11.26]수정 ---
+export async function requestPermissionAndSaveToken(userId) {
+  console.log('🔔 알림 권한 요청 중...');
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      
+      console.log('✅ 알림 권한 허용됨. 서비스 워커 대기 중...');
+      
+      // ⭐️ [핵심 수정 1] 서비스 워커가 'active' 상태가 될 때까지 기다립니다.
+      // (main.js에서 등록했더라도 활성화되는데 시간이 걸릴 수 있음)
+      const registration = await navigator.serviceWorker.ready;
+
+      // ⭐️ [핵심 수정 2] getToken에 registration을 넘겨줍니다.
+      const token = await getToken(messaging, { 
+        vapidKey: "BJUxXLJCZi0NhC-HHQwAx3zYgTpPsoD5smYhRSOQw81-_Ciiw_r_yJRyPuYNHItyfLjIXlQkHcxo7pyXsb-YVHg",
+        serviceWorkerRegistration: registration 
+      });
+
+      if (token) {
+        console.log('✅ FCM 토큰 획득:', token);
+        const userRef = doc(db, 'users', userId);
+        await updateDoc(userRef, { fcmToken: token });
+      } else {
+        console.log('⚠️ 토큰을 가져올 수 없습니다.');
+      }
     } else {
-        console.warn("FCM이 이 브라우저에서 지원되지 않습니다.");
+      console.log('🚫 알림 권한이 거부되었습니다.');
     }
+  } catch (error) {
+    console.error('❌ FCM 토큰 처리 중 오류:', error);
+    // 여기서 서비스 워커 오류가 나면 alert로 알려주면 좋습니다.
+    if (error.code === 'messaging/failed-service-worker-registration') {
+        alert("브라우저 설정 문제로 알림을 설정할 수 없습니다. 서비스 워커 등록을 확인하세요.");
+    }
+  }
 }
 
 // --- 뷰어 헬퍼 ---

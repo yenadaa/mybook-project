@@ -384,6 +384,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // ⭐️ [챗봇] 챗봇 UI 초기화 함수 호출
     initChatbot();
 
+    //[11.26] 서비스 워커 등록 (푸시 알림용)
+    if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/firebase-messaging-sw.js')
+    .then((registration) => {
+        console.log('✅ Service Worker 등록 성공:', registration.scope);
+    })
+    .catch((err) => {
+        console.error('❌ Service Worker 등록 실패:', err);
+    });
+    }
+
 }); // ✨ DOMContentLoaded가 여기서 끝납니다.
 
 // 
@@ -582,3 +593,20 @@ window.setChatbotEnabled = function(enabled) {
         }
     }
 }
+
+// ⭐️ 개발자 도구 콘솔에서 window.testNoti() 라고 치면 실행됨
+window.testNoti = async function() {
+    console.log("🚀 알림 강제 발송 요청 중...");
+    const { httpsCallable, functions } = await import('./A.firebase.js'); // 동적 임포트 (필요시 경로 수정)
+    
+    const trigger = httpsCallable(functions, 'testTriggerNotifications');
+    
+    try {
+        const result = await trigger();
+        console.log("✅ 결과:", result.data.message);
+        alert(`성공! ${result.data.message}`);
+    } catch (e) {
+        console.error("❌ 실패:", e);
+        alert("에러 발생 (콘솔 확인)");
+    }
+};

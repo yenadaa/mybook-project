@@ -727,28 +727,35 @@ QUEUE_LOCATION = "asia-northeast3"
 QUEUE_ID = "quiz-generation-queue"
 GENERATE_SESSION_URL = f"https://{QUEUE_LOCATION}-{PROJECT_ID}.cloudfunctions.net/generateUserReviewSession" 
 
-@scheduler_fn.on_schedule(schedule="every day 09:00", timezone="Asia/Seoul")
-def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
-    from google.cloud import tasks_v2 # ⭐️ 지연 로딩
+def _distribute_review_tasks_logic():
+    from google.cloud import tasks_v2
     global db, tasks_client
     if db is None: db = firestore.client()
     if tasks_client is None: tasks_client = tasks_v2.CloudTasksClient()
-    print("매일 복습 알림 '지휘자' 함수 실행 시작.")
+
     now = datetime.now(timezone.utc)
     users_to_notify = set()
+
+    # ⭐️ 님이 작성하신 쿼리 그대로 유지
     wrong_quiz_query = (
-        db.collection('quizItems')
-          .where('nextReviewDate', '<=', now)
-          .where('reviewLevel', '<', 4) 
-    )
+            db.collection('quizItems')
+            .where('nextReviewDate', '<=', now)
+        )
+    
     for doc in wrong_quiz_query.stream():
-        users_to_notify.add(doc.to_dict().get('userId'))
+            data = doc.to_dict()
+            # 레벨이 4 미만인 경우만 담기
+            if data.get('reviewLevel', 0) < 4:
+                users_to_notify.add(data.get('userId'))
+
     if not users_to_notify:
-        print("알림을 보낼 사용자가 없습니다.")
-        return
-    print(f"총 {len(users_to_notify)} 명의 사용자에 대한 복습 작업 생성 시작...")
+        return "알림을 보낼 사용자가 없습니다."
+    
+    # 큐 작업 생성 로직
     queue_path = tasks_client.queue_path(PROJECT_ID, QUEUE_LOCATION, QUEUE_ID)
     SERVICE_ACCOUNT_EMAIL = f"firebase-adminsdk-fbsvc@{PROJECT_ID}.iam.gserviceaccount.com"
+    
+    count = 0
     for user_id in users_to_notify:
         if not user_id: continue
         try:
@@ -759,17 +766,26 @@ def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
                     "url": GENERATE_SESSION_URL, 
                     "headers": {"Content-Type": "application/json"},
                     "body": json.dumps(payload).encode(),
-                    "oidc_token": {
-                        "service_account_email": SERVICE_ACCOUNT_EMAIL
-                    },
+                    "oidc_token": {"service_account_email": SERVICE_ACCOUNT_EMAIL},
                 },
                 "dispatch_deadline": timedelta(minutes=15)
             }
             tasks_client.create_task(parent=queue_path, task=task)
-            print(f"'{user_id}' 사용자를 위한 복습 작업을 큐에 추가했습니다.")
+            count += 1
         except Exception as e:
-            print(f"'{user_id}' 사용자 작업 생성 중 오류: {e}")
-    print("모든 복습 작업 할당 완료.")
+            print(f"Error user {user_id}: {e}")
+            
+    return f"총 {count}명에게 작업을 할당했습니다."
+
+# --- 스케줄러 (매일 아침 9시) ---
+@scheduler_fn.on_schedule(schedule="every day 09:00", timezone="Asia/Seoul")
+def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
+    print(_distribute_review_tasks_logic())
+
+# --- ⭐️ 테스트용 (프론트에서 호출 가능) ---
+@https_fn.on_call()
+def testTriggerNotifications(req: https_fn.CallableRequest) -> https_fn.Response:
+    return {"message": _distribute_review_tasks_logic()}
 
 @https_fn.on_request(
     region="asia-northeast3",
@@ -779,79 +795,219 @@ def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
     invoker="private" 
 )
 def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
-    import openai # ⭐️ 지연 로딩
+    import openai 
     global db, openai_client, storage_client
     if db is None: db = firestore.client()
     if openai_client is None: openai_client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     if storage_client is None: storage_client = storage.bucket()
+    
     user_id = None
     try:
-        payload = req.get_json(silent=True)
-        user_id = payload.get("userId")
+        # 데이터 파싱
+        req_json = req.get_json(silent=True)
+        if req_json and "userId" in req_json:
+            user_id = req_json.get("userId")
+        
         if not user_id:
-            print("오류: userId가 없습니다.")
-            return https_fn.Response("Bad Request", status=400)
-        print(f"'{user_id}' 사용자의 복습 퀴즈 세션 생성을 시작합니다.")
+            print("❌ 오류: userId가 없습니다.")
+            return https_fn.Response("Bad Request: Missing userId", status=400)
+        
+        # 1. 복습 대상 문제 가져오기 (DB 쿼리 수정)
         now = datetime.now(timezone.utc)
-        wrong_quiz_query = db.collection('quizItems').where('userId', '==', user_id).where('reviewLevel', '<', 4)
-        wrong_items_docs = list(wrong_quiz_query.stream())
+        
+        # ⭐️ [수정] DB에서는 'userId'와 '날짜'만 필터링합니다. (reviewLevel 제거)
+        # 이유: Firestore는 서로 다른 필드에 동시에 부등호(<, <=)를 못 씁니다.
+        docs_stream = (db.collection('quizItems')
+                         .where('userId', '==', user_id)
+                         .where('nextReviewDate', '<=', now)
+                         .stream())
+
+        wrong_items_docs = list(docs_stream)
+        
         if not wrong_items_docs:
-            print(f"'{user_id}' 사용자는 복습할 항목이 없습니다.")
+            print(f"'{user_id}' 사용자는 날짜상 복습할 항목이 없습니다.")
             return https_fn.Response("No items to review", status=200)
-        final_quiz_items = [doc.to_dict() for doc in wrong_items_docs] 
+
+        final_items_data = []
+
+        # 2. Python 메모리에서 레벨 필터링 & 데이터 가공
+        for doc in wrong_items_docs:
+            data = doc.to_dict()
+            
+            # ⭐️ [수정] 여기서 Python으로 레벨을 검사합니다.
+            # 레벨이 4 이상이면(이미 졸업한 문제) 건너뜁니다.
+            if data.get('reviewLevel', 0) >= 4:
+                continue
+                
+            # 원본 ID 심기 (나중에 채점할 때 필요)
+            data['originalDocId'] = doc.id 
+            final_items_data.append(data)
+            
+        # 레벨 필터링 후 남은 게 없으면 종료
+        if not final_items_data:
+            print(f"'{user_id}' 사용자는 복습 대상이 있지만 모두 졸업(Level 4) 상태입니다.")
+            return https_fn.Response("No items (filtered by level)", status=200)
+
+        # 3. 세션 저장
         session_ref = db.collection("reviewSessions").document()
-        session_ref.set({
+        session_id = session_ref.id
+        
+        session_data = {
             "userId": user_id,
             "createdAt": firestore.SERVER_TIMESTAMP,
-            "items": final_quiz_items
-        })
-        new_session_id = session_ref.id
-        print(f"'{user_id}' 사용자의 퀴즈 세션 '{new_session_id}' 저장 완료.")
+            "items": final_items_data,
+            "status": "ready" # 상태 추가
+        }
+        session_ref.set(session_data)
+        
+        print(f"✅ 세션 생성 완료: {session_id} (총 {len(final_items_data)} 문제)")
+
+        # 4. 알림 전송 (FCM)
         try:
             user_doc = db.collection('users').document(user_id).get()
-            fcm_token = None
-            if user_doc.exists:
-                fcm_token = user_doc.to_dict().get('fcmToken')
-            else:
-                print(f"'{user_id}' 사용자는 'users' 문서가 없습니다.")
+            fcm_token = user_doc.to_dict().get('fcmToken') if user_doc.exists else None
+            
             if fcm_token:
-                quiz_url = f"/quiz-page.html?session={new_session_id}"
+                # 퀴즈 페이지로 이동하는 URL
+                quiz_url = f"/quiz-page.html?session={session_id}"
+                
                 message = messaging.Message(
+                    notification=messaging.Notification(
+                        title="MyBook 복습 시간! 📚",
+                        body=f"오늘 복습할 {len(final_items_data)}개의 퀴즈가 도착했습니다."
+                    ),
                     data={ 
                         "urlToOpen": quiz_url,
-                        "title": "MyBook 복습 시간입니다! 📚", 
-                        "body": f"오늘 복습할 {len(final_quiz_items)}개의 퀴즈가 준비되었어요."
+                        # data 안에도 내용은 넣어둡니다 (클릭 이벤트 처리용)
+                        "title": "MyBook 복습 시간! 📚", 
+                        "body": f"오늘 복습할 {len(final_items_data)}개의 퀴즈가 도착했습니다."
                     },
                     token=fcm_token
                 )
                 messaging.send(message)
                 print(f"'{user_id}' 사용자에게 알림 전송 완료.")
             else:
-                print(f"'{user_id}' 사용자는 FCM 토큰이 없어 알림을 보내지 않습니다.")
+                print(f"⚠️ '{user_id}' 사용자는 FCM 토큰이 없습니다.")
+        
         except Exception as notify_e:
-            print(f"'{user_id}' 사용자에게 알림 전송 중 오류 발생: {notify_e}")
-        batch = db.batch()
-        for doc in wrong_items_docs:
-                current_level = doc.to_dict().get("reviewLevel", 0)
-                new_level = current_level + 1
-                next_review_date = _get_next_review_date(new_level)
-                batch.update(doc.reference, {
-                    "nextReviewDate": next_review_date, 
-                    "reviewLevel": firestore.Increment(1)
-                })
-        batch.commit()
-        print(f"'{user_id}' 사용자의 복습 날짜 (망각 곡선) 업데이트 완료.")
+            print(f"❌ 알림 전송 실패: {notify_e}")
+
+        # 5. 성공 응답
         return https_fn.Response("Session created", status=200)
+
     except Exception as e:
-        print(f"'{user_id or 'Unknown user'}' 사용자 처리 중 치명적 오류: {traceback.format_exc()}")
-        try:
-             db.collection("reviewSessions").add({
-                 "userId": user_id, "status": "error", "errorMessage": str(e),
-                 "createdAt": firestore.SERVER_TIMESTAMP
-             })
-        except Exception as db_e:
-            print(f"Firestore 오류 상태 저장 실패: {db_e}")
+        print(f"🔥 Critical Error: {traceback.format_exc()}")
         return https_fn.Response(f"Internal Error: {e}", status=500)
+    
+
+# ---------------------------------------------
+# --- 8. [NEW] 복습 퀴즈 채점 및 망각곡선 업데이트 ---
+# ---------------------------------------------
+@https_fn.on_call()
+def submitReviewSession(req: https_fn.CallableRequest) -> https_fn.Response:
+    """
+    [망각 곡선 핵심 로직]
+    사용자가 푼 퀴즈 결과를 받아 채점하고,
+    각 문제(quizItem)의 'reviewLevel'과 'nextReviewDate'를 갱신합니다.
+    """
+    global db
+    if db is None: db = firestore.client()
+
+    # 1. 데이터 수신
+    session_id = req.data.get("sessionId")
+    user_answers = req.data.get("answers") # 예: { "quiz_doc_id_1": "O", "quiz_doc_id_2": "apple" }
+    
+    if not session_id or not user_answers:
+        raise https_fn.HttpsError(code="invalid-argument", message="sessionId와 answers가 필요합니다.")
+
+    try:
+        # 2. 세션 정보 가져오기
+        session_ref = db.collection("reviewSessions").document(session_id)
+        session_doc = session_ref.get()
+        
+        if not session_doc.exists:
+            raise https_fn.HttpsError(code="not-found", message="유효하지 않은 세션입니다.")
+            
+        session_data = session_doc.to_dict()
+        if session_data.get("status") == "completed":
+            return {"message": "이미 제출된 세션입니다.", "score": 0}
+
+        quiz_items = session_data.get("items", [])
+        
+        batch = db.batch()
+        correct_count = 0
+        total_count = 0
+
+        # 3. 채점 루프 및 업데이트 스케줄링
+        for item in quiz_items:
+            original_id = item.get("originalDocId") # 아까 저장해둔 원본 ID
+            if not original_id: continue
+            
+            # 원본 퀴즈 문서 참조
+            item_ref = db.collection("quizItems").document(original_id)
+            
+            # 정답 비교 (대소문자 무시, 공백 제거)
+            correct_answer = str(item.get("answer", "")).strip().lower()
+            user_answer = str(user_answers.get(original_id, "")).strip().lower()
+            
+            # (OX나 단답형일 경우 단순 비교, 서술형은 일단 '제출하면 정답' 처리 혹은 별도 로직)
+            # 여기서는 엄격한 자동 채점 로직을 적용합니다.
+            is_correct = (correct_answer == user_answer)
+            
+            current_level = item.get("reviewLevel", 0)
+            
+            if is_correct:
+                correct_count += 1
+                new_level = min(current_level + 1, 5) # 최대 레벨 5 제한
+            else:
+                # ⭐️ [핵심] 틀리면 레벨 0 (또는 1)으로 강등 -> 내일 다시 복습
+                new_level = 0 
+            
+            # 다음 복습 날짜 계산
+            next_date = _get_next_review_date(new_level)
+            
+            # Batch에 업데이트 추가
+            batch.update(item_ref, {
+                "reviewLevel": new_level,
+                "nextReviewDate": next_date,
+                "lastReviewedAt": firestore.SERVER_TIMESTAMP
+            })
+            
+            total_count += 1
+
+        # 4. 세션 상태 완료로 변경
+        batch.update(session_ref, {
+            "status": "completed",
+            "submittedAt": firestore.SERVER_TIMESTAMP,
+            "score": f"{correct_count}/{total_count}"
+        })
+
+        # 5. DB 일괄 저장
+        batch.commit()
+        
+        return {
+            "success": True,
+            "correctCount": correct_count,
+            "totalCount": total_count,
+            "message": "채점 완료! 망각 곡선이 업데이트되었습니다."
+        }
+
+    except Exception as e:
+        print(f"채점 중 오류: {e}")
+        raise https_fn.HttpsError(code="internal", message=f"채점 실패: {e}")
+    
+
+def _get_next_review_date(level: int) -> datetime:
+    now = datetime.now(timezone.utc)
+    # 에빙하우스 망각곡선 기반 주기
+    if level == 0: delta = 1   # 틀렸거나 처음: 1일 뒤
+    elif level == 1: delta = 2
+    elif level == 2: delta = 4
+    elif level == 3: delta = 5
+    elif level == 4: delta = 7
+    else: delta = 10
+    
+    return now + timedelta(days=delta)
 
 # --------------------------------------------------------
 # ⭐️ 백지 복습 채점 함수 (CORS 오류 수정 버전)
