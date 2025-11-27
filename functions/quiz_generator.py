@@ -7,8 +7,7 @@ import uuid
 import fitz  # PyMuPDF
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic import BaseModel, Field
-from openai import OpenAI
-from sklearn.feature_extraction.text import TfidfVectorizer
+from openai import OpenAI, AsyncOpenAI # ⭐️ AsyncOpenAI 추가
 import json
 from json.decoder import JSONDecodeError
 import random
@@ -21,6 +20,7 @@ import collections
 import math
 from rank_bm25 import BM25Okapi
 import base64
+import asyncio # ⭐️ 비동기 라이브러리 추가
 
 # ---------------------------------------------
 # --- 1. 기본 설정 및 클라이언트 ---
@@ -28,11 +28,17 @@ import base64
 
 class PdfReadError(Exception): pass
 
+# 동기 클라이언트 (기존 퀴즈 생성 등에서 사용)
 def _get_client() -> "OpenAI":
     api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("환경변수 OPENAI_API_KEY가 필요합니다.")
+    if not api_key: raise RuntimeError("환경변수 OPENAI_API_KEY가 필요합니다.")
     return OpenAI(api_key=api_key)
+
+# ⭐️ [NEW] 비동기 클라이언트 (병렬 처리용)
+def _get_async_client() -> "AsyncOpenAI":
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key: raise RuntimeError("환경변수 OPENAI_API_KEY가 필요합니다.")
+    return AsyncOpenAI(api_key=api_key)
 
 def _encode_image_base64(pix_map) -> str:
     return base64.b64encode(pix_map.tobytes()).decode("utf-8")
@@ -40,7 +46,7 @@ def _encode_image_base64(pix_map) -> str:
 # ---------------------------------------------
 # --- 2. 데이터 모델 (Pydantic) ---
 # ---------------------------------------------
-
+# (기존과 동일하므로 생략 없이 그대로 둡니다)
 class Chunk(BaseModel):
     id: Optional[str] = None
     text: str
@@ -49,7 +55,6 @@ class Chunk(BaseModel):
     embedding: Optional[List[float]] = None
     metadata: Optional[Dict[str, Any]] = None
     page_content: str
-    # ⭐️ [Advanced RAG] 검색 정확도를 위한 시멘틱 메타데이터
     keywords: List[str] = Field(default_factory=list) 
     chapter: str = ""
 
@@ -71,7 +76,6 @@ class Output(BaseModel):
     review: ReviewOut
     meta: Dict[str, Any]
 
-# --- 챗봇/채점용 모델 ---
 class QuestionData(BaseModel):
     q: str
     concept_ids: List[str]
@@ -96,13 +100,14 @@ class ScoreResult(BaseModel):
     llm_assessment: str
 
 # ---------------------------------------------
-# --- 3. OpenAI Vision & Helper Functions ---
+# --- 3. [Async] OpenAI Vision & Helper Functions ---
 # ---------------------------------------------
 
-def _ask_gpt_json_vision(base64_image: str, prompt: str, model: str = "gpt-4o") -> Dict[str, Any]:
-    client = _get_client()
+# ⭐️ async def로 변경 및 await 사용
+async def _ask_gpt_json_vision_async(base64_image: str, prompt: str, model: str = "gpt-4o") -> Dict[str, Any]:
+    client = _get_async_client()
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model,
             messages=[
                 {
@@ -120,15 +125,16 @@ def _ask_gpt_json_vision(base64_image: str, prompt: str, model: str = "gpt-4o") 
         print(f"GPT Vision Error: {e}")
         return {"content": ""}
 
-def _check_is_math_page_with_mini(text: str) -> bool:
+# ⭐️ async def로 변경
+async def _check_is_math_page_with_mini_async(text: str) -> bool:
     if len(text.strip()) < 30: return False
-    client = _get_client()
+    client = _get_async_client()
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini", 
             messages=[
-                {"role": "system", "content": "당신은 수학 수식 탐지기입니다. 텍스트에 수학적 표기(공식, 방정식, 시그마, 적분 기호 등)가 포함되어 있는지 엄격하게 확인하세요."},
-                {"role": "user", "content": f"다음 텍스트를 분석하세요. 수식이 포함되어 있나요?\n\n[텍스트]\n{text[:800]}\n\n[출력(JSON)] {{'is_math': true}} 또는 {{'is_math': false}}"}
+                {"role": "system", "content": "Check if text contains math formulas/symbols."},
+                {"role": "user", "content": f"Analyze this text. Output JSON: {{\"is_math\": true}} or {{\"is_math\": false}}\n\nText:\n{text[:800]}"}
             ],
             response_format={"type": "json_object"},
             temperature=0, max_tokens=50
@@ -138,15 +144,15 @@ def _check_is_math_page_with_mini(text: str) -> bool:
     except:
         return True
 
-def enrich_chunk_metadata(text: str) -> Dict[str, Any]:
-    """[Advanced RAG] 청크 생성 시 키워드/주제 추출"""
-    client = _get_client()
+# ⭐️ async def로 변경 (메타데이터 추출도 병렬로!)
+async def enrich_chunk_metadata_async(text: str) -> Dict[str, Any]:
+    client = _get_async_client()
     try:
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "당신은 텍스트 분석가입니다. 주어진 텍스트에서 1) 핵심 키워드 5개(한국어 우선), 2) 이 내용의 주제(Chapter 제목)를 추출하세요."},
-                {"role": "user", "content": f"[텍스트]\n{text[:1500]}\n\n[출력(JSON)] {{'keywords': ['키워드1', ...], 'chapter': '주제'}}"} 
+                {"role": "system", "content": "Extract 5 keywords and the main topic/chapter from the text."},
+                {"role": "user", "content": f"Text: {text[:1500]}\n\nOutput JSON: {{'keywords': [...], 'chapter': '...'}}"} 
             ],
             response_format={"type": "json_object"},
             temperature=0.2, max_tokens=150
@@ -155,6 +161,7 @@ def enrich_chunk_metadata(text: str) -> Dict[str, Any]:
     except:
         return {"keywords": [], "chapter": ""}
 
+# 동기 함수 (기존 유지 - 퀴즈 생성용)
 def _ask_gpt_json(prompt: str, model: str, temperature: float, max_tokens: int) -> Any:
     client = _get_client()
     try:
@@ -162,7 +169,7 @@ def _ask_gpt_json(prompt: str, model: str, temperature: float, max_tokens: int) 
             model=model, temperature=temperature, max_tokens=max_tokens,
             response_format={"type": "json_object"},
             messages=[
-                {"role": "system", "content": "당신은 교재 기반 학습 도우미입니다. 반드시 JSON 형식으로만 응답하세요."},
+                {"role": "system", "content": "You are a helpful assistant. Output JSON."},
                 {"role": "user", "content": prompt},
             ],
         )
@@ -172,42 +179,49 @@ def _ask_gpt_json(prompt: str, model: str, temperature: float, max_tokens: int) 
         return {}
 
 # ---------------------------------------------
-# --- 4. PDF Processing (Main) ---
+# --- 4. [Async] PDF Processing Pipeline ---
 # ---------------------------------------------
 
-def pdf_to_preprocessed_doc(pdf_bytes: bytes, doc_id: Optional[str] = None) -> PreprocessedDoc:
-    try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    except Exception as e:
-        raise PdfReadError(f"PDF Open Error: {e}")
-
-    chunks: List[Chunk] = []
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    print(f"--- 🚦 Processing PDF ({len(doc)} pages) ---")
-
-    for page_num, page in enumerate(doc):
+# ⭐️ 단일 페이지 처리 함수 (비동기 작업 단위)
+async def process_single_page(page_num, raw_text, pix_map, doc_id, semaphore):
+    """한 페이지를 분석하여 청크 리스트를 반환합니다."""
+    # Semaphore: 동시에 실행되는 작업 수 제한 (OpenAI Rate Limit 방지)
+    async with semaphore:
         try:
-            raw_text = page.get_text("text")
-            use_vision = _check_is_math_page_with_mini(raw_text)
+            # 1. 수식 여부 확인 (비동기)
+            use_vision = await _check_is_math_page_with_mini_async(raw_text)
             final_text, source_type = raw_text, "pdf-text"
 
+            # 2. Vision 변환 (비동기)
             if use_vision:
-                print(f"   📸 [P.{page_num+1}] 수식 감지! Vision 변환 중...")
-                mat = fitz.Matrix(2, 2)
-                pix = page.get_pixmap(matrix=mat)
-                base64_img = _encode_image_base64(pix)
-                res = _ask_gpt_json_vision(
-                    base64_img, 
-                    "이미지의 텍스트를 추출하세요. 수식은 LaTeX 포맷($...$)으로, 표는 마크다운으로 변환하세요. 설명 없이 결과만 출력하세요.", 
-                    "gpt-4o"
-                )
+                print(f"   📸 [P.{page_num+1}] Math detected, using Vision...")
+                base64_img = _encode_image_base64(pix_map)
+                res = await _ask_gpt_json_vision_async(base64_img, "Extract text/math to LaTeX.", "gpt-4o")
                 final_text = res.get("content", "")
                 source_type = "gpt-4o-vision"
-            if not final_text.strip(): continue
 
-            for text_chunk in text_splitter.split_text(final_text):
-                enriched = enrich_chunk_metadata(text_chunk) if len(text_chunk) > 100 else {}
-                chunks.append(Chunk(
+            if not final_text.strip(): return []
+
+            # 3. 청크 분할 및 메타데이터 추출 (비동기)
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+            split_texts = text_splitter.split_text(final_text)
+            
+            page_chunks = []
+            
+            # 청크별 메타데이터 추출 작업을 동시에 실행
+            enrich_tasks = []
+            for text_chunk in split_texts:
+                if len(text_chunk) > 100:
+                    enrich_tasks.append(enrich_chunk_metadata_async(text_chunk))
+                else:
+                    enrich_tasks.append(asyncio.sleep(0, result={"keywords": [], "chapter": ""})) # Dummy awaitable
+            
+            # 모든 청크 메타데이터 분석 완료 대기
+            enriched_results = await asyncio.gather(*enrich_tasks)
+
+            for i, text_chunk in enumerate(split_texts):
+                enriched = enriched_results[i]
+                page_chunks.append(Chunk(
                     id=str(uuid.uuid4()),
                     text=text_chunk,
                     page_content=text_chunk,
@@ -215,14 +229,55 @@ def pdf_to_preprocessed_doc(pdf_bytes: bytes, doc_id: Optional[str] = None) -> P
                     keywords=enriched.get("keywords", []),
                     chapter=enriched.get("chapter", "")
                 ))
-        except Exception as e:
-            print(f"Page {page_num} Error: {e}")
-            continue
+            
+            return page_chunks
 
-    return PreprocessedDoc(doc_id=doc_id, chunks=chunks)
+        except Exception as e:
+            print(f"Error on page {page_num}: {e}")
+            return []
+
+# ⭐️ 메인 처리 함수 (진입점)
+def pdf_to_preprocessed_doc(pdf_bytes: bytes, doc_id: Optional[str] = None) -> PreprocessedDoc:
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        raise PdfReadError(f"PDF Open Error: {e}")
+
+    print(f"--- 🚀 Smart Hybrid Processing (Parallel) Started: {len(doc)} pages ---")
+
+    # 1. PDF 페이지 데이터 미리 추출 (PyMuPDF는 동기 라이브러리라 미리 빼두는 게 좋음)
+    # 메모리 절약을 위해 필요한 것만 추출
+    pages_data = []
+    for page_num, page in enumerate(doc):
+        raw_text = page.get_text("text")
+        # 이미지 변환용 행렬 (해상도)
+        mat = fitz.Matrix(2, 2)
+        pix = page.get_pixmap(matrix=mat)
+        pages_data.append((page_num, raw_text, pix))
+
+    # 2. 비동기 실행을 위한 래퍼
+    async def run_parallel_processing():
+        # 동시 실행 제한 (5개 페이지씩)
+        semaphore = asyncio.Semaphore(5) 
+        tasks = []
+        for p_num, p_text, p_pix in pages_data:
+            task = process_single_page(p_num, p_text, p_pix, doc_id, semaphore)
+            tasks.append(task)
+        
+        # 모든 페이지 동시 실행 및 결과 대기
+        results = await asyncio.gather(*tasks)
+        
+        # 결과(이중 리스트) 평탄화 (Flatten)
+        flat_chunks = [chunk for page_result in results for chunk in page_result]
+        return flat_chunks
+
+    # 3. 동기 환경(Cloud Function)에서 비동기 루프 실행
+    final_chunks = asyncio.run(run_parallel_processing())
+
+    return PreprocessedDoc(doc_id=doc_id, chunks=final_chunks)
 
 # ---------------------------------------------
-# --- 5. Prompts & Utils ---
+# --- 5. Prompts & Utils (기존과 동일) ---
 # ---------------------------------------------
 
 def _normalize_ids(doc: PreprocessedDoc) -> List[str]:
@@ -269,8 +324,8 @@ def _prompt_review(text: str, kws: List[str], counts: Dict[str, int]) -> str:
     - 언어: 한국어
     [키워드] {kw_str}
     [형식]
-    - OX: "q"(질문), "answer"(true/false), "why"(해설), "sources"(근거 문장 ID)
-    - 단답: "q"(질문), "answer"(단답형 정답), "sources"
+    - OX: "q", "answer"(true/false), "why", "sources"
+    - 단답: "q", "answer", "sources"
     [출력(JSON)]
     {{ "review": {{ "ox": [], "short": [] }} }}
     [텍스트]
@@ -320,7 +375,6 @@ def generate_base_review(doc: PreprocessedDoc, model: str = "gpt-4o-mini", seed:
 
 def search_chunks_with_bm25(doc: PreprocessedDoc, query: str, top_k: int = 3) -> List[Chunk]:
     if not doc.chunks: return []
-    # [Document Expansion] 본문 + 키워드 + 챕터
     tokenized_corpus = []
     for chunk in doc.chunks:
         keywords_str = " ".join(chunk.keywords) if chunk.keywords else ""
@@ -334,7 +388,7 @@ def search_chunks_with_bm25(doc: PreprocessedDoc, query: str, top_k: int = 3) ->
     return top_chunks
 
 # ---------------------------------------------
-# --- 8. [MISSING PART RESTORED] Relation Logic ---
+# --- 8. Relation Logic (Helpers) ---
 # ---------------------------------------------
 
 RELATION_CANON = ["원인-결과","전제/조건","수단/방법","목적","상하위","부분-전체","정의/동일시","비교/대조","사례/구체화","지원/근거","반박/제약"]
@@ -365,7 +419,6 @@ def _build_inventory_from_chunks(concepts_user: List[str], target_chunks: List[C
     return concepts, sentences
 
 def _topic_groups(concepts, sentences, K=5, top_m=5):
-    # Simplified LDA for brevity, assuming sklearn is installed
     try:
         from sklearn.decomposition import LatentDirichletAllocation
         cid2idx = {c["id"]: i for i, c in enumerate(concepts)}
@@ -389,14 +442,13 @@ def _topic_groups(concepts, sentences, K=5, top_m=5):
             groups.append({"tid": f"t{k}", "concept_ids": cids, "top_sent_ids": valid_sids[:5], "weights": [1.0]*len(cids)})
         return groups
     except:
-        return [] # Fallback if sklearn fails
+        return []
 
 def _build_hyperedges_for_topics(topics, concepts, sentences, model) -> List[Dict]:
     sent_map = {s["sid"]: s for s in sentences}
     edges = []
     for t in topics:
         if len(t["concept_ids"]) < 2: continue
-        # Simplified prompt generation
         concepts_info = [{"id": c, "label": next(x["label"] for x in concepts if x["id"]==c)} for c in t["concept_ids"]]
         prompt = f"""주어진 문맥(Context)을 바탕으로 개념(Concepts)들 간의 관계를 파악하세요.
         [개념] {json.dumps(concepts_info, ensure_ascii=False)}
@@ -440,7 +492,6 @@ def generate_relation_discussion_from_chunks(book_id, user_concepts, target_chun
     hyperedges = _build_hyperedges_for_topics(topics, concepts, sentences, "gpt-4o-mini")
     questions = _generate_relation_questions(hyperedges, concepts, desired_discussion_n, "gpt-4o-mini")
     
-    # Assemble sources
     sid2s = {s["sid"]: s for s in sentences}
     for q in questions:
         q["sources"] = []
@@ -451,7 +502,6 @@ def generate_relation_discussion_from_chunks(book_id, user_concepts, target_chun
     return {"status": "ok", "review": {"discussion": questions}}
 
 def _fallback_relation_discussion_from_chunks(book_id, user_concepts, target_chunks, desired_discussion_n=3) -> Dict:
-    # Simple fallback without complex logic
     q_list = []
     for i in range(desired_discussion_n):
         q_list.append({
@@ -477,7 +527,6 @@ def generate_custom_review(
 ) -> ReviewOut:
     all_ids = _normalize_ids(doc)
     
-    # 1. Select Targets
     target_chunks = []
     if search_query:
         target_chunks = search_chunks_with_bm25(doc, search_query, top_k=4)       
@@ -489,7 +538,6 @@ def generate_custom_review(
     
     if not target_chunks: return ReviewOut(ox=[], short=[], discussion=[])
 
-    # 2. Keywords
     selected_text = "\n\n".join([c.text for c in target_chunks])
     if keywords: kws = keywords
     else:
@@ -499,7 +547,6 @@ def generate_custom_review(
     counts = counts_override or {"ox":3, "short":3, "discussion":3}
     final_out = ReviewOut(ox=[], short=[], discussion=[])
 
-    # 3. OX/Short Generation
     if counts.get("ox",0) > 0 or counts.get("short",0) > 0:
         try:
             c_qa = counts.copy(); c_qa["discussion"] = 0
@@ -513,19 +560,12 @@ def generate_custom_review(
             final_out.short = [fix(x, "단답") for x in raw.get("short", [])]
         except Exception as e: print(f"OX/Short Error: {e}")
 
-    # 4. Discussion Generation
     if counts.get("discussion", 0) > 0:
         try:
-            res = generate_relation_discussion_from_chunks(
-                book_id=doc.doc_id or "doc",
-                user_concepts=kws,
-                target_chunks=target_chunks,
-                desired_discussion_n=counts["discussion"]
-            )
+            res = generate_relation_discussion_from_chunks(doc.doc_id, kws, target_chunks, counts["discussion"])
             if res.get("status") == "ok":
                 final_out.discussion = res["review"]["discussion"]
             else:
-                # Fallback
                 fb = _fallback_relation_discussion_from_chunks(doc.doc_id, kws, target_chunks, counts["discussion"])
                 final_out.discussion = fb["review"]["discussion"]
         except Exception as e:
@@ -541,25 +581,18 @@ def _prompt_score_discussion(q_data: Dict[str, Any], user_answer: str) -> str:
     rubric_str = '\n'.join([f"- {r.get('key')}" for r in q_data.get('rubric', [])])
     return textwrap.dedent(f"""
     [역할] 서술형 답안 채점관.
-    [지시] 루브릭에 따라 점수를 매기고 피드백을 제공하세요.
     [문제] {q_data.get('q')}
-    [루브릭]
-    {rubric_str}
-    [사용자 답안] {user_answer}
+    [루브릭] {rubric_str}
+    [답안] {user_answer}
     [출력(JSON)] 
     {{ 
-      "score_breakdown": [{{"key": "루브릭항목", "score_out_of_10": 8.0}}], 
-      "llm_assessment": "전반적인 평가 한 문장...", 
-      "feedback_tip": "보완할 점 한 문장 팁..." 
+      "score_breakdown": [{{"key": "...", "score_out_of_10": 8.0}}], 
+      "llm_assessment": "평가...", 
+      "feedback_tip": "조언..." 
     }}
     """).strip()
 
 def score_discussion_answer(answer_data: AnswerIn, model: str = "gpt-4o-mini") -> ScoreResult:
-    """
-
-    사용자 답안을 문제의 루브릭과 가중치에 기반하여 채점하고 피드백 팁을 생성합니다.
-
-    """
     q_data = answer_data.q_data
     prompt = _prompt_score_discussion(q_data.model_dump(), answer_data.user_answer)
     try:
@@ -567,11 +600,21 @@ def score_discussion_answer(answer_data: AnswerIn, model: str = "gpt-4o-mini") -
         total = 0.0
         breakdown = []
         rmap = {r['key']: r['weight'] for r in q_data.rubric}
+        
         for item in raw.get("score_breakdown", []):
             s = item.get("score_out_of_10", 0)
-            w = rmap.get(item.get("key"), 0)
+            
+            # 여기서 'w'라는 변수로 만들었습니다.
+            w = rmap.get(item.get("key"), 0) 
+            
             total += (s / 10.0) * w
             breakdown.append(ScoreBreakdown(key=item.get("key"), score_out_of_10=s, weight=w))
-        return ScoreResult(score_breakdown=breakdown, final_score=round(total * 100, 1), feedback_tip=raw.get("feedback_tip", ""), llm_assessment=raw.get("llm_assessment", ""))
+            
+        return ScoreResult(
+            score_breakdown=breakdown,
+            final_score=round(total * 100, 1),
+            feedback_tip=raw.get("feedback_tip", ""),
+            llm_assessment=raw.get("llm_assessment", "")
+        )
     except:
         return ScoreResult(score_breakdown=[], final_score=0, feedback_tip="Error", llm_assessment="Error")
