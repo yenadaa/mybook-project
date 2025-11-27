@@ -187,6 +187,10 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
                     metadata["page"] = "unknown"
             else:
                  metadata["page"] = "unknown"
+            if chunk.keywords:
+                metadata["keywords"] = chunk.keywords # 리스트 형태
+            if chunk.chapter:
+                metadata["chapter"] = chunk.chapter
             
             # 3. Document 객체 생성
             doc = Document(
@@ -1018,7 +1022,7 @@ def _get_next_review_date(level: int) -> datetime:
     timeout_sec=60
 )
 def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
-    # (CORS 헤더 설정 - 기존과 동일)
+    # --- CORS 헤더 ---
     headers = {
         "Access-Control-Allow-Origin": ALLOWED_ORIGIN, 
         "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -1029,6 +1033,8 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
 
     import json
     from openai import OpenAI
+    # ⭐️ _load_processed_doc_from_firestore는 main.py 상단에 정의되어 있다고 가정
+    # search_chunks_with_bm25는 quiz_generator에서 가져옴
     from quiz_generator import search_chunks_with_bm25, PreprocessedDoc
     
     global db, openai_client
@@ -1040,105 +1046,91 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
         book_id = data.get("bookId")
         base64_image = data.get("imageData")
         
-        # ⭐️ [NEW] 아까 서버가 던졌던 심화 질문 (이게 있으면 '대답 모드'로 작동)
+        # 추가 옵션들
         target_question = data.get("targetQuestion") 
-        
-        # ⭐️ [NEW] '힌트 모드' 요청인지 확인
         is_hint_request = data.get("isHint", False)
 
         if not book_id or not base64_image:
             return https_fn.Response("Missing fields", status=400, headers=headers)
 
-        # 1. 필기 인식 (Vision) - 공통
+        # 1. 필기 인식 (Vision)
         vision_resp = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "user", 
                     "content": [
-                        {"type": "text", "text": "이미지의 손글씨를 텍스트로 변환해. 잡담 말고 텍스트만 줘."},
+                        {"type": "text", "text": "이미지의 필기 내용을 텍스트로 변환하세요. 잡담 없이 텍스트만 출력하세요."},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
                     ]
                 }
             ],
-            max_tokens=300
+            max_tokens=500
         )
         user_text = vision_resp.choices[0].message.content.strip()
         
-        if not user_text or len(user_text) < 1:
-             return https_fn.Response(json.dumps({"score": 0, "feedback": "내용이 없거나 인식이 안 돼요!"}), status=200, headers=headers)
+        if not user_text:
+            return https_fn.Response(json.dumps({"score": 0, "feedback": "글씨를 인식할 수 없습니다."}), status=200, headers=headers)
 
-        # 2. 정답지(책 내용) 검색 - 공통
+        # 2. 정답지(RAG) 검색
         doc_obj = _load_processed_doc_from_firestore(book_id)
-        # 사용자가 쓴 내용 + (있다면) 질문 내용까지 합쳐서 검색의 정확도를 높임
         query_text = f"{user_text} {target_question if target_question else ''}"
         relevant_chunks = search_chunks_with_bm25(doc_obj, query_text, top_k=3)
-        ground_truth = "\n\n".join([c.text for c in relevant_chunks]) if relevant_chunks else "관련 내용을 찾지 못함."
+        ground_truth = "\n\n".join([c.text for c in relevant_chunks]) if relevant_chunks else "관련 내용 없음"
 
         # -------------------------------------------------------
-        # [CASE A] 심화 질문에 대한 답변을 검사할 때 (소크라테스 모드)
+        # [CASE A] 심화 질문 답변 (소크라테스)
         # -------------------------------------------------------
         if target_question:
             prompt = f"""
-            너는 소크라테스식 교육법을 쓰는 튜터야.
-            사용자가 내가 낸 질문에 대해 손으로 써서 답변을 제출했어.
+            [역할] 소크라테스식 튜터.
+            [질문] {target_question}
+            [학생 답안] {user_text}
+            [교재 내용] {ground_truth}
             
-            [내가 낸 질문]
-            {target_question}
+            [지시]
+            1. 답안이 질문 의도에 맞는지 평가하세요.
+            2. 부족하다면 정답 대신 '생각해볼 거리'나 '힌트'를 주세요.
+            3. 잘했으면 칭찬하세요.
             
-            [사용자의 답변 (필기 인식)]
-            {user_text}
-            
-            [참고할 교재 내용]
-            {ground_truth}
-            
-            [지시사항]
-            1. 사용자의 답변이 질문의 의도에 맞는지, 논리적인지 평가해줘. (점수는 매기지 마)
-            2. 틀렸거나 부족하면 정답을 바로 알려주지 말고 **다시 생각할 수 있는 힌트**를 줘.
-            3. 아주 훌륭하면 "완벽합니다!"라고 칭찬하고 대화를 마무리해.
-            
-            [출력 JSON]
-            {{
-                "feedback": "답변에 대한 평가 및 코멘트",
-                "next_question": "추가로 던질 질문 (없으면 null)"
-            }}
+            [출력(JSON)] {{ "feedback": "...", "next_question": "추가 질문(없으면 null)" }}
             """
             
         # -------------------------------------------------------
-        # [CASE B] 중간 점검 / 힌트 요청일 때
+        # [CASE B] 힌트 요청
         # -------------------------------------------------------
         elif is_hint_request:
             prompt = f"""
-            사용자가 백지 복습을 하다가 중간 점검(힌트)을 요청했어.
-            지금까지 쓴 내용을 보고, **다음에 무엇을 더 쓰면 좋을지** 방향만 잡아줘.
+            [역할] 학습 도우미.
+            [학생이 쓴 글] {user_text}
+            [교재 내용] {ground_truth}
             
-            [사용자가 지금까지 쓴 내용]
-            {user_text}
+            [지시]
+            학생이 지금까지 쓴 내용을 보고, 다음에 무엇을 더 쓰면 좋을지 방향을 잡아주세요. 정답을 다 알려주진 마세요.
             
-            [교재 내용]
-            {ground_truth}
-            
-            [지시사항]
-            - 채점하지 마.
-            - "지금 ~~에 대해 잘 쓰셨네요. 이어서 OO 개념도 설명해보시겠어요?" 처럼 유도해줘.
-            
-            [출력 JSON]
-            {{
-                "feedback": "힌트 내용",
-                "score": null
-            }}
+            [출력(JSON)] {{ "feedback": "힌트 내용...", "score": null }}
             """
 
         # -------------------------------------------------------
-        # [CASE C] 일반 채점 (기존 로직)
+        # [CASE C] 일반 백지 복습 채점 (여기가 비어있었습니다!)
         # -------------------------------------------------------
         else:
             prompt = f"""
-            (기존 채점 프롬프트와 동일...)
-            [지시사항]
-            ...
-            4. challenge_question: 80점 이상일 때 심화 질문 생성.
-            ...
+            [역할] 깐깐한 채점관.
+            [학생의 백지 복습 내용] {user_text}
+            [교재 원문] {ground_truth}
+            
+            [지시]
+            1. 학생이 교재의 핵심 내용을 얼마나 잘 기억해냈는지 100점 만점으로 채점하세요.
+            2. 교재 내용과 비교하여 **빠뜨린 핵심 키워드**나 **틀린 내용**을 지적하세요.
+            3. 80점 이상이면 심화 학습을 위한 질문(challenge_question)을 하나 던지세요.
+            
+            [출력(JSON)]
+            {{
+                "score": 85,
+                "feedback": "전반적으로 잘 썼지만, ~~ 개념이 빠졌습니다.",
+                "challenge_question": "그렇다면 이 개념이 실제로는 어떻게 적용될까요?" 
+            }}
             """
 
         # GPT 호출
@@ -1149,7 +1141,8 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
         )
         result_json = json.loads(resp.choices[0].message.content)
         
-        # (오답노트 저장 로직은 CASE C일 때만 실행하도록 조건 추가 가능)
+        # (옵션) 결과에 인식된 텍스트도 포함해서 프론트에 주면 좋음
+        result_json["ocr_text"] = user_text
         
         return https_fn.Response(json.dumps(result_json), status=200, headers=headers)
 
