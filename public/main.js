@@ -1,3 +1,4 @@
+import * as renderer from './viewer-renderer.js'; // [추가][11-29][renderer 모듈 임포트]
 import { 
     getCurrentUser, 
     initDocSystem, 
@@ -393,6 +394,13 @@ document.addEventListener('DOMContentLoaded', () => {
     .catch((err) => {
         console.error('❌ Service Worker 등록 실패:', err);
     });
+    }
+
+    // [추가][11.28][페이지 스크롤 리스너 추가 (인디케이터 업데이트용)]
+    const viewerEl = document.querySelector('.viewer');
+    if (viewerEl) {
+        // .viewer 요소에 스크롤 이벤트가 발생하면 renderer의 함수를 호출
+        viewerEl.addEventListener('scroll', renderer.onScrollUpdatePage); 
     }
 
 }); // ✨ DOMContentLoaded가 여기서 끝납니다.

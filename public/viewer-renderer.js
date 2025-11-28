@@ -245,22 +245,31 @@ export function updateToolbar() {
     if (state.els.zoomLabel) state.els.zoomLabel.textContent = Math.round(state.scale * 100) + '%';
 }
 
+// [전체 수정][11-29][수동 스크롤 시 호출되는 함수] (인디케이터 업데이트)
 export function onScrollUpdatePage() {
-    if (!state.pdfDoc || !state.continuousMode || !state.els.pages) return;
-    const viewerRect = state.els.pages.getBoundingClientRect();
+    const viewerEl = document.querySelector('.viewer'); 
+    if (!state.pdfDoc || !state.continuousMode || !viewerEl) return;
+    
+    const scrollTop = viewerEl.scrollTop;
+    const viewerHeight = viewerEl.clientHeight;
+    const thresholdPosition = scrollTop + (viewerHeight * 0.33); // 뷰어 상단 1/3 지점
+
     let mostVisiblePage = state.currentPage;
-    const pageWraps = document.querySelectorAll('.page-wrap');
-    const threshold = viewerRect.top + (viewerRect.height * 0.33);
+    const pageWraps = document.querySelectorAll('.page-wrap'); 
+
     for (const wrap of pageWraps) {
-        const wrapRect = wrap.getBoundingClientRect();
-        if (wrapRect.top <= threshold && wrapRect.bottom >= threshold) {
-            const pageNum = parseInt(wrap.dataset.page, 10);
-            if (!isNaN(pageNum)) {
-                mostVisiblePage = pageNum;
-                break;
-            }
+        const pageNum = parseInt(wrap.dataset.page, 10);
+        if (isNaN(pageNum)) continue;
+
+        const pageTopRelativeToViewer = wrap.offsetTop; 
+        
+        if (pageTopRelativeToViewer > thresholdPosition) {
+            mostVisiblePage = Math.max(1, pageNum - 1); 
+            break;
         }
+        mostVisiblePage = pageNum;
     }
+    
     if (state.currentPage !== mostVisiblePage) {
         state.setCurrentPage(mostVisiblePage);
         updateToolbar();

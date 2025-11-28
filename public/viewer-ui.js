@@ -5,6 +5,18 @@ import * as ocr from './viewer-ocr.js';
 import * as search from './viewer-search.js';
 import * as highlights from './viewer-highlight-manager.js';
 import * as utils from './viewer-utils.js';
+//[추가][11-29][페이지 인디케이터 ui 업데이트]
+export function updateToolbar() {
+    const indicatorEl = document.getElementById('pageIndicator'); 
+    
+    if (indicatorEl && state.pdfDoc) {
+        const totalPages = state.pdfDoc.numPages;
+        const currentPage = state.currentPage;
+        indicatorEl.textContent = `p. ${currentPage} / ${totalPages}`;
+    } else if (indicatorEl) {
+        indicatorEl.textContent = 'p. - / -';
+    }
+}
 
 // [추가][11-24][알림 메시지를 화면에 잠시 보여주는 함수]
 let alertTimeout;
