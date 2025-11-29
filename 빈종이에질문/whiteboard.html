@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, user-scalable=no"
+  />
+  <title>백지 복습 모드</title>
+  <style>
+    :root {
+      --bg: #f0f2f5;
+      --panel: #ffffff;
+      --muted: #64748b;
+      --primary: #3b82f6;
+      --danger: #ef4444;
+      --success: #10b981;
+      --shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+      --border: 1px solid #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica,
+        Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      color: #111827;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      padding: 10px;
+      background: var(--panel);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      border-bottom: var(--border);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+      overflow-x: auto;
+    }
+    button {
+      padding: 10px 16px;
+      font-size: 14px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      background: #e5e7eb;
+      color: #374151;
+      transition: transform .02s ease, box-shadow .2s ease, opacity .2s;
+      white-space: nowrap;
+    }
+    button:hover { box-shadow: var(--shadow); }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-danger  { background: var(--danger);  color: #fff; }
+    .btn-answer  {
+      background: var(--success) !important;
+      color: #fff !important;
+      font-weight: 700;
+      box-shadow: 0 0 12px rgba(16,185,129,.45);
+    }
+    .divider {
+      width: 1px; height: 28px; background: #e5e7eb; margin: 0 6px;
+    }
+
+    #canvas-container {
+      position: relative;
+      background: var(--panel);
+      margin: 12px;
+      height: calc(100vh - 84px);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      border: var(--border);
+    }
+    canvas { display: block; touch-action: none; }
+
+    #challenge-area {
+      display:none;
+      position:absolute;
+      top: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #eef2ff;
+      color: #111827;
+      padding: 14px 16px;
+      border-radius: 12px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+      border: 2px solid var(--primary);
+      max-width: 92vw;
+      width: 680px;
+      z-index: 100;
+    }
+    #challenge-area .head {
+      display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;
+    }
+    #challenge-text { margin: 0; line-height: 1.55; font-weight: 600; }
+
+    #loading {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      color: white; z-index: 999;
+      align-items: center; justify-content: center; flex-direction: column;
+      gap: 14px;
+      backdrop-filter: blur(1px);
+    }
+    .spinner {
+      width: 44px; height: 44px;
+      border: 4px solid #fff; border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ───────── 오른쪽: 최근 세션 질문 패널(신규) ───────── */
+    #session-questions-panel { /* 수정사항!! */
+      width: 380px; max-width: 92vw;
+      position: absolute;
+      right: 16px; top: 86px; bottom: 16px;
+      background: var(--panel);
+      border-radius: 12px;
+      border: var(--border);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      z-index: 180;
+      display: flex; flex-direction: column;
+    } /* 수정사항!! */
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button id="btn-back" class="btn">⬅ 닫기</button>
+    <div class="divider"></div>
+
+    <input type="color" id="colorPicker" value="#000000" title="펜 색상" />
+    <button id="btn-pen" class="btn">✏️ 펜</button>
+    <button id="btn-eraser" class="btn">🧹 지우개</button>
+    <button id="btn-clear" class="btn btn-danger">전체 지우기</button>
+
+    <div class="divider"></div>
+    <button id="btn-hint" class="btn">💡 힌트 보기</button>
+    <button id="btn-submit" class="btn btn-primary">📝 채점받기</button>
+  </div>
+
+  <div id="challenge-area">
+    <div class="head">
+      <strong style="color:var(--primary);font-size:15px">🤔 소크라테스 심화 질문</strong>
+      <button id="btn-challenge-close" class="btn" style="padding:6px 10px; font-size:13px">대화 종료</button>
+    </div>
+    <p id="challenge-text">...</p>
+    <p style="margin-top:8px; font-size: 12.5px; color: var(--muted);">
+      👇 아래 빈 공간에 답변을 쓰고 <b>[답변 제출]</b>을 눌러보세요!
+    </p>
+  </div>
+
+  <div id="canvas-container">
+    <canvas id="drawingCanvas"></canvas>
+  </div>
+
+  <!-- 오른쪽 고정 패널: 최근 3개 세션 배너 + 질문 펼쳐보기 -->
+  <aside id="session-questions-panel"> <!-- 수정사항!! -->
+    <div style="padding:10px 12px; border-bottom:1px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center;"> <!-- 수정사항!! -->
+      <strong>최근 세션 질문(3)</strong> <!-- 수정사항!! -->
+      <button id="refresh-sessions" class="btn" style="padding:6px 10px; font-size:13px">새로고침</button> <!-- 수정사항!! -->
+    </div> <!-- 수정사항!! -->
+    <div id="session-list" style="padding:8px 10px; overflow:auto;"></div> <!-- 수정사항!! -->
+  </aside> <!-- 수정사항!! -->
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <span>AI가 분석 중입니다... 🤖</span>
+  </div>
+
+  <!-- ===== 기존 스크립트(그림판/채점/힌트) ===== -->
+  <script>
+    function goBack() { window.history.back(); }
+    document.getElementById('btn-back').addEventListener('click', goBack);
+
+    const container = document.getElementById('canvas-container');
+    const canvas = document.getElementById('drawingCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let currentTool = 'pen';
+    let isDrawing = false;
+    let currentChallengeQuestion = null;
+
+    function resizeCanvas() {
+      const tmp = document.createElement('canvas');
+      tmp.width = canvas.width; tmp.height = canvas.height;
+      if (tmp.width && tmp.height) tmp.getContext('2d').drawImage(canvas, 0, 0);
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+      if (tmp.width && tmp.height) ctx.drawImage(tmp, 0, 0);
+      setTool(currentTool);
+      ctx.strokeStyle = document.getElementById('colorPicker').value;
+      ctx.lineCap = 'round';
+    }
+    window.addEventListener('resize', resizeCanvas);
+    setTimeout(resizeCanvas, 80);
+
+    function setTool(tool) {
+      currentTool = tool;
+      if (tool === 'pen') {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.lineWidth = 2;
+      } else {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.lineWidth = 20;
+      }
+    }
+    function clearCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); }
+
+    function pointerPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const p = e.touches ? e.touches[0] : e;
+      return { x: p.clientX - rect.left, y: p.clientY - rect.top };
+    }
+    function startDraw(e) { isDrawing = true; draw(e); }
+    function endDraw() { isDrawing = false; ctx.beginPath(); }
+    function draw(e) {
+      if (!isDrawing) return;
+      const { x, y } = pointerPos(e);
+      ctx.lineTo(x, y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, y);
+      e.preventDefault?.();
+    }
+
+    canvas.addEventListener('mousedown', startDraw);
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', endDraw);
+    canvas.addEventListener('mouseleave', endDraw);
+    canvas.addEventListener('touchstart', startDraw, { passive: false });
+    canvas.addEventListener('touchmove', draw, { passive: false });
+    canvas.addEventListener('touchend', endDraw);
+
+    document.getElementById('btn-pen').addEventListener('click', () => setTool('pen'));
+    document.getElementById('btn-eraser').addEventListener('click', () => setTool('eraser'));
+    document.getElementById('btn-clear').addEventListener('click', clearCanvas);
+    document.getElementById('colorPicker').addEventListener('change', (e) => {
+      ctx.strokeStyle = e.target.value;
+      setTool('pen'); // 색 바꾸면 펜으로 전환
+    });
+
+    const challengeArea   = document.getElementById('challenge-area');
+    const challengeTextEl = document.getElementById('challenge-text');
+    const btnChallengeClose = document.getElementById('btn-challenge-close');
+
+    function setChallengeMode(question) {
+      currentChallengeQuestion = question;
+      challengeTextEl.textContent = question;
+      challengeArea.style.display = 'block';
+      const submitBtn = document.getElementById('btn-submit');
+      submitBtn.textContent = '💬 답변 제출';
+      submitBtn.classList.add('btn-answer');
+    }
+    function closeChallenge() {
+      currentChallengeQuestion = null;
+      challengeArea.style.display = 'none';
+      const submitBtn = document.getElementById('btn-submit');
+      submitBtn.textContent = '📝 채점받기';
+      submitBtn.classList.remove('btn-answer');
+    }
+    btnChallengeClose.addEventListener('click', closeChallenge);
+
+    // 서버 연동
+    const API_URL = "https://gradeblankpaper-kbtdkj4qza-du.a.run.app";
+
+    async function submitReview() {
+      const loading = document.getElementById('loading');
+      try {
+        loading.style.display = 'flex';
+        const payload = {
+          bookId: null, // whiteboard는 문서 독립으로 운영
+          imageData: canvas.toDataURL('image/png').split(',')[1],
+          targetQuestion: currentChallengeQuestion
+        };
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (!res.ok || result.error) {
+          throw new Error(result.error || `HTTP ${res.status}`);
+        }
+        if (currentChallengeQuestion) {
+          alert(`[🤖 튜터 피드백]\n\n${result.feedback || '(피드백 없음)'}`);
+          if (result.next_question) setChallengeMode(result.next_question);
+          else closeChallenge();
+        } else {
+          let msg = `📝 [채점 결과: ${result.score}점]\n\n${result.feedback || ''}`;
+          if (result.missed_keywords?.length) {
+            msg += `\n\n💡 [놓친 핵심 키워드]\n${result.missed_keywords.join(', ')}`;
+          }
+          alert(msg);
+          if (result.challenge_question) {
+            setChallengeMode(result.challenge_question);
+            setTimeout(() => alert("🔥 심화 질문이 도착했습니다. 상단 박스를 확인하세요."), 450);
+          }
+        }
+      } catch (err) {
+        alert("통신 오류: " + err.message);
+      } finally {
+        loading.style.display = 'none';
+      }
+    }
+    async function requestHint() {
+      const loading = document.getElementById('loading');
+      try {
+        loading.style.display = 'flex';
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bookId: null,
+            imageData: canvas.toDataURL('image/png').split(',')[1],
+            isHint: true
+          })
+        });
+        const result = await res.json();
+        if (!res.ok || result.error) throw new Error(result.error || `HTTP ${res.status}`);
+        const hint = result.feedback || "힌트를 생성할 수 없습니다. 내용을 조금 더 작성해보세요.";
+        alert(`💡 [AI 힌트]\n\n${hint}`);
+      } catch (err) {
+        alert("에러 발생: " + err.message);
+      } finally {
+        loading.style.display = 'none';
+      }
+    }
+    document.getElementById('btn-submit').addEventListener('click', submitReview);
+    document.getElementById('btn-hint').addEventListener('click', requestHint);
+  </script>
+
+  <!-- ===== 오른쪽 패널: 최근 세션 질문 읽기 모듈 ===== -->
+  <script type="module">
+    // 수정사항!!
+    import {
+      db, auth, collection, getDocs, query, orderBy, limit,
+    } from "./A.firebase.js"; /* 수정사항!! */
+
+    async function loadRecentSessions() { /* 수정사항!! */
+      const user = auth.currentUser;
+      if (!user) return;
+      const sessQ = query(collection(db, `users/${user.uid}/chatSessions`), orderBy("endAt", "desc"), limit(3));
+      const snap = await getDocs(sessQ);
+      const container = document.getElementById('session-list');
+      container.innerHTML = "";
+
+      snap.forEach((d) => {
+        const data = d.data();
+        const sid = d.id;
+        const title = data?.title || "(세션)";
+        const persona = data?.persona || "기타";
+        const count = data?.questionCount || 0;
+
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'border:1px solid #f1f5f9; border-radius:10px; margin-bottom:8px; overflow:hidden;';
+
+        const header = document.createElement('button');
+        header.className = "btn";
+        header.style.cssText = 'width:100%; text-align:left; padding:10px 12px; background:#fbfdff;';
+        header.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="font-weight:600;">${title}</div>
+            <small style="color:#64748b">${persona} · ${count}문항</small>
+          </div>
+        `;
+
+        const body = document.createElement('div');
+        body.style.cssText = 'display:none; padding:10px 12px; background:#fff;';
+
+        let loaded = 0;
+        let isOpen = false;
+        const pageSize = 20;
+
+        async function loadMore() {
+          const tQ = query(
+            collection(db, `users/${user.uid}/chatSessions/${sid}/turns`),
+            orderBy("order", "asc"),
+            limit(pageSize + loaded)
+          );
+          const tSnap = await getDocs(tQ);
+          const items = [];
+          tSnap.forEach(t => items.push({ id: t.id, ...t.data() }));
+
+          const toRender = items.slice(loaded);
+          loaded = items.length;
+
+          toRender.forEach(it => {
+            const p = document.createElement('div');
+            p.style.cssText = 'padding:8px 0; border-bottom:1px dashed #eef2f7; white-space:pre-wrap;';
+            p.textContent = it.text; // 한 줄 = 한 질문
+            body.appendChild(p);
+          });
+
+          if (loaded < count) {
+            moreBtn.style.display = 'inline-flex';
+          } else {
+            moreBtn.style.display = 'none';
+          }
+        }
+
+        const moreBtn = document.createElement('button');
+        moreBtn.className = 'btn';
+        moreBtn.style.cssText = 'margin-top:8px; padding:6px 10px; font-size:12px;';
+        moreBtn.textContent = '더보기';
+        moreBtn.addEventListener('click', loadMore);
+
+        body.appendChild(moreBtn);
+
+        header.addEventListener('click', async () => {
+          isOpen = !isOpen;
+          body.style.display = isOpen ? 'block' : 'none';
+          if (isOpen && loaded === 0) await loadMore();
+        });
+
+        wrap.appendChild(header);
+        wrap.appendChild(body);
+        container.appendChild(wrap);
+      });
+    }
+
+    document.getElementById('refresh-sessions')?.addEventListener('click', loadRecentSessions); // 수정사항!!
+    setTimeout(loadRecentSessions, 800); // 수정사항!!
+  </script>
+</body>
+</html>
