@@ -110,50 +110,71 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
 
     import json
     from openai import OpenAI
-    # ⭐️ quiz_generator에서 필요한 함수들 가져오기
-    from quiz_generator import search_chunks_with_bm25
+    from quiz_generator import search_chunks_with_bm25, PreprocessedDoc
     
     global openai_client
-    # db는 get_db()로 가져오지만, 여기선 헬퍼함수 내부에서 호출하므로 패스
     if 'openai_client' not in globals() or openai_client is None:
         openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
     try:
         data = req.get_json(silent=True)
         book_id = data.get("bookId")
+        
+        # ⭐️ [수정 1] 텍스트/이미지 입력값 확인
         base64_image = data.get("imageData")
+        user_text_direct = data.get("userTextDirect") # 프론트에서 보낸 텍스트
+
         target_question = data.get("targetQuestion") 
         is_hint_request = data.get("isHint", False)
 
-        if not book_id or not base64_image:
-            return https_fn.Response("Missing fields", status=400, headers=headers)
+        # ⭐️ [수정 2] 둘 다 없으면 에러 처리
+        if not base64_image and not user_text_direct:
+            return https_fn.Response("Missing input (image or text)", status=400, headers=headers)
 
-        # 1. 필기 인식
-        vision_resp = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "user", 
-                    "content": [
-                        {"type": "text", "text": "이미지의 필기 내용을 텍스트로 변환하세요. 잡담 없이 텍스트만 출력하세요."},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
-                    ]
-                }
-            ],
-            max_tokens=500
-        )
-        user_text = vision_resp.choices[0].message.content.strip()
+        user_text = ""
+
+        # ⭐️ [수정 3] 텍스트가 있으면 Vision API 건너뛰기! (핵심)
+        if user_text_direct:
+            print("📝 [Text Mode] 사용자 타이핑 입력 감지")
+            user_text = str(user_text_direct).strip()
+            
+        # ⭐️ [수정 4] 텍스트가 없고 이미지만 있을 때 Vision 호출
+        elif base64_image:
+            print("🖼️ [Image Mode] 이미지 입력 감지 -> Vision API 호출")
+            try:
+                vision_resp = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "user", 
+                            "content": [
+                                {"type": "text", "text": "이미지의 필기 내용을 텍스트로 변환하세요. 잡담 없이 텍스트만 출력하세요."},
+                                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
+                            ]
+                        }
+                    ],
+                    max_tokens=500
+                )
+                user_text = vision_resp.choices[0].message.content.strip()
+            except Exception as vision_e:
+                print(f"Vision API Error: {vision_e}")
+                return https_fn.Response(json.dumps({"score": 0, "feedback": "이미지 인식 실패"}), status=200, headers=headers)
         
         if not user_text:
-            return https_fn.Response(json.dumps({"score": 0, "feedback": "글씨를 인식할 수 없습니다."}), status=200, headers=headers)
+            return https_fn.Response(json.dumps({"score": 0, "feedback": "내용을 인식할 수 없습니다."}), status=200, headers=headers)
 
         # 2. 정답지(RAG) 검색
-        # ⭐️ 여기서 아까 정의한 헬퍼 함수를 사용합니다. (이제 에러 안 남)
-        doc_obj = _load_processed_doc_from_firestore(book_id)
-        
-        query_text = f"{user_text} {target_question if target_question else ''}"
-        relevant_chunks = search_chunks_with_bm25(doc_obj, query_text, top_k=3)
-        ground_truth = "\n\n".join([c.text for c in relevant_chunks]) if relevant_chunks else "관련 내용 없음"
+        # (문서 ID가 없으면 - 즉 화이트보드 단독 모드면 - 검색 없이 진행)
+        ground_truth = "관련 교재 내용 없음 (자유 서술)"
+        if book_id and book_id != "null":
+            try:
+                doc_obj = _load_processed_doc_from_firestore(book_id)
+                query_text = f"{user_text} {target_question if target_question else ''}"
+                relevant_chunks = search_chunks_with_bm25(doc_obj, query_text, top_k=3)
+                if relevant_chunks:
+                    ground_truth = "\n\n".join([c.text for c in relevant_chunks])
+            except Exception as e:
+                print(f"RAG Search Error (Non-fatal): {e}")
 
         # 3. 프롬프트 구성 (CASE A/B/C)
         if target_question: # 소크라테스 모드

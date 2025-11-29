@@ -1,277 +1,455 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>백지 복습 모드</title>
-    <style>
-        body { margin: 0; overflow: hidden; background: #f0f0f0; display: flex; flex-direction: column; height: 100vh; }
-        
-        /* 상단 툴바 */
-        .toolbar { padding: 10px; background: white; display: flex; gap: 10px; border-bottom: 1px solid #ccc; align-items: center; overflow-x: auto; }
-        button { padding: 10px 20px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; white-space: nowrap; }
-        .btn-primary { background: #3b82f6; color: white; }
-        .btn-secondary { background: #e5e7eb; color: #374151; }
-        .btn-danger { background: #ef4444; color: white; }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>백지 복습 모드</title>
+  <style>
+    :root {
+      --bg: #f0f2f5;
+      --panel: #ffffff;
+      --muted: #64748b;
+      --primary: #3b82f6;
+      --danger: #ef4444;
+      --success: #10b981;
+      --shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+      --border: 1px solid #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      background: var(--bg);
+      font-family: ui-sans-serif, -apple-system, sans-serif;
+      color: #111827;
+    }
 
-        /* 답변 제출 모드일 때 버튼 스타일 (초록색) */
-        .btn-answer { 
-            background: #10b981 !important; 
-            border-color: #10b981 !important;
-            color: white !important;
-            font-weight: bold;
-            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
-        }
+    /* 툴바 스타일 */
+    .toolbar {
+      position: sticky; top: 0; z-index: 50;
+      padding: 10px; background: var(--panel);
+      display: flex; gap: 10px; align-items: center;
+      border-bottom: var(--border);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+      overflow-x: auto;
+    }
+    button {
+      padding: 10px 16px; font-size: 14px;
+      border: none; border-radius: 10px;
+      cursor: pointer; background: #e5e7eb; color: #374151;
+      white-space: nowrap; transition: 0.2s;
+    }
+    button:hover { box-shadow: var(--shadow); }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-danger  { background: var(--danger);  color: #fff; }
+    .btn-answer  { background: var(--success) !important; color: #fff !important; font-weight: 700; }
+    
+    /* 모드 전환 버튼 스타일 */
+    .btn-mode { background: #8b5cf6; color: white; }
+    .btn-mode:hover { background: #7c3aed; }
 
-        /* 그림판 영역 */
-        #canvas-container { flex: 1; position: relative; background: white; margin: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
-        canvas { display: block; touch-action: none; /* 태블릿 터치 스크롤 방지 (중요!) */ }
-        
-        /* 로딩 오버레이 */
-        #loading { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); color: white; justify-content: center; align-items: center; font-size: 24px; z-index: 999; flex-direction: column; gap: 15px; }
-        .spinner { width: 40px; height: 40px; border: 4px solid #fff; border-top: 4px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
+    .divider { width: 1px; height: 28px; background: #e5e7eb; margin: 0 6px; }
+
+    /* 메인 영역 (캔버스 & 텍스트) */
+    .content-area {
+      position: relative;
+      background: var(--panel);
+      margin: 12px;
+      /* 오른쪽 패널 공간 확보 */
+      width: calc(100% - 24px - 380px); 
+      height: calc(100vh - 84px);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      border: var(--border);
+    }
+    
+    canvas { display: block; touch-action: none; width: 100%; height: 100%; }
+    
+    textarea#typingArea {
+        width: 100%; height: 100%; resize: none;
+        padding: 30px; font-size: 16px; line-height: 1.6;
+        border: none; outline: none; font-family: sans-serif;
+        color: #333; background: #fff;
+    }
+
+    /* 심화 질문 박스 */
+    #challenge-area {
+      display:none; position:absolute;
+      top: 80px; left: 50%; transform: translateX(-50%);
+      background: #eef2ff; color: #111827;
+      padding: 14px 16px; border-radius: 12px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+      border: 2px solid var(--primary);
+      width: 680px; max-width: 90%; z-index: 100;
+    }
+
+    /* 오른쪽 패널 (채팅 기록) */
+    #session-questions-panel {
+      width: 380px; 
+      position: absolute;
+      right: 12px; top: 80px; bottom: 12px;
+      background: var(--panel);
+      border-radius: 12px;
+      border: var(--border);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      z-index: 180;
+      display: flex; flex-direction: column;
+    }
+    
+    /* 반응형 처리 */
+    @media (max-width: 1000px) {
+        #session-questions-panel { display: none; }
+        .content-area { width: calc(100% - 24px); }
+    }
+
+    /* 로딩 화면 */
+    #loading {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45); color: white;
+      z-index: 999; align-items: center; justify-content: center;
+      flex-direction: column; gap: 14px; backdrop-filter: blur(1px);
+    }
+    .spinner {
+      width: 44px; height: 44px;
+      border: 4px solid #fff; border-top-color: transparent;
+      border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
-    <div class="toolbar">
-        <button onclick="goBack()" class="btn-secondary">⬅ 닫기</button>
-        
-        <input type="color" id="colorPicker" value="#000000" title="펜 색상" style="height: 40px; cursor: pointer;">
-        
-        <button onclick="setTool('pen')" class="btn-secondary">✏️ 펜</button>
-        <button onclick="setTool('eraser')" class="btn-secondary">🧹 지우개</button>
-        
-        <button onclick="clearCanvas()" class="btn-danger">전체 지우기</button>
-        <button onclick="requestHint()" class="btn-secondary">💡 힌트 보기</button>
-        
-        <button id="btn-submit" onclick="submitReview()" class="btn-primary">📝 채점받기</button>
+  
+  <div class="toolbar">
+    <button id="btn-back" class="btn">⬅ 닫기</button>
+    <div class="divider"></div>
+    
+    <button id="btn-mode-switch" class="btn btn-mode">⌨️ 타이핑 모드</button>
+    <div class="divider"></div>
+
+    <div id="drawing-tools" style="display:flex; gap:10px; align-items:center;">
+        <input type="color" id="colorPicker" value="#000000" title="펜 색상" />
+        <button id="btn-pen" class="btn">✏️ 펜</button>
+        <button id="btn-eraser" class="btn">🧹 지우개</button>
+        <button id="btn-clear" class="btn btn-danger">전체 지우기</button>
     </div>
 
-    <div id="challenge-area" style="display:none; position:absolute; top:70px; left:50%; transform:translateX(-50%); background:#eef2ff; padding:15px; border-radius:10px; box-shadow:0 4px 15px rgba(0,0,0,0.2); border:2px solid #3b82f6; max-width: 90%; width: 600px; z-index:100;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <strong style="color:#3b82f6; font-size: 1.1em;">🤔 소크라테스 심화 질문</strong>
-            <button onclick="closeChallenge()" style="padding:4px 8px; font-size:12px; background:#ddd;">대화 종료</button>
-        </div>
-        <p id="challenge-text" style="margin:0; font-weight:500; line-height: 1.5; color: #333;">...</p>
-        <p style="margin-top:10px; font-size: 0.9em; color: #666;">👇 아래 빈 공간에 답변을 쓰고 [답변 제출]을 눌러보세요!</p>
+    <div class="divider"></div>
+    <button id="btn-hint" class="btn">💡 힌트 보기</button>
+    <button id="btn-submit" class="btn btn-primary">📝 채점받기</button>
+  </div>
+
+  <div id="challenge-area">
+    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+      <strong style="color:var(--primary);">🤔 심화 질문 (소크라테스 튜터)</strong>
+      <button id="btn-challenge-close" class="btn" style="padding:4px 8px; font-size:12px">닫기</button>
     </div>
+    <p id="challenge-text">...</p>
+  </div>
 
-    <div id="canvas-container">
-        <canvas id="drawingCanvas"></canvas>
+  <div id="canvas-container" class="content-area">
+    <canvas id="drawingCanvas"></canvas>
+  </div>
+
+  <div id="text-editor-container" class="content-area" style="display:none;">
+    <textarea id="typingArea" placeholder="여기에 복습한 내용을 자유롭게 작성하세요..."></textarea>
+  </div>
+
+  <aside id="session-questions-panel">
+    <div style="padding:12px; border-bottom:1px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center;">
+      <strong>📂 챗봇 대화 기록</strong>
+      <button id="refresh-sessions" class="btn" style="padding:4px 8px; font-size:12px">새로고침</button>
     </div>
+    <div id="session-list" style="padding:10px; overflow-y:auto; flex:1; background:#f9fafb;"></div>
+  </aside>
 
-    <div id="loading">
-        <div class="spinner"></div>
-        <span>AI가 분석 중입니다... 🤖</span>
-    </div>
+  <div id="loading"><div class="spinner"></div><span>AI 선생님이 채점 중입니다... 🤖</span></div>
 
-    <script>
-        // --- 1. 초기 설정 및 네비게이션 ---
-        function goBack() {
-            window.history.back();
+  <script>
+    // 1. 뒤로가기
+    function goBack() { window.history.back(); }
+    document.getElementById('btn-back').addEventListener('click', goBack);
+
+    // 2. 변수 및 요소 초기화
+    const canvasContainer = document.getElementById('canvas-container');
+    const textContainer = document.getElementById('text-editor-container');
+    const canvas = document.getElementById('drawingCanvas');
+    const ctx = canvas.getContext('2d');
+    const btnModeSwitch = document.getElementById('btn-mode-switch');
+    const drawingTools = document.getElementById('drawing-tools');
+
+    let inputMode = 'drawing'; // 'drawing' or 'text'
+    let isDrawing = false; 
+    let currentTool = 'pen';
+    let currentChallengeQuestion = null;
+
+    // 3. 모드 전환 로직
+    btnModeSwitch.addEventListener('click', () => {
+        if (inputMode === 'drawing') {
+            // 텍스트 모드로 전환
+            inputMode = 'text';
+            btnModeSwitch.textContent = '🎨 그리기 모드'; // 버튼 이름 변경
+            canvasContainer.style.display = 'none';
+            textContainer.style.display = 'block';
+            drawingTools.style.display = 'none'; // 펜 도구 숨기기
+        } else {
+            // 그리기 모드로 전환
+            inputMode = 'drawing';
+            btnModeSwitch.textContent = '⌨️ 타이핑 모드';
+            canvasContainer.style.display = 'block';
+            textContainer.style.display = 'none';
+            drawingTools.style.display = 'flex'; // 펜 도구 보이기
+            resizeCanvas(); // 캔버스 사이즈 재조정
         }
+    });
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const currentBookId = urlParams.get('bookId');
-
-        if (!currentBookId) {
-            alert("문서 정보가 없습니다. 메인 화면으로 돌아갑니다.");
-            window.location.href = "index.html";
-        }
-
-        // --- 2. 캔버스 설정 ---
-        const canvas = document.getElementById('drawingCanvas');
-        const ctx = canvas.getContext('2d');
-        const container = document.getElementById('canvas-container');
-        let currentTool = 'pen';
-        let currentChallengeQuestion = null; // 현재 심화 질문 상태
-
-        // 캔버스 크기 맞추기 (리사이즈 시 데이터 유지)
-        function resize() {
-            // 1. 현재 그림 백업
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = canvas.width;
-            tempCanvas.height = canvas.height;
-            const tempCtx = tempCanvas.getContext('2d');
-            if (canvas.width > 0 && canvas.height > 0) {
-                tempCtx.drawImage(canvas, 0, 0);
-            }
-
-            // 2. 크기 변경
-            canvas.width = container.clientWidth;
-            canvas.height = container.clientHeight;
-
-            // 3. 그림 복구
-            if (tempCanvas.width > 0 && tempCanvas.height > 0) {
-                ctx.drawImage(tempCanvas, 0, 0);
-            }
-
-            // 4. 스타일 재설정 (리사이즈하면 초기화되므로)
-            setTool(currentTool);
-            ctx.strokeStyle = document.getElementById('colorPicker').value;
-            ctx.lineCap = 'round';
-        }
-        window.addEventListener('resize', resize);
-        // 초기 실행 (약간의 지연을 주어 컨테이너가 잡힌 후 실행)
-        setTimeout(resize, 100);
-
-        // --- 3. 그리기 로직 ---
-        let isDrawing = false;
-
-        function startDraw(e) { isDrawing = true; draw(e); }
-        function endDraw() { isDrawing = false; ctx.beginPath(); }
+    // 4. 캔버스 관련 로직
+    function resizeCanvas() {
+        if(canvasContainer.clientWidth === 0) return; // 숨겨져 있을 땐 패스
+        // 캔버스 크기 유지 (내용 안 날아가게 하려면 별도 백업 필요하나, 여기선 간단히)
+        // 리사이즈 시 내용은 초기화될 수 있음 (간단 구현)
+        const temp = ctx.getImageData(0,0,canvas.width, canvas.height);
+        canvas.width = canvasContainer.clientWidth;
+        canvas.height = canvasContainer.clientHeight;
+        try { ctx.putImageData(temp, 0, 0); } catch(e){} 
         
-        function draw(e) {
-            if (!isDrawing) return;
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            const rect = canvas.getBoundingClientRect();
+        ctx.lineCap = 'round';
+        updateToolStyle();
+    }
+    window.addEventListener('resize', resizeCanvas);
+    setTimeout(resizeCanvas, 100);
 
-            ctx.lineTo(clientX - rect.left, clientY - rect.top);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(clientX - rect.left, clientY - rect.top);
+    function updateToolStyle() {
+        ctx.strokeStyle = document.getElementById('colorPicker').value;
+        if(currentTool === 'eraser') { 
+            ctx.lineWidth = 20; 
+            ctx.globalCompositeOperation = 'destination-out'; 
+        } else { 
+            ctx.lineWidth = 2; 
+            ctx.globalCompositeOperation = 'source-over'; 
         }
+    }
 
-        canvas.addEventListener('mousedown', startDraw);
-        canvas.addEventListener('mouseup', endDraw);
-        canvas.addEventListener('mousemove', draw);
-        canvas.addEventListener('touchstart', startDraw);
-        canvas.addEventListener('touchend', endDraw);
-        canvas.addEventListener('touchmove', draw);
-
-        // --- 4. 도구 기능 ---
-        function clearCanvas() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-        }
-
-        function setTool(tool) {
-            currentTool = tool;
-            if (tool === 'pen') {
-                ctx.globalCompositeOperation = 'source-over';
-                ctx.lineWidth = 2;
-            } else if (tool === 'eraser') {
-                ctx.globalCompositeOperation = 'destination-out';
-                ctx.lineWidth = 20;
-            }
-        }
-
-        document.getElementById('colorPicker').addEventListener('change', (e) => {
-            ctx.strokeStyle = e.target.value;
-            setTool('pen'); 
-        });
-
-        // --- 5. 서버 통신 (핵심) ---
+    function startDraw(e) { if(inputMode !== 'drawing') return; isDrawing = true; draw(e); }
+    function endDraw() { isDrawing = false; ctx.beginPath(); }
+    function draw(e) {
+        if(!isDrawing) return;
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
         
-        // ✅ 본인의 Cloud Functions URL (수정됨)
-        const API_URL = "https://gradeblankpaper-kbtdkj4qza-du.a.run.app";
+        ctx.lineTo(x, y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, y);
+        e.preventDefault();
+    }
 
-        // [채점 / 답변 제출]
-        async function submitReview() {
-            const imageData = canvas.toDataURL('image/png').split(',')[1];
-            document.getElementById('loading').style.display = 'flex';
+    // 캔버스 이벤트 연결
+    canvas.addEventListener('mousedown', startDraw); 
+    canvas.addEventListener('mousemove', draw);
+    canvas.addEventListener('mouseup', endDraw); 
+    canvas.addEventListener('mouseleave', endDraw);
+    canvas.addEventListener('touchstart', startDraw, {passive: false}); 
+    canvas.addEventListener('touchmove', draw, {passive: false});
+    canvas.addEventListener('touchend', endDraw);
 
+    // 도구 버튼 연결
+    document.getElementById('btn-pen').onclick = () => { currentTool='pen'; updateToolStyle(); };
+    document.getElementById('btn-eraser').onclick = () => { currentTool='eraser'; updateToolStyle(); };
+    document.getElementById('btn-clear').onclick = () => ctx.clearRect(0,0,canvas.width, canvas.height);
+    document.getElementById('colorPicker').onchange = () => { currentTool='pen'; updateToolStyle(); };
+
+    // 5. 심화 질문 UI 로직
+    const challengeArea = document.getElementById('challenge-area');
+    const challengeTextEl = document.getElementById('challenge-text');
+    const btnChallengeClose = document.getElementById('btn-challenge-close');
+
+    function setChallengeMode(question) {
+        currentChallengeQuestion = question;
+        challengeTextEl.textContent = question;
+        challengeArea.style.display = 'block';
+        const submitBtn = document.getElementById('btn-submit');
+        submitBtn.textContent = '💬 답변 제출';
+        submitBtn.classList.add('btn-answer');
+    }
+    function closeChallenge() {
+        currentChallengeQuestion = null;
+        challengeArea.style.display = 'none';
+        const submitBtn = document.getElementById('btn-submit');
+        submitBtn.textContent = '📝 채점받기';
+        submitBtn.classList.remove('btn-answer');
+    }
+    btnChallengeClose.addEventListener('click', closeChallenge);
+
+    // 6. 서버 통신 (API)
+    const API_URL = "https://gradeblankpaper-kbtdkj4qza-du.a.run.app"; // 본인의 Cloud Function URL 확인 필요!
+
+    async function submitReview() {
+        const loading = document.getElementById('loading');
+        try {
+            loading.style.display = 'flex';
+            
             const payload = {
-                bookId: currentBookId,
-                imageData: imageData,
-                targetQuestion: currentChallengeQuestion 
+                bookId: null, // 필요시 URL 파라미터에서 가져와야 함
+                targetQuestion: currentChallengeQuestion
             };
 
-            try {
-                const response = await fetch(API_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload)
-                });
-                
-                const result = await response.json();
-                
-                // 에러 처리
-                if (result.error) throw new Error(result.error);
-
-                // A. 소크라테스 답변 피드백
-                if (currentChallengeQuestion) {
-                    alert(`[🤖 튜터 피드백]\n\n${result.feedback}`);
-                    
-                    if (result.next_question) {
-                        setChallengeMode(result.next_question); // 대화 계속
-                    } else {
-                        closeChallenge(); // 대화 종료
-                    }
-                } 
-                // B. 일반 채점 결과
-                else {
-                    let msg = `📝 [채점 결과: ${result.score}점]\n\n${result.feedback}`;
-                    
-                    if (result.missed_keywords && result.missed_keywords.length > 0) {
-                        msg += `\n\n💡 [놓친 핵심 키워드]\n${result.missed_keywords.join(', ')}`;
-                    }
-                    
-                    alert(msg);
-
-                    if (result.challenge_question) {
-                        setChallengeMode(result.challenge_question);
-                        // setTimeout을 줘서 alert 닫힌 뒤에 뜨게 함
-                        setTimeout(() => alert("🔥 훌륭합니다! 심화 질문이 도착했습니다. 상단 박스를 확인하세요."), 500);
-                    }
-                }
-
-            } catch (e) {
-                alert("통신 오류: " + e);
-            } finally {
-                document.getElementById('loading').style.display = 'none';
+            // ⭐️ 모드에 따라 데이터 분기
+            if (inputMode === 'drawing') {
+                payload.imageData = canvas.toDataURL('image/png').split(',')[1];
+            } else {
+                const textVal = document.getElementById('typingArea').value.trim();
+                if (textVal.length < 2) throw new Error("내용을 입력해주세요!");
+                payload.userTextDirect = textVal;
             }
+
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            const result = await res.json();
+            if (!res.ok || result.error) throw new Error(result.error || `HTTP ${res.status}`);
+            
+            if (currentChallengeQuestion) {
+                 alert(`[🤖 튜터 피드백]\n\n${result.feedback || '(피드백 없음)'}`);
+                 if (result.next_question) setChallengeMode(result.next_question);
+                 else closeChallenge();
+            } else {
+                 let msg = `📝 [채점 결과: ${result.score}점]\n\n${result.feedback || ''}`;
+                 if (result.missed_keywords?.length) msg += `\n\n💡 [놓친 키워드]\n${result.missed_keywords.join(', ')}`;
+                 alert(msg);
+                 if (result.challenge_question) {
+                    setChallengeMode(result.challenge_question);
+                    setTimeout(() => alert("🔥 심화 질문이 도착했습니다."), 450);
+                 }
+            }
+
+        } catch (err) {
+            alert("오류: " + err.message);
+        } finally {
+            loading.style.display = 'none';
         }
+    }
 
-        // [힌트 요청]
-        async function requestHint() {
-            const imageData = canvas.toDataURL('image/png').split(',')[1];
-            document.getElementById('loading').style.display = 'flex';
+    async function requestHint() {
+        const loading = document.getElementById('loading');
+        try {
+            loading.style.display = 'flex';
+            const payload = { bookId: null, isHint: true };
 
-            try {
-                const response = await fetch(API_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ 
-                        bookId: currentBookId, 
-                        imageData: imageData,
-                        isHint: true 
-                    })
-                });
-                
-                const result = await response.json();
-                if (result.feedback) {
-                    alert(`💡 [AI 힌트]\n\n${result.feedback}`);
+            if (inputMode === 'drawing') {
+                payload.imageData = canvas.toDataURL('image/png').split(',')[1];
+            } else {
+                const textVal = document.getElementById('typingArea').value.trim();
+                if (!textVal) throw new Error("내용이 없습니다.");
+                payload.userTextDirect = textVal;
+            }
+
+            const res = await fetch(API_URL, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if(!res.ok) throw new Error(result.error);
+            alert(`💡 [AI 힌트]\n\n${result.feedback}`);
+        } catch(err) {
+            alert(err.message);
+        } finally {
+            loading.style.display = 'none';
+        }
+    }
+
+    document.getElementById('btn-submit').addEventListener('click', submitReview);
+    document.getElementById('btn-hint').addEventListener('click', requestHint);
+  </script>
+
+  <script type="module">
+    import {
+      db, auth, collection, getDocs, query, orderBy, limit,
+      onAuthStateChanged
+    } from "./A.firebase.js";
+
+    async function loadRecentSessions() {
+      const user = auth.currentUser;
+      if (!user) return;
+      
+      const container = document.getElementById('session-list');
+      container.innerHTML = '<div style="text-align:center; color:#888; padding:20px;">불러오는 중...</div>';
+
+      try {
+          const sessQ = query(collection(db, `users/${user.uid}/chatSessions`), orderBy("endAt", "desc"), limit(3));
+          const snap = await getDocs(sessQ);
+          container.innerHTML = "";
+
+          if(snap.empty) {
+              container.innerHTML = '<div style="text-align:center; padding:20px; color:#aaa;">저장된 대화가 없습니다.</div>';
+              return;
+          }
+
+          snap.forEach((d) => {
+            const data = d.data();
+            const sid = d.id;
+            
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'border:1px solid #e5e7eb; border-radius:8px; margin-bottom:10px; background:#fff; overflow:hidden;';
+
+            // 헤더
+            const header = document.createElement('div');
+            header.style.cssText = 'padding:12px; background:#f3f4f6; cursor:pointer; font-size:13px; font-weight:600; display:flex; justify-content:space-between; align-items:center;';
+            header.innerHTML = `<span>${data.title || '대화 세션'}</span> <span style="font-weight:normal; color:#6b7280; font-size:11px;">${data.questionCount || 0}개 질문</span>`;
+
+            // 바디 (질문 목록)
+            const body = document.createElement('div');
+            body.style.cssText = 'display:none; padding:10px; border-top:1px solid #e5e7eb; font-size:12.5px; line-height:1.5; color:#374151; max-height:200px; overflow-y:auto;';
+
+            let isLoaded = false;
+            
+            header.onclick = async () => {
+                if(body.style.display === 'none') {
+                    body.style.display = 'block';
+                    if(!isLoaded) {
+                        body.innerHTML = '로딩 중...';
+                        const tQ = query(collection(db, `users/${user.uid}/chatSessions/${sid}/turns`), orderBy("order", "asc"));
+                        const tSnap = await getDocs(tQ);
+                        body.innerHTML = '';
+                        tSnap.forEach(t => {
+                            const qText = t.data().text;
+                            const p = document.createElement('p');
+                            p.style.marginBottom = '8px';
+                            p.innerHTML = `<b style="color:#3b82f6;">Q.</b> ${qText}`;
+                            body.appendChild(p);
+                        });
+                        if(tSnap.empty) body.innerHTML = '질문이 없습니다.';
+                        isLoaded = true;
+                    }
                 } else {
-                    alert("힌트를 생성할 수 없습니다. 내용을 조금 더 작성해보세요.");
+                    body.style.display = 'none';
                 }
-            } catch (e) {
-                alert("에러 발생: " + e);
-            } finally {
-                document.getElementById('loading').style.display = 'none';
-            }
-        }
+            };
 
-        // --- 6. UI 모드 전환 ---
-        function setChallengeMode(question) {
-            currentChallengeQuestion = question;
-            document.getElementById('challenge-text').textContent = question;
-            document.getElementById('challenge-area').style.display = 'block';
-            
-            const btn = document.getElementById('btn-submit');
-            btn.textContent = "💬 답변 제출";
-            btn.classList.add('btn-answer');
-        }
+            wrap.appendChild(header);
+            wrap.appendChild(body);
+            container.appendChild(wrap);
+          });
+      } catch (e) {
+          console.error(e);
+          container.innerHTML = '<div style="color:red; text-align:center; padding:20px;">로드 실패</div>';
+      }
+    }
 
-        function closeChallenge() {
-            currentChallengeQuestion = null;
-            document.getElementById('challenge-area').style.display = 'none';
-            
-            const btn = document.getElementById('btn-submit');
-            btn.textContent = "📝 채점받기";
-            btn.classList.remove('btn-answer');
+    // 로그인 상태 감지
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            loadRecentSessions();
+        } else {
+            document.getElementById('session-list').innerHTML = "<div style='padding:20px; text-align:center; color:#999;'>로그인이 필요합니다.</div>";
         }
-    </script>
+    });
+
+    document.getElementById('refresh-sessions')?.addEventListener('click', loadRecentSessions);
+  </script>
 </body>
 </html>
