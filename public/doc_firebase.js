@@ -64,7 +64,7 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 const messaging = getMessaging(app);
 const provider = new GoogleAuthProvider();
-const functions = getFunctions(app);
+const functions = getFunctions(app, "asia-northeast3");
 
 // --- 전역 변수 ---
 const appId = "default-app-id";

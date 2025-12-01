@@ -372,7 +372,7 @@
       onAuthStateChanged
     } from "./A.firebase.js";
 
-    async function loadRecentSessions() {
+async function loadRecentSessions() {
       const user = auth.currentUser;
       if (!user) return;
       
@@ -380,7 +380,12 @@
       container.innerHTML = '<div style="text-align:center; color:#888; padding:20px;">불러오는 중...</div>';
 
       try {
-          const sessQ = query(collection(db, `users/${user.uid}/chatSessions`), orderBy("endAt", "desc"), limit(3));
+          // 1. 최신순(updatedAt)으로 5개 가져오기
+          const sessQ = query(
+              collection(db, `users/${user.uid}/chatSessions`), 
+              orderBy("updatedAt", "desc"), 
+              limit(5)
+          );
           const snap = await getDocs(sessQ);
           container.innerHTML = "";
 
@@ -396,12 +401,15 @@
             const wrap = document.createElement('div');
             wrap.style.cssText = 'border:1px solid #e5e7eb; border-radius:8px; margin-bottom:10px; background:#fff; overflow:hidden;';
 
+            // 메시지 개수 표시
+            const count = data.messageCount || data.questionCount || 0;
+
             // 헤더
             const header = document.createElement('div');
             header.style.cssText = 'padding:12px; background:#f3f4f6; cursor:pointer; font-size:13px; font-weight:600; display:flex; justify-content:space-between; align-items:center;';
-            header.innerHTML = `<span>${data.title || '대화 세션'}</span> <span style="font-weight:normal; color:#6b7280; font-size:11px;">${data.questionCount || 0}개 질문</span>`;
+            header.innerHTML = `<span>${data.title || '대화 세션'}</span> <span style="font-weight:normal; color:#6b7280; font-size:11px;">${count}개 메시지</span>`;
 
-            // 바디 (질문 목록)
+            // 바디 (내용 영역)
             const body = document.createElement('div');
             body.style.cssText = 'display:none; padding:10px; border-top:1px solid #e5e7eb; font-size:12.5px; line-height:1.5; color:#374151; max-height:200px; overflow-y:auto;';
 
@@ -410,19 +418,47 @@
             header.onclick = async () => {
                 if(body.style.display === 'none') {
                     body.style.display = 'block';
+                    
                     if(!isLoaded) {
-                        body.innerHTML = '로딩 중...';
+                        body.innerHTML = '<div style="color:#999; text-align:center;">로딩 중...</div>';
+                        
+                        // 세부 대화 내용 가져오기
                         const tQ = query(collection(db, `users/${user.uid}/chatSessions/${sid}/turns`), orderBy("order", "asc"));
                         const tSnap = await getDocs(tQ);
-                        body.innerHTML = '';
-                        tSnap.forEach(t => {
-                            const qText = t.data().text;
-                            const p = document.createElement('p');
-                            p.style.marginBottom = '8px';
-                            p.innerHTML = `<b style="color:#3b82f6;">Q.</b> ${qText}`;
-                            body.appendChild(p);
-                        });
-                        if(tSnap.empty) body.innerHTML = '질문이 없습니다.';
+                        
+                        body.innerHTML = ''; // 로딩 문구 지우기
+
+                        if(tSnap.empty) {
+                            body.innerHTML = '대화 내용이 없습니다.';
+                        } else {
+                            let validCount = 0;
+                            let prevText = ""; // 중복 방지용
+
+                            tSnap.forEach(t => {
+                                const qText = t.data().text;
+
+                                // 🗑️ [필터링 1] 로딩 멘트 & 빈 텍스트 삭제
+                                if (!qText) return;
+                                if (qText.includes("답변을 생성 중입니다")) return;
+                                if (qText.trim() === "..." || qText.trim() === "") return;
+
+                                // 🗑️ [필터링 2] 바로 앞 말과 똑같은 말이면 삭제 (중복 인사 방지)
+                                if (qText === prevText) return;
+                                prevText = qText;
+
+                                // 통과한 진짜 메시지만 화면에 그리기
+                                const p = document.createElement('p');
+                                p.style.marginBottom = '8px';
+                                p.innerHTML = `<span style="color:#3b82f6; font-weight:bold;">AI:</span> ${qText}`;
+                                body.appendChild(p);
+                                validCount++;
+                            });
+
+                            // 필터링 다 했더니 남은 게 하나도 없을 때
+                            if (validCount === 0) {
+                                body.innerHTML = '<div style="color:#aaa; text-align:center;">표시할 유효한 대화가 없습니다.</div>';
+                            }
+                        }
                         isLoaded = true;
                     }
                 } else {
@@ -439,7 +475,6 @@
           container.innerHTML = '<div style="color:red; text-align:center; padding:20px;">로드 실패</div>';
       }
     }
-
     // 로그인 상태 감지
     onAuthStateChanged(auth, (user) => {
         if (user) {

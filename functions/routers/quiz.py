@@ -35,7 +35,11 @@ def _load_processed_doc_from_firestore(book_id: str):
 # 메인 함수들
 # --------------------------------------------------------
 
-@https_fn.on_call(secrets=["OPENAI_API_KEY"])
+@https_fn.on_call(
+    region="asia-northeast3",  # 리전 명시 (프론트엔드와 일치 필요)
+    memory=options.MemoryOption.GB_2, 
+    timeout_sec=300
+)
 def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
     db = get_db()
     book_id = req.data.get("bookId")

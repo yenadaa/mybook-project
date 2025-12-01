@@ -37,7 +37,7 @@ const db = initializeFirestore(app, {
 
 const auth = getAuth(app);
 const storage = getStorage(app);
-const functions = getFunctions(app);
+const functions = getFunctions(app, "asia-northeast3");
 
 // Messaging 안전 초기화
 let messaging = null;
