@@ -133,6 +133,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const target = e.target;
         const optionLI = target.closest('li');
 
+        // [추가][12-01][힌트 버튼 클릭 로직]
+        if (target.matches('.hint-button')) {
+            const quizItem = target.closest('.quiz-item');
+            const hintContent = quizItem.querySelector('.hint-content');
+            
+            if (hintContent) {
+                // display 속성을 사용하여 숨김/보임 토글
+                const isVisible = hintContent.style.display === 'block';
+                
+                if (isVisible) {
+                    hintContent.style.display = 'none'; // 숨기기
+                    target.textContent = '💡 힌트 보기';
+                } else {
+                    hintContent.style.display = 'block'; // 보이기
+                    target.textContent = '💡 힌트 숨기기';
+                }
+            }
+            return; // 힌트 처리 후 다른 퀴즈 로직 실행 방지
+        }
+
         if (optionLI && optionLI.parentElement.classList.contains('quiz-options')) {
             const quizItem = optionLI.closest('.quiz-item');
             if (!quizItem || quizItem.classList.contains('answered')) return;
@@ -263,6 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 `).join('');
             }
+            
+            // --- [함수 전체 변경][12-01][힌트가없습니다 없앰] ---
             if (review.discussion && review.discussion.length > 0) {
                 html += '<h3>서술형/토론</h3>';
                 html += review.discussion.map((item, i) => `
@@ -272,11 +294,15 @@ document.addEventListener('DOMContentLoaded', () => {
                             <textarea class="discussion-input" placeholder="정답을 입력하세요."></textarea>
                         </div>
                         <div class="quiz-actions">
-                            <button class="hint-button">💡 힌트 보기</button>
                             <button class="submit-discussion-btn">정답 제출</button>
-                        </div>
-                        <div class="hint-content">
-                            ${item.hint || '힌트가 없습니다.'}
+                            
+                            ${item.hint ? `
+                                <button class="hint-button">💡 힌트 보기</button>
+                                <div class="hint-content" style="display: none;">
+                                    ${item.hint}
+                                </div> 
+                            ` : ''}
+
                         </div>                        
                     </div>
                 `).join('');
