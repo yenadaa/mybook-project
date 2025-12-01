@@ -116,6 +116,37 @@
       border-radius: 50%; animation: spin 1s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 커스텀 알림창(모달) 스타일 */
+    .custom-modal-overlay {
+      display: none; position: fixed; top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.6); z-index: 99999;
+      align-items: center; justify-content: center;
+    }
+    .custom-modal-box {
+      background: #fff; width: 90%; max-width: 500px;
+      padding: 24px; border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+      text-align: left; animation: popUp 0.2s ease-out;
+    }
+    .custom-modal-title {
+      font-size: 18px; font-weight: bold; margin-bottom: 12px;
+      color: #3b82f6; border-bottom: 1px solid #eee; padding-bottom: 8px;
+    }
+    .custom-modal-body {
+      font-size: 16px; line-height: 1.6; color: #333;
+      white-space: pre-wrap; max-height: 60vh; overflow-y: auto;
+    }
+    .custom-modal-btn {
+      display: block; width: 100%; margin-top: 20px; padding: 12px;
+      background: #3b82f6; color: white; border: none;
+      border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;
+    }
+    @keyframes popUp {
+      from { transform: scale(0.9); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
   </style>
 </head>
 <body>
@@ -166,6 +197,20 @@
   <div id="loading"><div class="spinner"></div><span>AI 선생님이 채점 중입니다... 🤖</span></div>
 
   <script>
+    // --- [1] 모달 제어 함수 (앱/웹뷰 호환용) ---
+    function showCustomModal(title, text) {
+        const modal = document.getElementById('resultModal');
+        if (!modal) { alert(title + "\n\n" + text); return; }
+        
+        document.getElementById('modalTitle').textContent = title;
+        document.getElementById('modalBody').textContent = text;
+        modal.style.display = 'flex';
+    }
+    function closeCustomModal() {
+        const modal = document.getElementById('resultModal');
+        if (modal) modal.style.display = 'none';
+    }
+
     // 1. 뒤로가기
     function goBack() { window.history.back(); }
     document.getElementById('btn-back').addEventListener('click', goBack);
@@ -206,8 +251,6 @@
     // 4. 캔버스 관련 로직
     function resizeCanvas() {
         if(canvasContainer.clientWidth === 0) return; // 숨겨져 있을 땐 패스
-        // 캔버스 크기 유지 (내용 안 날아가게 하려면 별도 백업 필요하나, 여기선 간단히)
-        // 리사이즈 시 내용은 초기화될 수 있음 (간단 구현)
         const temp = ctx.getImageData(0,0,canvas.width, canvas.height);
         canvas.width = canvasContainer.clientWidth;
         canvas.height = canvasContainer.clientHeight;
@@ -285,6 +328,7 @@
     // 6. 서버 통신 (API)
     const API_URL = "https://gradeblankpaper-kbtdkj4qza-du.a.run.app"; // 본인의 Cloud Function URL 확인 필요!
 
+    // --- [2] 채점 함수 (모달 적용됨) ---
     async function submitReview() {
         const loading = document.getElementById('loading');
         try {
@@ -314,26 +358,30 @@
             if (!res.ok || result.error) throw new Error(result.error || `HTTP ${res.status}`);
             
             if (currentChallengeQuestion) {
-                 alert(`[🤖 튜터 피드백]\n\n${result.feedback || '(피드백 없음)'}`);
+                 showCustomModal("🤖 튜터 피드백", result.feedback || '(피드백 없음)');
+
                  if (result.next_question) setChallengeMode(result.next_question);
                  else closeChallenge();
             } else {
-                 let msg = `📝 [채점 결과: ${result.score}점]\n\n${result.feedback || ''}`;
+                 let msg = `[채점 결과: ${result.score}점]\n\n${result.feedback || ''}`;
                  if (result.missed_keywords?.length) msg += `\n\n💡 [놓친 키워드]\n${result.missed_keywords.join(', ')}`;
-                 alert(msg);
+                 
+                 // 심화 질문이 있으면 메시지에 추가 (모달 중복 방지)
                  if (result.challenge_question) {
                     setChallengeMode(result.challenge_question);
-                    setTimeout(() => alert("🔥 심화 질문이 도착했습니다."), 450);
+                    msg += "\n\n🔥 [알림] 심화 질문이 도착했습니다! 상단을 확인하세요.";
                  }
+                 showCustomModal("📝 채점 완료", msg);
             }
 
         } catch (err) {
-            alert("오류: " + err.message);
+            showCustomModal("오류 발생", err.message);
         } finally {
             loading.style.display = 'none';
         }
     }
 
+    // --- [3] 힌트 함수 (모달 적용됨) ---
     async function requestHint() {
         const loading = document.getElementById('loading');
         try {
@@ -354,9 +402,10 @@
             });
             const result = await res.json();
             if(!res.ok) throw new Error(result.error);
-            alert(`💡 [AI 힌트]\n\n${result.feedback}`);
+            
+            showCustomModal("💡 AI 힌트", result.feedback);
         } catch(err) {
-            alert(err.message);
+            showCustomModal("오류", err.message);
         } finally {
             loading.style.display = 'none';
         }
@@ -372,7 +421,8 @@
       onAuthStateChanged
     } from "./A.firebase.js";
 
-async function loadRecentSessions() {
+    // --- [4] 채팅 불러오기 (필터링 적용됨) ---
+    async function loadRecentSessions() {
       const user = auth.currentUser;
       if (!user) return;
       
@@ -380,7 +430,6 @@ async function loadRecentSessions() {
       container.innerHTML = '<div style="text-align:center; color:#888; padding:20px;">불러오는 중...</div>';
 
       try {
-          // 1. 최신순(updatedAt)으로 5개 가져오기
           const sessQ = query(
               collection(db, `users/${user.uid}/chatSessions`), 
               orderBy("updatedAt", "desc"), 
@@ -401,15 +450,12 @@ async function loadRecentSessions() {
             const wrap = document.createElement('div');
             wrap.style.cssText = 'border:1px solid #e5e7eb; border-radius:8px; margin-bottom:10px; background:#fff; overflow:hidden;';
 
-            // 메시지 개수 표시
             const count = data.messageCount || data.questionCount || 0;
 
-            // 헤더
             const header = document.createElement('div');
             header.style.cssText = 'padding:12px; background:#f3f4f6; cursor:pointer; font-size:13px; font-weight:600; display:flex; justify-content:space-between; align-items:center;';
             header.innerHTML = `<span>${data.title || '대화 세션'}</span> <span style="font-weight:normal; color:#6b7280; font-size:11px;">${count}개 메시지</span>`;
 
-            // 바디 (내용 영역)
             const body = document.createElement('div');
             body.style.cssText = 'display:none; padding:10px; border-top:1px solid #e5e7eb; font-size:12.5px; line-height:1.5; color:#374151; max-height:200px; overflow-y:auto;';
 
@@ -422,31 +468,27 @@ async function loadRecentSessions() {
                     if(!isLoaded) {
                         body.innerHTML = '<div style="color:#999; text-align:center;">로딩 중...</div>';
                         
-                        // 세부 대화 내용 가져오기
                         const tQ = query(collection(db, `users/${user.uid}/chatSessions/${sid}/turns`), orderBy("order", "asc"));
                         const tSnap = await getDocs(tQ);
                         
-                        body.innerHTML = ''; // 로딩 문구 지우기
+                        body.innerHTML = ''; 
 
                         if(tSnap.empty) {
                             body.innerHTML = '대화 내용이 없습니다.';
                         } else {
                             let validCount = 0;
-                            let prevText = ""; // 중복 방지용
+                            let prevText = ""; 
 
                             tSnap.forEach(t => {
                                 const qText = t.data().text;
 
-                                // 🗑️ [필터링 1] 로딩 멘트 & 빈 텍스트 삭제
+                                // 필터링: 로딩 멘트, 점, 중복 제거
                                 if (!qText) return;
                                 if (qText.includes("답변을 생성 중입니다")) return;
                                 if (qText.trim() === "..." || qText.trim() === "") return;
-
-                                // 🗑️ [필터링 2] 바로 앞 말과 똑같은 말이면 삭제 (중복 인사 방지)
                                 if (qText === prevText) return;
                                 prevText = qText;
 
-                                // 통과한 진짜 메시지만 화면에 그리기
                                 const p = document.createElement('p');
                                 p.style.marginBottom = '8px';
                                 p.innerHTML = `<span style="color:#3b82f6; font-weight:bold;">AI:</span> ${qText}`;
@@ -454,7 +496,6 @@ async function loadRecentSessions() {
                                 validCount++;
                             });
 
-                            // 필터링 다 했더니 남은 게 하나도 없을 때
                             if (validCount === 0) {
                                 body.innerHTML = '<div style="color:#aaa; text-align:center;">표시할 유효한 대화가 없습니다.</div>';
                             }
@@ -475,7 +516,7 @@ async function loadRecentSessions() {
           container.innerHTML = '<div style="color:red; text-align:center; padding:20px;">로드 실패</div>';
       }
     }
-    // 로그인 상태 감지
+
     onAuthStateChanged(auth, (user) => {
         if (user) {
             loadRecentSessions();
@@ -486,5 +527,13 @@ async function loadRecentSessions() {
 
     document.getElementById('refresh-sessions')?.addEventListener('click', loadRecentSessions);
   </script>
+
+  <div id="resultModal" class="custom-modal-overlay">
+    <div class="custom-modal-box">
+      <div id="modalTitle" class="custom-modal-title">알림</div>
+      <div id="modalBody" class="custom-modal-body">내용</div>
+      <button class="custom-modal-btn" onclick="closeCustomModal()">확인</button>
+    </div>
+  </div>
 </body>
 </html>

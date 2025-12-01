@@ -615,3 +615,89 @@ input[type="range"] { accent-color: var(--accent); }
 .hint-content {display: none; /* 기본적으로 숨김 */background-color: #f9f9f9;padding: 10px;border-left: 3px solid var(--accent, #3b82f6);margin-top: 10px;font-size: 0.9rem;color: #555;border-radius: 4px;}
 .submit-discussion-btn {background-color: var(--accent, #3b82f6);color: white;border: none;padding: 6px 12px;border-radius: 4px;cursor: pointer;}
 .submit-discussion-btn:disabled {background-color: #ccc;cursor: not-allowed;}
+
+
+/* 📱 태블릿(1400px 이하) : 오른쪽 패널 스크롤 고정 & 3단 레이아웃 */
+@media screen and (max-width: 1400px) {
+
+  /* 1. 화면 배율 축소 (한 화면에 다 담기 위해) */
+  body {
+    zoom: 0.75; 
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden; /* ⭐️ 전체 화면 스크롤 금지 (각 패널 안에서만 스크롤) */
+  }
+
+  /* 2. 전체 레이아웃 틀 잡기 */
+  .main {
+    display: grid !important;
+    /* [목록 220px] [PDF 자동] [오른쪽 300px] */
+    grid-template-columns: 220px 1fr 300px !important;
+    height: 100% !important; /* 높이 꽉 채우기 */
+    overflow: hidden !important;
+  }
+
+  /* 3. 오른쪽 패널 틀 고정 */
+  .right {
+    display: block !important;
+    width: 300px !important;
+    height: 100% !important; /* 높이 고정 */
+    border-left: 1px solid #e5e5e5;
+    background: #fff;
+    overflow: hidden !important; /* 패널 자체는 스크롤 X (내부에서 함) */
+  }
+
+  /* 4. 오른쪽 내부 컨테이너 (탭 - 내용 - 입력창) */
+  .right-grid-container {
+    display: grid !important;
+    /* [탭(44px)] [내용(나머지)] [입력창(자동)] */
+    grid-template-rows: 44px 1fr auto !important; 
+    height: 100% !important;
+  }
+
+  /* 5. ⭐️ 여기가 핵심: 내용 부분만 스크롤 생기게 하기 */
+  /* .notes는 노트 목록, .chat-messages는 채팅 목록이라고 가정 */
+  .notes, .chat-messages, .right .content-area {
+    overflow-y: auto !important; /* 세로 스크롤 허용 */
+    height: 100% !important;
+    padding-bottom: 20px; /* 끝부분 여유 */
+    
+    /* 스크롤바 디자인 (눈에 보이게) */
+    scrollbar-width: thin; 
+    scrollbar-color: #ccc transparent;
+  }
+
+  /* (크롬/사파리용 스크롤바 디자인) */
+  .notes::-webkit-scrollbar, 
+  .chat-messages::-webkit-scrollbar {
+    width: 6px;
+    display: block !important; /* 스크롤바 강제 표시 */
+  }
+  .notes::-webkit-scrollbar-thumb,
+  .chat-messages::-webkit-scrollbar-thumb {
+    background-color: #ccc;
+    border-radius: 3px;
+  }
+
+  /* 6. 입력창은 바닥에 고정 */
+  .chat-input-area, .notes-footer {
+    position: relative !important;
+    background: #fff;
+    z-index: 10;
+    padding-bottom: 10px; /* 하단 여백 */
+  }
+
+  /* 7. 상단 툴바 (이전 설정 유지) */
+  .toolbar {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    padding-right: 20px !important;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .toolbar::-webkit-scrollbar { display: none; }
+  .toolbar .group, .toolbar button {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+  }
+}
