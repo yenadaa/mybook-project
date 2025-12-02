@@ -1,19 +1,39 @@
+# functions/routers/quiz.py
+
 from firebase_functions import https_fn, options
-from firebase_admin import firestore # 👈 이거 없어서 에러 났던 것임
+from firebase_admin import firestore
 from core.config import get_db, ALLOWED_ORIGIN
 import json
 import os
+import sys
 import traceback
+from openai import OpenAI
 
 # --------------------------------------------------------
-# 헬퍼 함수 (파일 분리하면서 없어진 것 복구)
+# [중요] 모듈 경로 문제 해결
+# quiz_generator.py가 상위(functions/)에 있으므로 경로를 추가
+# --------------------------------------------------------
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# 이제 quiz_generator를 정상적으로 import 할 수 있습니다.
+try:
+    from quiz_generator import search_chunks_with_bm25, PreprocessedDoc, AnswerIn, score_discussion_answer
+except ImportError as e:
+    print(f"❌ quiz_generator import 실패: {e}")
+    # 배포 시 에러가 터지지 않게 일단 넘어가지만, 실행 시 에러 날 수 있음
+    pass
+
+
+# --------------------------------------------------------
+# 전역 변수
+# --------------------------------------------------------
+openai_client = None
+
+
+# --------------------------------------------------------
+# 헬퍼 함수
 # --------------------------------------------------------
 def _load_processed_doc_from_firestore(book_id: str):
-    """
-    Firestore에서 책 데이터를 읽어와서 PreprocessedDoc 객체로 변환합니다.
-    """
-    from quiz_generator import PreprocessedDoc
-    
     db = get_db()
     if not book_id:
         raise ValueError("bookId가 필요합니다.")
@@ -32,15 +52,15 @@ def _load_processed_doc_from_firestore(book_id: str):
 
 
 # --------------------------------------------------------
-# 메인 함수들
+# Cloud Functions
 # --------------------------------------------------------
 
 @https_fn.on_call(
-    region="asia-northeast3",  # 리전 명시 (프론트엔드와 일치 필요)
+    region="asia-northeast3",
     memory=options.MemoryOption.GB_2, 
-    timeout_sec=300
+    timeout_sec=540
 )
-def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
+def generateFullDocQuiz(req: https_fn.CallableRequest) -> any:
     db = get_db()
     book_id = req.data.get("bookId")
     if not book_id:
@@ -61,8 +81,13 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> https_fn.Response:
         print(f"Error: {e}")
         raise https_fn.HttpsError(code="internal", message=f"오류: {e}")
 
-@https_fn.on_call(secrets=["OPENAI_API_KEY"], memory=options.MemoryOption.GB_1)
-def generateCustomReview(req: https_fn.CallableRequest) -> https_fn.Response:
+
+@https_fn.on_call(
+    region="asia-northeast3",
+    secrets=["OPENAI_API_KEY"], 
+    memory=options.MemoryOption.GB_1
+)
+def generateCustomReview(req: https_fn.CallableRequest) -> any:
     db = get_db()
     book_id = req.data.get("bookId")
     if not book_id:
@@ -83,9 +108,12 @@ def generateCustomReview(req: https_fn.CallableRequest) -> https_fn.Response:
         print(f"Error: {e}")
         raise https_fn.HttpsError(code="internal", message=f"오류: {e}")
 
-@https_fn.on_call(secrets=["OPENAI_API_KEY"])
-def scoreQuizAnswer(req: https_fn.CallableRequest) -> https_fn.Response:
-    from quiz_generator import AnswerIn, ScoreResult, score_discussion_answer
+
+@https_fn.on_call(
+    region="asia-northeast3",
+    secrets=["OPENAI_API_KEY"]
+)
+def scoreQuizAnswer(req: https_fn.CallableRequest) -> any:
     try:
         answer_data = req.data.get("answerData")
         if not answer_data:
@@ -97,10 +125,13 @@ def scoreQuizAnswer(req: https_fn.CallableRequest) -> https_fn.Response:
         print(f"채점 오류: {e}")
         raise https_fn.HttpsError("internal", f"채점 중 오류: {e}")
 
+
+# ⭐️ [수정됨] 백지 복습 채점 (Vision + Text 로직 개선)
 @https_fn.on_request(
     secrets=["OPENAI_API_KEY"],
     memory=options.MemoryOption.GB_1,
-    timeout_sec=60
+    timeout_sec=60,
+    region="asia-northeast3"
 )
 def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
     # --- CORS 헤더 ---
@@ -112,64 +143,63 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
     if req.method == "OPTIONS":
         return https_fn.Response("", status=204, headers=headers)
 
-    import json
-    from openai import OpenAI
-    from quiz_generator import search_chunks_with_bm25, PreprocessedDoc
-    
     global openai_client
     if 'openai_client' not in globals() or openai_client is None:
         openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
     try:
         data = req.get_json(silent=True)
+        if not data:
+             return https_fn.Response(json.dumps({"error": "No JSON data"}), status=400, headers=headers)
+
         book_id = data.get("bookId")
-        
-        # ⭐️ [수정 1] 텍스트/이미지 입력값 확인
         base64_image = data.get("imageData")
-        user_text_direct = data.get("userTextDirect") # 프론트에서 보낸 텍스트
+        user_text_direct = data.get("userTextDirect")
 
-        target_question = data.get("targetQuestion") 
-        is_hint_request = data.get("isHint", False)
+        # 1. 입력값 유효성 검사 (공백 문자열 방지)
+        has_valid_text = user_text_direct and str(user_text_direct).strip()
 
-        # ⭐️ [수정 2] 둘 다 없으면 에러 처리
-        if not base64_image and not user_text_direct:
+        if not base64_image and not has_valid_text:
             return https_fn.Response("Missing input (image or text)", status=400, headers=headers)
 
         user_text = ""
 
-        # ⭐️ [수정 3] 텍스트가 있으면 Vision API 건너뛰기! (핵심)
-        if user_text_direct:
-            print("📝 [Text Mode] 사용자 타이핑 입력 감지")
+        # 2. 텍스트 우선 처리
+        if has_valid_text:
+            print(f"📝 [Text Mode] 사용자 입력: {str(user_text_direct)[:20]}...")
             user_text = str(user_text_direct).strip()
             
-        # ⭐️ [수정 4] 텍스트가 없고 이미지만 있을 때 Vision 호출
+        # 3. 텍스트가 없을 때만 이미지 처리 (Vision API)
         elif base64_image:
-            print("🖼️ [Image Mode] 이미지 입력 감지 -> Vision API 호출")
+            print("🖼️ [Image Mode] Vision API 호출")
             try:
                 vision_resp = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model="gpt-4o-mini", 
                     messages=[
                         {
                             "role": "user", 
                             "content": [
-                                {"type": "text", "text": "이미지의 필기 내용을 텍스트로 변환하세요. 잡담 없이 텍스트만 출력하세요."},
+                                {"type": "text", "text": "이미지의 필기 내용을 텍스트로 변환해줘. 설명 없이 내용만 출력해."},
                                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
                             ]
                         }
                     ],
-                    max_tokens=500
+                    max_tokens=800
                 )
                 user_text = vision_resp.choices[0].message.content.strip()
+                print(f"✅ [Vision Result] {user_text[:30]}...")
             except Exception as vision_e:
-                print(f"Vision API Error: {vision_e}")
-                return https_fn.Response(json.dumps({"score": 0, "feedback": "이미지 인식 실패"}), status=200, headers=headers)
+                print(f"❌ Vision Error: {vision_e}")
+                return https_fn.Response(json.dumps({"score": 0, "feedback": f"이미지 인식 실패: {vision_e}"}), status=200, headers=headers)
         
         if not user_text:
             return https_fn.Response(json.dumps({"score": 0, "feedback": "내용을 인식할 수 없습니다."}), status=200, headers=headers)
 
-        # 2. 정답지(RAG) 검색
-        # (문서 ID가 없으면 - 즉 화이트보드 단독 모드면 - 검색 없이 진행)
+        # 4. RAG 검색
+        target_question = data.get("targetQuestion") 
+        is_hint_request = data.get("isHint", False)
         ground_truth = "관련 교재 내용 없음 (자유 서술)"
+
         if book_id and book_id != "null":
             try:
                 doc_obj = _load_processed_doc_from_firestore(book_id)
@@ -178,36 +208,37 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
                 if relevant_chunks:
                     ground_truth = "\n\n".join([c.text for c in relevant_chunks])
             except Exception as e:
-                print(f"RAG Search Error (Non-fatal): {e}")
+                print(f"⚠️ RAG Search Error: {e}")
 
-        # 3. 프롬프트 구성 (CASE A/B/C)
-        if target_question: # 소크라테스 모드
+        # 5. 프롬프트 및 채점
+        if target_question:
             prompt = f"""
             [역할] 소크라테스식 튜터.
             [질문] {target_question}
-            [학생 답안] {user_text}
-            [교재 내용] {ground_truth}
+            [답안] {user_text}
+            [교재] {ground_truth}
             [지시] 답안 평가 후 정답 대신 힌트나 추가 질문 제공. 칭찬 포함.
-            [출력(JSON)] {{ "feedback": "...", "next_question": "..." }}
+            ⭐️중요: 반드시 아래 포맷의 JSON 형식으로만 출력할 것.
+            [출력 포맷(JSON)] {{ "feedback": "...", "next_question": "..." }}
             """
-        elif is_hint_request: # 힌트 모드
+        elif is_hint_request:
             prompt = f"""
             [역할] 학습 도우미.
-            [학생 글] {user_text}
-            [교재 내용] {ground_truth}
-            [지시] 다음에 쓸 내용 방향 제시 (정답 유출 금지).
-            [출력(JSON)] {{ "feedback": "...", "score": null }}
+            [글] {user_text}
+            [교재] {ground_truth}
+            [지시] 다음 내용 방향 제시.
+            ⭐️중요: 반드시 아래 포맷의 JSON 형식으로만 출력할 것.
+            [출력 포맷(JSON)] {{ "feedback": "...", "score": null }}
             """
-        else: # 일반 채점 모드
+        else:
             prompt = f"""
             [역할] 채점관.
-            [학생 글] {user_text}
-            [교재 원문] {ground_truth}
-            [지시] 100점 만점 채점, 빠진 키워드 지적, 80점 이상 시 심화 질문.
-            [출력(JSON)] {{ "score": 85, "feedback": "...", "challenge_question": "..." }}
+            [글] {user_text}
+            [교재] {ground_truth}
+            [지시] 100점 만점 채점, 피드백 제공.
+            ⭐️중요: 반드시 아래 포맷의 JSON 형식으로만 출력할 것.
+            [출력 포맷(JSON)] {{ "score": 85, "feedback": "...", "challenge_question": "..." }}
             """
-
-        # 4. GPT 호출
         resp = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "system", "content": prompt}],
@@ -219,4 +250,6 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response(json.dumps(result_json), status=200, headers=headers)
 
     except Exception as e:
+        print(f"❌ Error: {e}")
+        traceback.print_exc()
         return https_fn.Response(json.dumps({"error": str(e)}), status=500, headers=headers)
