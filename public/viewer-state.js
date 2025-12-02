@@ -17,8 +17,7 @@ export let searchCursor = -1;
 export let bookmarks = []; // 로컬 스토리지 사용
 
 // OCR
-export let ocrData = {}; // 로컬 스토리지 사용
-export let ocrDebugVisible = false;
+//[삭제][12-02][테서랙트에 관한 코드 삭제]
 export let ocrSelectionRect = null; // 현재 선택 중인 영역 요소 (DOM)
 export let ocrStartPos = null;      // 선택 시작 좌표 (draw-layer 기준)
 export let ocrCurrentPage = null;   // 선택이 이루어진 페이지 번호
@@ -73,11 +72,6 @@ export const els = {
     addBookmark: document.getElementById('addBookmark'),
     exportNotes: document.getElementById('exportNotes'),
     clearData: document.getElementById('clearData'),
-    ocrPage: document.getElementById('ocrPage'),
-    ocrAll: document.getElementById('ocrAll'),
-    ocrLang: document.getElementById('ocrLang'),
-    ocrToggleDebug: document.getElementById('ocrToggleDebug'),
-    ocrStatus: document.getElementById('ocrStatus'),
     ocrSelectBtn: document.getElementById('ocrSelectBtn'), // OCR 선택 버튼
 };
 
@@ -104,8 +98,7 @@ export function setSearchIndex(index) { searchIndex = index; }
 export function setSearchHits(hits) { searchHits = hits; }
 export function setSearchCursor(c) { searchCursor = c; }
 export function setBookmarks(b) { bookmarks = b; }
-export function setOcrData(data) { ocrData = data; }
-export function setOcrDebugVisible(v) { ocrDebugVisible = v; }
+////[삭제][12-02][ocr 부분 2줄(ocrdata, ocrDebugvisible) 삭제]
 export function setOcrSelectionRect(rect) { ocrSelectionRect = rect; }
 export function setOcrStartPos(pos) { ocrStartPos = pos; }
 export function setOcrCurrentPage(p) { ocrCurrentPage = p; }
@@ -137,7 +130,7 @@ export function updateButtons() {
 
 // ====== Local Storage (북마크, OCR 데이터 전용) ======
 export function saveLocal() {
-    const data = { bookmarks, ocrData };
+    const data = { bookmarks}; //[삭제][12-02][ocr부분 삭제]
     localStorage.setItem('pdfViewer.extended', JSON.stringify(data));
 }
 export function loadLocal() {
@@ -146,6 +139,6 @@ export function loadLocal() {
         if (!raw) return;
         const data = JSON.parse(raw);
         bookmarks = data.bookmarks || [];
-        ocrData = data.ocrData || {};
+        //[삭제][12-02][ocr부분 삭제]
     } catch (e) { console.error("로컬 데이터 로딩 오류:", e); }
 }
