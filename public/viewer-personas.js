@@ -1,4 +1,4 @@
-/*
+/* hello
  * prompts.js — ES module exporting structured prompt strings.
  * Encoding: UTF-8 (Korean)
  * Usage example:
