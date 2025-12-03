@@ -180,7 +180,13 @@ transform-origin: 0 0;
 }
 .textLayer ::selection { background: rgba(180,213,255,.35); }
 
-/*[삭제][12-02][테서랙트 관련 부분 삭제]*/
+/*[복구수정][12-03][테서랙트 관련 부분 복구]*/
+.ocr-layer { position:absolute; left:0; top:0; pointer-events:none; }
+.ocr-word { position:absolute; white-space:pre; line-height:1; color:transparent; pointer-events:auto; }
+.ocr-word.debug { color: var(--accent); background: rgba(99,102,241,.12); }
+.ocr-status { font-size:12px; color:var(--muted); margin-left:8px; }
+
+
 .modal-overlay {
   position: fixed; /* 화면 전체를 덮도록 고정 */
   top: 0;
