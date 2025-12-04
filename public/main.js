@@ -10,9 +10,7 @@ import {
 } from './doc_firebase.js'; 
 import { httpsCallable, functions } from './A.firebase.js';
 
-// ⭐️ [추가] 페르소나 프롬프트 파일 가져오기
-import { PERSONA_PROMPTS } from './viewer-personas.js';
-
+import { PROMPTS } from './viewer-personas.js';
 console.log("✅ main.js 스크립트 파일 로드됨");
 
 // ⭐️ [복구] 챗봇 변수
@@ -430,10 +428,22 @@ function initChatbot() {
         try {
             // 👇 [수정완료] 페르소나 파일에서 프롬프트 가져오기
             const personaSelect = document.getElementById("chat-persona-select");
-            const selectedValue = personaSelect ? personaSelect.value : 'professor';
-            
-            // viewer-personas.js의 내용을 가져와서 씁니다.
-            const systemPromptText = PERSONA_PROMPTS[selectedValue] || PERSONA_PROMPTS["professor"];
+            const selectedKey = personaSelect ? personaSelect.value : 'professor';
+
+            let systemPromptText = "";
+            // 화면 선택값(professor 등)을 실제 프롬프트 키(builder_v3 등)로 연결
+            switch (selectedKey) {
+                case "socrates": 
+                    systemPromptText = PROMPTS.socrates_v3;
+                    break;
+                case "senior":   
+                    systemPromptText = PROMPTS.applier_v1;
+                    break;
+                case "professor":
+                default:
+                    systemPromptText = PROMPTS.builder_v3;
+                    break;
+            }
 
             const botAnswer = await window.sendQueryToBot(currentBookId, chatHistory, systemPromptText);
             

@@ -10,7 +10,7 @@ import { renderDocument, clearDocument } from './viewer-renderer.js';
 import { setHighlightsData } from './viewer-highlight-manager.js';
 
 // 3. 챗봇 관련 임포트
-import { PERSONA_PROMPTS } from './viewer-personas.js';
+import { PROMPTS } from './viewer-personas.js'; //[12.04 수정]
 import { onBotMessageHook } from "./viewer-session-hooks.js";
 
 // ====== 전역 등록 ======
@@ -78,7 +78,21 @@ function initChatbot() {
 
             // 3. 프롬프트 준비
             const selectedKey = personaSelect ? personaSelect.value : 'professor';
-            const systemPromptText = PERSONA_PROMPTS[selectedKey] || PERSONA_PROMPTS['professor'];
+            let systemPromptText = "";
+
+            // 화면의 선택값(value)에 따라 새로운 프롬프트 키를 매핑
+            switch (selectedKey) {
+                case "socrates": 
+                    systemPromptText = PROMPTS.socrates_v3; // 소크라테스
+                    break;
+                case "senior":   
+                    systemPromptText = PROMPTS.applier_v1;  // 개념 활용형 (선배)
+                    break;
+                case "professor":
+                default:
+                    systemPromptText = PROMPTS.builder_v3;  // 개념 구축형 (교수)
+                    break;
+            }
 
             localChatHistory.push({ role: "user", content: userText });
 
