@@ -11,7 +11,8 @@ from routers.quiz import (
     generateFullDocQuiz,
     generateCustomReview,
     scoreQuizAnswer,
-    gradeBlankPaper
+    gradeBlankPaper,
+    scoreDiscussionAnswer
 )
 
 # 4. Review

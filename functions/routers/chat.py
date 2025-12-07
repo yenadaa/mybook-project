@@ -130,3 +130,4 @@ def ragChat(req: https_fn.Request) -> https_fn.Response:
 
     except Exception as e:
         return https_fn.Response(json.dumps({"error": f"GPT 오류: {e}"}), status=500, headers=response_headers)
+    

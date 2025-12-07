@@ -525,6 +525,7 @@ def generate_custom_review(
     model: str = "gpt-4o-mini",
     counts_override: Optional[Dict[str, int]] = None,
 ) -> ReviewOut:
+    # 1. 텍스트 및 키워드 준비
     all_ids = _normalize_ids(doc)
     
     target_chunks = []
@@ -536,38 +537,87 @@ def generate_custom_review(
     elif section:
         target_chunks = [c for c in doc.chunks if section in " / ".join(c.section_path or [])]
     
-    if not target_chunks: return ReviewOut(ox=[], short=[], discussion=[])
+    # 청크가 없으면 빈 결과 반환
+    if not target_chunks: 
+        return ReviewOut(ox=[], short=[], discussion=[])
 
     selected_text = "\n\n".join([c.text for c in target_chunks])
-    if keywords: kws = keywords
-    else:
-        try: kws = _ask_gpt_json(_prompt_keywords(selected_text), model, 0.2, 200).get("keywords", [])
-        except: kws = []
+    
+    if not keywords:
+        try: 
+            keywords = _ask_gpt_json(_prompt_keywords(selected_text), model, 0.2, 200).get("keywords", [])
+        except: 
+            keywords = []
+    
+    kws = keywords
 
-    counts = counts_override or {"ox":3, "short":3, "discussion":3}
+    # 2. 문제 개수 설정
+    counts = counts_override or {"ox": 3, "short": 3, "discussion": 3}
     final_out = ReviewOut(ox=[], short=[], discussion=[])
 
-    if counts.get("ox",0) > 0 or counts.get("short",0) > 0:
+    # 3. OX 및 단답형 생성 (기존 유지)
+    if counts.get("ox", 0) > 0 or counts.get("short", 0) > 0:
         try:
-            c_qa = counts.copy(); c_qa["discussion"] = 0
+            c_qa = counts.copy()
+            c_qa["discussion"] = 0
             raw = _ask_gpt_json(_prompt_review(selected_text, kws, c_qa), model, 0.4, 2000).get("review", {})
+            
             hl_ids = [c.id for c in target_chunks]
             def fix(it, t):
                 it["tags"] = list(set((it.get("tags") or []) + [t]))
                 it["sources"] = _fix_sources(it.get("sources", []), all_ids, hl_ids)
                 return it
+                
             final_out.ox = [fix(x, "OX") for x in raw.get("ox", [])]
             final_out.short = [fix(x, "단답") for x in raw.get("short", [])]
-        except Exception as e: print(f"OX/Short Error: {e}")
+        except Exception as e: 
+            print(f"OX/Short Error: {e}")
 
+    # 4. ⭐️ [핵심 수정] 서술형(Discussion) 생성 - GPT 직접 호출 & 힌트 강제
     if counts.get("discussion", 0) > 0:
         try:
-            res = generate_relation_discussion_from_chunks(doc.doc_id, kws, target_chunks, counts["discussion"])
-            if res.get("status") == "ok":
-                final_out.discussion = res["review"]["discussion"]
-            else:
-                fb = _fallback_relation_discussion_from_chunks(doc.doc_id, kws, target_chunks, counts["discussion"])
-                final_out.discussion = fb["review"]["discussion"]
+            # 복잡한 함수 호출 대신, 여기서 바로 프롬프트를 쏩니다.
+            prompt = f"""
+            [역할] 한국어 학습 교재 출제자.
+            [자료] {selected_text[:5000]}
+            [키워드] {", ".join(kws)}
+            
+            [지시사항]
+            위 자료를 바탕으로 '심층 서술형/논술형 문제(Discussion)'를 {counts['discussion']}개 출제하세요.
+            학생이 답변하기 어려울 수 있으므로, 각 문제마다 **반드시 'hint'(힌트)**를 포함해야 합니다.
+            
+            [출력 포맷(JSON)]
+            {{
+                "review": {{
+                    "discussion": [
+                        {{
+                            "q": "질문 내용...",
+                            "hint": "핵심 키워드나 생각할 거리를 주는 1문장 힌트", 
+                            "sources": []
+                        }}
+                    ]
+                }}
+            }}
+            """
+            
+            # GPT 호출
+            res = _ask_gpt_json(prompt, model, 0.7, 2000)
+            raw_discussions = res.get("review", {}).get("discussion", [])
+            
+            hl_ids = [c.id for c in target_chunks]
+            final_discussions = []
+            
+            for d in raw_discussions:
+                d["sources"] = _fix_sources(d.get("sources", []), all_ids, hl_ids[:1])
+                
+                # ⭐️ 힌트 안전장치 (혹시라도 비어있으면 기본값 채움)
+                if not d.get("hint"): 
+                    d["hint"] = "지문의 핵심 키워드를 다시 확인해보세요."
+                
+                final_discussions.append(d)
+                
+            final_out.discussion = final_discussions
+
         except Exception as e:
             print(f"Discussion Error: {e}")
 

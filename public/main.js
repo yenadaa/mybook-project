@@ -44,6 +44,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await generateCustomReview({ bookId });
             const resultData = result.data; 
 
+            // ⭐️ [디버깅용 로그 추가]
+            console.log("🔥 전체 데이터:", resultData);
+            console.log("🔥 Discussion 데이터:", resultData?.review?.discussion);
+
+            // 만약 discussion 데이터가 있다면 첫 번째 문제의 힌트도 찍어보기
+            if (resultData?.review?.discussion?.length > 0) {
+                console.log("🔥 첫 번째 문제 힌트:", resultData.review.discussion[0].hint);
+            }
+
             const items = [];
             if (resultData?.review?.ox) {
                 resultData.review.ox.forEach(it =>
@@ -99,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
              data.review.short.forEach(it => items.push({ type: 'short', q: it.q, answer: it.answer || "", sources: it.sources || [], tags: it.tags || [] }));
            }
            if (data?.review?.discussion) {
-             data.review.discussion.forEach(it => items.push({ type: 'discussion', q: it.q, sources: it.sources || [], tags: it.tags || [] }));
+             data.review.discussion.forEach(it => items.push({ type: 'discussion', q: it.q, hint: it.hint, sources: it.sources || [], tags: it.tags || [] }));//12.07 수정
            }
 
            const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
@@ -132,23 +141,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const optionLI = target.closest('li');
 
         // [추가][12-01][힌트 버튼 클릭 로직]
+        // [12.07]💡 [수정] 힌트 버튼 클릭 시 토글
         if (target.matches('.hint-button')) {
-            const quizItem = target.closest('.quiz-item');
-            const hintContent = quizItem.querySelector('.hint-content');
-            
-            if (hintContent) {
-                // display 속성을 사용하여 숨김/보임 토글
-                const isVisible = hintContent.style.display === 'block';
-                
-                if (isVisible) {
-                    hintContent.style.display = 'none'; // 숨기기
-                    target.textContent = '💡 힌트 보기';
-                } else {
-                    hintContent.style.display = 'block'; // 보이기
-                    target.textContent = '💡 힌트 숨기기';
-                }
+            const hintContent = target.nextElementSibling; // 버튼 바로 뒤 요소 찾기
+            if (hintContent && hintContent.classList.contains('hint-content')) {
+                const isHidden = hintContent.style.display === 'none';
+                hintContent.style.display = isHidden ? 'block' : 'none';
+                target.textContent = isHidden ? '💡 힌트 숨기기' : '💡 힌트 보기';
             }
-            return; // 힌트 처리 후 다른 퀴즈 로직 실행 방지
+            return;
+        }
+
+        // 📝 [수정] 정답 제출 버튼 클릭 시
+        if (target.matches('.submit-discussion-btn')) {
+            handleDiscussionSubmit(target);
+            return;
         }
 
         if (optionLI && optionLI.parentElement.classList.contains('quiz-options')) {
@@ -282,28 +289,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 `).join('');
             }
             
-            // --- [함수 전체 변경][12-01][힌트가없습니다 없앰] ---
-            if (review.discussion && review.discussion.length > 0) {
-                html += '<h3>서술형/토론</h3>';
-                html += review.discussion.map((item, i) => `
-                    <div class="quiz-item discussion-item">
-                        <p class="quiz-question">${i + 1}. ${item.q}</p>
-                        <div class="discussion-input-container">
-                            <textarea class="discussion-input" placeholder="정답을 입력하세요."></textarea>
-                        </div>
-                        <div class="quiz-actions">
-                            <button class="submit-discussion-btn">정답 제출</button>
-                            
-                            ${item.hint ? `
-                                <button class="hint-button">💡 힌트 보기</button>
-                                <div class="hint-content" style="display: none;">
-                                    ${item.hint}
-                                </div> 
-                            ` : ''}
-
-                        </div>                        
-                    </div>
-                `).join('');
+            // --- [함수 전체 변경][12-01][힌트가없습니다 없앰] /[12/07]수정---
+            if (review.discussion) {
+                review.discussion.forEach((item, i) => {
+                    html += `
+                        <div class="quiz-item discussion-item">
+                            <p class="quiz-question">Q${i+1}. (서술) ${item.q}</p>
+                            <div class="discussion-input-container">
+                                <textarea class="discussion-input" placeholder="답변을 입력하세요..."></textarea>
+                            </div>
+                            <div class="quiz-actions">
+                                <button class="submit-discussion-btn">정답 제출 & 채점</button>
+                                
+                                ${item.hint ? `
+                                    <button class="hint-button" style="margin-left:10px; background:#f3f4f6; color:#333;">💡 힌트 보기</button>
+                                    <div class="hint-content" style="display:none; margin-top:10px; padding:10px; background:#fffbeb; border:1px solid #fcd34d; border-radius:5px; color:#92400e;">
+                                        ${item.hint}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>`;
+                });
             }
         }
         showQuizModal(html);
@@ -313,11 +319,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const quizItem = submitButton.closest('.quiz-item');
         const textarea = quizItem.querySelector('.discussion-input');
         const answer = textarea.value.trim();
-        const question = quizItem.querySelector('.quiz-question').textContent;
+        const questionText = quizItem.querySelector('.quiz-question').textContent;
 
-        if (!answer) {
+        if (!answer) 
             return alert("답변을 입력해주세요.");
-        }
 
         const bookId = getCurrentBookId();
         const user = getCurrentUser();
@@ -328,13 +333,33 @@ document.addEventListener('DOMContentLoaded', () => {
         submitButton.textContent = "제출 중...";
 
         try {
-            showTemporaryAlert("답변이 서버에 저장되었습니다.");
-            submitButton.textContent = "제출 완료";
-            textarea.disabled = true; 
+            // ⭐️ [수정] 백엔드 채점 API 호출
+            const scoreDiscussionAnswer = httpsCallable(functions, 'scoreDiscussionAnswer');
+            const result = await scoreDiscussionAnswer({
+                question: questionText,
+                user_answer: answer
+            });
+            
+            const { score, feedback } = result.data;
+
+            // 결과 표시 UI 생성
+            const feedbackDiv = document.createElement('div');
+            feedbackDiv.className = 'grading-result';
+            feedbackDiv.style.cssText = "margin-top:10px; padding:10px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px;";
+            feedbackDiv.innerHTML = `
+                <div style="font-weight:bold; color:#166534; margin-bottom:4px;">💯 점수: ${score} / 10</div>
+                <div style="font-size:14px; color:#374151;">${feedback}</div>
+            `;
+            
+            // 힌트 버튼 아래나 입력창 아래에 추가
+            quizItem.querySelector('.discussion-input-container').appendChild(feedbackDiv);
+
+            submitButton.textContent = "채점 완료";
+            textarea.disabled = true; // 수정 불가 처리
 
         } catch (e) {
-            console.error("답변 제출 실패:", e);
-            alert("제출에 실패했습니다.");
+            console.error("채점 실패:", e);
+            alert("채점 중 오류가 발생했습니다.");
             submitButton.disabled = false;
             submitButton.textContent = "정답 제출";
         }
