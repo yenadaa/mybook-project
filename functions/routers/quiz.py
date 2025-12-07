@@ -134,7 +134,6 @@ def scoreQuizAnswer(req: https_fn.CallableRequest) -> any:
     region="asia-northeast3"
 )
 def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
-    # --- CORS 헤더 ---
     headers = {
         "Access-Control-Allow-Origin": ALLOWED_ORIGIN, 
         "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -149,107 +148,139 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
 
     try:
         data = req.get_json(silent=True)
-        if not data:
-             return https_fn.Response(json.dumps({"error": "No JSON data"}), status=400, headers=headers)
+        if not data: return https_fn.Response(json.dumps({"error": "No JSON"}), status=400, headers=headers)
 
         book_id = data.get("bookId")
         base64_image = data.get("imageData")
         user_text_direct = data.get("userTextDirect")
 
-        # 1. 입력값 유효성 검사 (공백 문자열 방지)
         has_valid_text = user_text_direct and str(user_text_direct).strip()
-
+        
         if not base64_image and not has_valid_text:
-            return https_fn.Response("Missing input (image or text)", status=400, headers=headers)
+            return https_fn.Response("Missing input", status=400, headers=headers)
 
         user_text = ""
 
-        # 2. 텍스트 우선 처리
+        # 1. Vision API 호출 (강력한 gpt-4o 사용)
         if has_valid_text:
-            print(f"📝 [Text Mode] 사용자 입력: {str(user_text_direct)[:20]}...")
+            print(f"📝 [Input] Text Mode: {str(user_text_direct)[:30]}...")
             user_text = str(user_text_direct).strip()
-            
-        # 3. 텍스트가 없을 때만 이미지 처리 (Vision API)
         elif base64_image:
-            print("🖼️ [Image Mode] Vision API 호출")
+            print("🖼️ [Input] Image Mode -> Vision API (GPT-4o) 호출")
             try:
+                # ⭐️ [핵심 1] gpt-4o-mini -> gpt-4o 변경 (인식률 대폭 상승)
                 vision_resp = openai_client.chat.completions.create(
-                    model="gpt-4o-mini", 
+                    model="gpt-4o", 
                     messages=[
                         {
                             "role": "user", 
                             "content": [
-                                {"type": "text", "text": "이미지의 필기 내용을 텍스트로 변환해줘. 설명 없이 내용만 출력해."},
+                                {"type": "text", "text": "이 이미지에 손으로 쓴 글씨가 있습니다. 내용을 빠짐없이 텍스트로 변환해주세요. 그림이나 도표는 '[도표]'라고만 표시하고 텍스트 위주로 읽어주세요."},
                                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
                             ]
                         }
                     ],
-                    max_tokens=800
+                    max_tokens=1000
                 )
                 user_text = vision_resp.choices[0].message.content.strip()
-                print(f"✅ [Vision Result] {user_text[:30]}...")
+                print(f"✅ [OCR Success] 인식된 텍스트: {user_text}") # 로그 꼭 확인하세요!
             except Exception as vision_e:
                 print(f"❌ Vision Error: {vision_e}")
-                return https_fn.Response(json.dumps({"score": 0, "feedback": f"이미지 인식 실패: {vision_e}"}), status=200, headers=headers)
+                return https_fn.Response(json.dumps({"score": 0, "feedback": f"이미지 인식 오류: {vision_e}"}), status=200, headers=headers)
         
         if not user_text:
-            return https_fn.Response(json.dumps({"score": 0, "feedback": "내용을 인식할 수 없습니다."}), status=200, headers=headers)
+            return https_fn.Response(json.dumps({"score": 0, "feedback": "글씨를 인식하지 못했습니다. 더 또렷하게 써주세요."}), status=200, headers=headers)
 
-        # 4. RAG 검색
+        # 2. RAG 검색 (범위 확대)
         target_question = data.get("targetQuestion") 
         is_hint_request = data.get("isHint", False)
-        ground_truth = "관련 교재 내용 없음 (자유 서술)"
+        ground_truth = ""
 
         if book_id and book_id != "null":
             try:
                 doc_obj = _load_processed_doc_from_firestore(book_id)
-                query_text = f"{user_text} {target_question if target_question else ''}"
-                relevant_chunks = search_chunks_with_bm25(doc_obj, query_text, top_k=3)
+                
+                # 검색어 구성: 질문 + 사용자 답변 (키워드 매칭 확률 높임)
+                query_text = f"{target_question if target_question else ''} {user_text}"
+                
+                # ⭐️ [핵심 2] top_k 3 -> 15 (관련 내용 찾을 확률 높임)
+                relevant_chunks = search_chunks_with_bm25(doc_obj, query_text, top_k=15)
+                
                 if relevant_chunks:
-                    ground_truth = "\n\n".join([c.text for c in relevant_chunks])
+                    ground_truth = "\n\n".join([f"[발췌 {i+1}] {c.text}" for i, c in enumerate(relevant_chunks)])
+                    print(f"📚 [RAG Success] 관련 청크 {len(relevant_chunks)}개 찾음.")
+                else:
+                    print("⚠️ [RAG Warning] 관련 내용을 찾지 못함.")
             except Exception as e:
-                print(f"⚠️ RAG Search Error: {e}")
+                print(f"❌ RAG Error: {e}")
 
-        # 5. 프롬프트 및 채점
+        # 3. 채점/피드백 생성
+        # RAG 데이터가 없으면 없다고 AI에게 알려줌
+        context_prompt = f"참고할 교재 내용:\n{ground_truth}" if ground_truth else "참고할 교재 내용이 검색되지 않았습니다. 일반적인 지식으로 판단하세요."
+
         if target_question:
             prompt = f"""
             [역할] 소크라테스식 튜터.
             [질문] {target_question}
-            [답안] {user_text}
-            [교재] {ground_truth}
-            [지시] 답안 평가 후 정답 대신 힌트나 추가 질문 제공. 칭찬 포함.
-            ⭐️중요: 반드시 아래 포맷의 JSON 형식으로만 출력할 것.
-            [출력 포맷(JSON)] {{ "feedback": "...", "next_question": "..." }}
+            [학생 답안] {user_text}
+            [교재 컨텍스트] {context_prompt}
+            
+            [지시] 
+            1. 학생의 답안이 교재 내용과 일치하는지 확인하세요.
+            2. 교재에 있는 내용은 구체적으로 인용하며 피드백하세요.
+            3. 정답을 바로 알려주지 말고, 힌트나 추가 질문을 던지세요.
+            
+            ⭐️중요: JSON Key는 영어(feedback, next_question)로, 내용은 한국어로 작성.
+            [출력(JSON)] {{ "feedback": "...", "next_question": "..." }}
             """
         elif is_hint_request:
             prompt = f"""
-            [역할] 학습 도우미.
-            [글] {user_text}
-            [교재] {ground_truth}
-            [지시] 다음 내용 방향 제시.
-            ⭐️중요: 반드시 아래 포맷의 JSON 형식으로만 출력할 것.
-            [출력 포맷(JSON)] {{ "feedback": "...", "score": null }}
+            [역할] 친절한 학습 조교.
+            [학생 글] {user_text}
+            [교재 컨텍스트] {context_prompt}
+            
+            [지시] 
+            1. 학생이 쓰고 있는 내용이 교재의 어느 부분인지 파악하세요.
+            2. 다음에 이어질 내용을 교재에 기반하여 힌트로 주세요.
+            
+            ⭐️중요: JSON Key는 영어(feedback)로, 내용은 한국어로 작성.
+            [출력(JSON)] {{ "feedback": "...", "score": null }}
             """
         else:
             prompt = f"""
-            [역할] 채점관.
-            [글] {user_text}
-            [교재] {ground_truth}
-            [지시] 100점 만점 채점, 피드백 제공.
-            ⭐️중요: 반드시 아래 포맷의 JSON 형식으로만 출력할 것.
-            [출력 포맷(JSON)] {{ "score": 85, "feedback": "...", "challenge_question": "..." }}
+            [역할] 꼼꼼한 채점관.
+            [학생 글] {user_text}
+            [교재 컨텍스트] {context_prompt}
+            
+            [지시]
+            1. 학생이 쓴 내용이 교재의 핵심 내용과 일치하는지 분석하세요.
+            2. 점수 대신 '잘한 점'과 '보완할 점'을 명확히 나누어 주세요.
+            3. 교재에 있지만 학생이 빠트린 키워드가 있다면 '보완할 점'에 언급하세요.
+            
+            ⭐️중요: JSON Key는 영어(feedback, good_points, weak_points, challenge_question)로, 내용은 한국어로 작성.
+            [출력(JSON)] 
+            {{ 
+                "feedback": "총평...", 
+                "good_points": "- ...", 
+                "weak_points": "- ...", 
+                "challenge_question": "..." 
+            }}
             """
+
         resp = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "system", "content": prompt}],
             response_format={"type": "json_object"}
         )
         result_json = json.loads(resp.choices[0].message.content)
-        result_json["ocr_text"] = user_text
+        
+        # 디버깅용: 인식된 텍스트를 피드백 앞부분에 살짝 붙여서 보내줌 (확인용)
+        # 나중에 잘 되면 이 줄은 삭제하세요.
+        # result_json["feedback"] = f"[인식된 텍스트: {user_text}] \n\n" + result_json.get("feedback", "")
         
         return https_fn.Response(json.dumps(result_json), status=200, headers=headers)
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Critical Error: {e}")
         traceback.print_exc()
         return https_fn.Response(json.dumps({"error": str(e)}), status=500, headers=headers)
