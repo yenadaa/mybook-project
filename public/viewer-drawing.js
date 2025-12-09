@@ -14,8 +14,8 @@ export function initDrawLayer(p, drawCanvas) {
     drawCanvas.addEventListener('pointerdown', (e) => {
         if (!state.pdfDoc || st.pointerId !== null) return;
         if (e.pointerType === 'mouse' && e.button !== 0) return;
-
-        if (state.selectMode === 'pen') {
+                                        //[수정][12-09][검정펜 버튼 눌렀을 때 그리기]
+        if (state.selectMode === 'pen' || state.selectMode === 'marker') {
             st.pointerId = e.pointerId;
             try { drawCanvas.setPointerCapture(e.pointerId); } catch (err) { console.warn("Could not set pointer capture:", err); }
             const pos = getPos(e);
@@ -52,8 +52,8 @@ export function initDrawLayer(p, drawCanvas) {
         if (!state.pdfDoc || st.pointerId !== e.pointerId) return;
         if (e.pointerType === 'mouse' && e.buttons !== 1) return;
 
-        const ctx = drawCanvas.getContext('2d');
-        if (state.selectMode === 'pen' && st.drawing) {
+        const ctx = drawCanvas.getContext('2d');    //[수정][12-09][마우스 움직였을 때 선을 계속 그리는 조건에 검정펜 추가]
+        if ((state.selectMode === 'pen' || state.selectMode === 'marker') && st.drawing) {
             const pos = getPos(e);
             st.path.push(pos);
             ctx.lineTo(pos.x, pos.y);
@@ -78,8 +78,8 @@ export function initDrawLayer(p, drawCanvas) {
             } catch (err) {
                 // console.warn("Could not release pointer capture:", err);
             }
-        }
-        if (state.selectMode === 'pen') finishStroke(p, st);
+        }                           //[수정][12-09][마우스 떼고 나서 저장하는 조건에 검정펜 추가]
+        if (state.selectMode === 'pen' || state.selectMode === 'marker') finishStroke(p, st);
         else if (state.selectMode === 'eraser') finishEraser(p, st, getPos(e));
         else if (state.selectMode === 'ocrSelect' && st.startOcr) {
             const endPos = getPos(e);
