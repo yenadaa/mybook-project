@@ -30,7 +30,8 @@ export const HIGHLIGHT_COLORS = {
     '중요': 'rgba(255, 165, 0, 0.35)',
     '암기': 'rgba(144, 238, 144, 0.35)',
     '참고': 'rgba(135, 206, 250, 0.35)',
-    'OCR': 'rgba(135, 206, 250, 0.35)'
+    'OCR': 'rgba(135, 206, 250, 0.35)',
+    '마커': 'rgb(0, 0, 0)', //[추가][12-09][검은색 펜 색상 추가]
 };
 export let currentThicknessPx = Number(localStorage.getItem('pdfViewer.penThicknessPx')) || 20;
 
@@ -56,6 +57,7 @@ export const els = {
     undoBtn: document.getElementById('undoBtn'),
     redoBtn: document.getElementById('redoBtn'),
     penBtn: document.getElementById('penBtn'),
+    markerBtn: document.getElementById('markerBtn'),//[추가][12-09][검정펜]
     eraserBtn: document.getElementById('eraserBtn'),
     tagBtns: Array.from(document.querySelectorAll('.tag-btn')),
     thickness: document.getElementById('thickness'),
@@ -118,6 +120,7 @@ export function setPendingChunk(chunk) { pendingChunk = chunk; }
 export function setMode(mode) {
     selectMode = mode;
     els.penBtn?.classList.toggle('active', mode === 'pen');
+    els.markerBtn?.classList.toggle('active', mode === 'marker');//[추가][12-09][검정펜]
     els.eraserBtn?.classList.toggle('active', mode === 'eraser');
     els.ocrSelectBtn?.classList.toggle('active', mode === 'ocrSelect');
     document.querySelectorAll('.page-wrap').forEach(wrap => {
