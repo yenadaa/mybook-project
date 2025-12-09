@@ -227,9 +227,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // 3. 툴바 버튼 (펜, 지우개, OCR)
-    state.els.penBtn?.addEventListener('click', () => { drawing.flushPendingIfAny(); state.setMode(state.selectMode === 'pen' ? 'none' : 'pen'); });
-    state.els.eraserBtn?.addEventListener('click', () => { drawing.flushPendingIfAny(); state.setMode(state.selectMode === 'eraser' ? 'none' : 'eraser'); });
-    state.els.ocrSelectBtn?.addEventListener('click', () => { state.setMode(state.selectMode === 'ocrSelect' ? 'none' : 'ocrSelect'); });
+    state.els.penBtn?.addEventListener('click', () => {
+        drawing.flushPendingIfAny(); 
+        state.setMode(state.selectMode === 'pen' ? 'none' : 'pen'); 
+        state.setSelectedTag('기본');//[추가][12-09][형광펜 기본 모드일 때 '기본' 태그 설정]
+    });
+    state.els.markerBtn?.addEventListener('click', () => { // [추가][12-09][MarkerBtn 로직 추가]
+        drawing.flushPendingIfAny(); 
+        state.setMode(state.selectMode === 'marker' ? 'none' : 'marker'); 
+        state.setSelectedTag('마커'); // [자유 필기 모드일 때 '마커' 태그 설정]
+    });
+
+    state.els.eraserBtn?.addEventListener('click', () => {
+        drawing.flushPendingIfAny();
+        state.setMode(state.selectMode === 'eraser' ? 'none' : 'eraser');
+    });
+    state.els.ocrSelectBtn?.addEventListener('click', () => {
+        state.setMode(state.selectMode === 'ocrSelect' ? 'none' : 'ocrSelect');
+    });
 
     state.els.tagBtns?.forEach(btn => btn.addEventListener('click', (e) => {
         drawing.flushPendingIfAny();
