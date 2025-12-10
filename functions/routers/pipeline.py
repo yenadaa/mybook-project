@@ -163,3 +163,4 @@ def on_pdf_upload(event: storage_fn.CloudEvent[storage_fn.StorageObjectData]):
     except Exception as e:
         doc_ref.set({"status": f"error_saving: {e}"}, merge=True)
         return
+    

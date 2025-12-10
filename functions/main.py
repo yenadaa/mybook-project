@@ -29,3 +29,9 @@ from routers.tools import (
     runOcrOnSelection,
     saveQuizItems
 )
+
+# 6. [추가] Whiteboard
+from routers.whiteboard import (
+    saveWhiteboard,
+    loadWhiteboard
+)
