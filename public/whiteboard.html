@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>백지 복습 모드</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     :root {
       --bg: #f0f2f5;
@@ -153,12 +155,18 @@
   
   <div class="toolbar">
     <button id="btn-back" class="btn">⬅ 닫기</button>
+    <button id="btn-export-pdf" class="btn" style="background:#ff9800; color:white;">📄 PDF 저장</button>
     <div class="divider"></div>
+
+    <div id="page-title-bar" style="background:#fff; padding:12px 20px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; gap:10px;">
+    <span style="font-size:20px;">📌</span>
+    <strong id="current-page-topic" style="font-size:16px; color:#374151;">자유 복습 노트</strong>
+    </div>
     
     <button id="btn-mode-switch" class="btn btn-mode">⌨️ 타이핑 모드</button>
     <div class="divider"></div>
 
-    <button id="btn-save-temp" class="btn" style="background:#f3f4f6;">💾 임시저장</button>
+    <button id="btn-save-temp" class="btn" style="background:#f3f4f6;">💾 저장</button>
     <button id="btn-load-temp" class="btn" style="background:#f3f4f6;">📂 불러오기</button>
     <div class="divider"></div>
 
@@ -172,6 +180,13 @@
     <div class="divider"></div>
     <button id="btn-hint" class="btn">💡 힌트 보기</button>
     <button id="btn-submit" class="btn btn-primary">📝 채점받기</button>
+  </div>
+  
+    <div class="divider"></div>
+    <div style="display:flex; align-items:center; gap:5px; background:#f3f4f6; padding:4px 8px; border-radius:8px;">
+      <button id="btn-prev-page" class="btn" style="padding:6px 10px; font-size:12px;">◀ 이전</button>
+      <span id="page-indicator" style="font-weight:bold; font-size:14px; color:#333; min-width:40px; text-align:center;">1 p</span>
+      <button id="btn-next-page" class="btn" style="padding:6px 10px; font-size:12px;">다음 ▶</button>
   </div>
 
   <div id="challenge-area">
