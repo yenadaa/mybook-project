@@ -25,9 +25,10 @@ export function initDrawLayer(p, drawCanvas) {
             ctx.lineCap = 'round'; ctx.lineJoin = 'round';
             // [수정][12-11][모드에 따라 독립적인 색상/두께 상태 변수를 사용]
             if (state.selectMode === 'marker') {
-                ctx.strokeStyle = state.MARKER_STROKE_COLOR;
+                // [수정] 고정된 상수 대신 UI에서 변경되는 상태 변수를 사용
+                ctx.strokeStyle = state.markerCurrentColor; 
                 ctx.globalAlpha = 1.0; 
-                ctx.lineWidth = state.MARKER_DEFAULT_THICKNESS_PX; // 자유 필기 모드 전용 두께 사용
+                ctx.lineWidth = state.markerCurrentThicknessPx; //[수정] UI에 연결된 두께 변수 사용
             } else { // 형광펜 모드
                 ctx.strokeStyle = state.HIGHLIGHT_COLORS[state.selectedTag] || state.HIGHLIGHT_COLORS['기본'];
                 ctx.globalAlpha = 1.0; 
@@ -38,6 +39,18 @@ export function initDrawLayer(p, drawCanvas) {
             st.pointerId = e.pointerId;
             try { drawCanvas.setPointerCapture(e.pointerId); } catch (err) { console.warn("Could not set pointer capture:", err); }
             st.startEraser = getPos(e);
+            
+            // [44-52 추가][12-11][픽셀 지우기 시작]
+            const pos = getPos(e);
+            const ctx = drawCanvas.getContext('2d');
+            ctx.lineCap = 'round';
+            ctx.lineWidth = state.currentThicknessPx; // 지우개 브러시 크기는 형광펜 두께 사용
+            ctx.globalCompositeOperation = 'destination-out'; // 픽셀 지우기 모드
+            
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
+            st.drawing = true; // 지우개 모드에서 drawing 플래그 사용
+
         } else if (state.selectMode === 'ocrSelect') {
             st.pointerId = e.pointerId;
             try { drawCanvas.setPointerCapture(e.pointerId); } catch (err) { /* ... */ }
@@ -66,6 +79,11 @@ export function initDrawLayer(p, drawCanvas) {
             st.path.push(pos);
             ctx.lineTo(pos.x, pos.y);
             ctx.stroke();
+        } else if (state.selectMode === 'eraser' && st.drawing) {
+            //[추가][12-11][픽셀 단위 지우개 동작]
+            const pos = getPos(e);
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
         } else if (state.selectMode === 'ocrSelect' && st.startOcr && state.ocrSelectionRect) {
             const currentPos = getPos(e);
             const x = Math.min(st.startOcr.x, currentPos.x);
@@ -88,7 +106,13 @@ export function initDrawLayer(p, drawCanvas) {
             }
         }                           //[수정][12-09][마우스 떼고 나서 저장하는 조건에 검정펜 추가]
         if (state.selectMode === 'pen' || state.selectMode === 'marker') finishStroke(p, st);
-        else if (state.selectMode === 'eraser') finishEraser(p, st, getPos(e));
+        else if (state.selectMode === 'eraser') {//[조건문 전체 수정][12-11]
+            finishEraser(p, st, getPos(e)); // 객체 삭제 로직은 유지
+            st.drawing = false;
+            // 픽셀 지우기 후 캔버스 모드 복구
+            const ctx = drawCanvas.getContext('2d');
+            ctx.globalCompositeOperation = 'source-over';
+        }
         else if (state.selectMode === 'ocrSelect' && st.startOcr) {
             const endPos = getPos(e);
             const startPos = st.startOcr;
@@ -127,8 +151,8 @@ function finishStroke(p, st) {
     
     // 1. 독립 변수 결정
     const strokeTag = isMarker ? state.MARKER_STROKE_TAG : state.selectedTag;
-    const strokeColor = isMarker ? state.MARKER_STROKE_COLOR : (state.HIGHLIGHT_COLORS[state.selectedTag] || state.HIGHLIGHT_COLORS['기본']);
-    const thicknessPx = isMarker ? state.MARKER_DEFAULT_THICKNESS_PX : state.currentThicknessPx; // 독립 두께 사용
+    const strokeColor = isMarker ? state.markerCurrentColor : (state.HIGHLIGHT_COLORS[state.selectedTag] || state.HIGHLIGHT_COLORS['기본']);
+    const thicknessPx = isMarker ? state.markerCurrentThicknessPx : state.currentThicknessPx; // 독립 두께 사용
     
     // 2. 텍스트 캡처 분리 (성능 및 로직 독립성)
     const bb = utils.bboxOfPoints(st.path);
@@ -190,7 +214,20 @@ function finishEraser(p, st, end) {
     ).forEach(hh => {
         let bb;
         if (hh.type === 'stroke') {
-            bb = utils.bboxOfPathStyle(hh.paths, w, h, (hh.thicknessNorm || 0) * h);
+            // [218-229수정][12-11][스트로크의 태그를 확인하여 정확한 두께를 가져옴]
+            const isMarker = (hh.tag === state.MARKER_STROKE_TAG);
+            
+            let thicknessPx;
+            if (isMarker) {
+                // 마커일 경우, 저장된 norm 값 또는 마커 전용 기본값 사용
+                thicknessPx = Math.round((hh.thicknessNorm || (state.MARKER_DEFAULT_THICKNESS_PX / h)) * h);
+            } else {
+                // 형광펜일 경우, 저장된 norm 값 또는 형광펜 전용 기본값 (20px) 사용
+                thicknessPx = Math.round((hh.thicknessNorm || (20 / h)) * h);
+            }
+            
+            bb = utils.bboxOfPathStyle(hh.paths, w, h, thicknessPx);
+            
         } else if (hh.type === 'ocrBlock' && hh.bbox) {
             bb = {
                 x0: hh.bbox.x0 * w, y0: hh.bbox.y0 * h,

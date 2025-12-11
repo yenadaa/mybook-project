@@ -172,7 +172,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // UI 초기화
     if (state.els.thickness) state.els.thickness.value = String(state.currentThicknessPx);
     if (state.els.thicknessLabel) state.els.thicknessLabel.textContent = `${state.currentThicknessPx} px`;
-    
+    // [추가] Marker UI 초기화
+    if (state.els.markerThickness) state.els.markerThickness.value = String(state.markerCurrentThicknessPx);
+    if (state.els.markerThicknessLabel) state.els.markerThicknessLabel.textContent = `${state.markerCurrentThicknessPx} px`;
+    if (state.els.markerColorSelect) state.els.markerColorSelect.value = state.markerCurrentColor;   
     // 로컬 데이터 로드
     state.loadLocal();
     renderer.renderBookmarks(); 
@@ -260,6 +263,21 @@ document.addEventListener('DOMContentLoaded', () => {
         state.setCurrentThicknessPx(Number(state.els.thickness.value));
         if (state.els.thicknessLabel) state.els.thicknessLabel.textContent = `${state.currentThicknessPx} px`;
         localStorage.setItem('pdfViewer.penThicknessPx', String(state.currentThicknessPx));
+    });
+
+    // [추가][12-11][자유 필기 모드 두께 슬라이더 리스너]
+    state.els.markerThickness?.addEventListener('input', () => {
+        const px = Number(state.els.markerThickness.value);
+        state.setMarkerCurrentThicknessPx(px);
+        if (state.els.markerThicknessLabel) state.els.markerThicknessLabel.textContent = `${px} px`;
+        localStorage.setItem('pdfViewer.markerThicknessPx', String(px));
+    });
+
+    //[추가][12-11][자유 필기 모드 색상 선택 리스너]
+    state.els.markerColorSelect?.addEventListener('change', (e) => {
+        const color = e.target.value;
+        state.setMarkerCurrentColor(color);
+        localStorage.setItem('pdfViewer.markerColor', color);
     });
 
     // 4. 검색 & 사이드바

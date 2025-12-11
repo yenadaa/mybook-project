@@ -38,6 +38,10 @@ export const MARKER_STROKE_TAG = '자유필기'; // 파이어스토어 저장을
 export const MARKER_STROKE_COLOR = 'rgb(0, 0, 0)'; 
 export const MARKER_DEFAULT_THICKNESS_PX = 15; // 고정된 기본 두께 (15px)
 
+// [추가][12-11][Marker UI에서 선택한 값 (LocalStorage 로드)]
+export let markerCurrentColor = localStorage.getItem('pdfViewer.markerColor') || 'rgb(0, 0, 0)'; 
+export let markerCurrentThicknessPx = Number(localStorage.getItem('pdfViewer.markerThicknessPx')) || 15;
+
 export let currentThicknessPx = Number(localStorage.getItem('pdfViewer.penThicknessPx')) || 20;
 
 export let pendingChunk = null;
@@ -67,6 +71,10 @@ export const els = {
     tagBtns: Array.from(document.querySelectorAll('.tag-btn')),
     thickness: document.getElementById('thickness'),
     thicknessLabel: document.getElementById('thicknessLabel'),
+    // [추가][12-11][자유 필기 모드 전용 UI 요소 등록]
+    markerThickness: document.getElementById('markerThickness'),//1
+    markerThicknessLabel: document.getElementById('markerThicknessLabel'),//2
+    markerColorSelect: document.getElementById('markerColorSelect'),//3
     searchInput: document.getElementById('searchInput'),
     searchPrev: document.getElementById('searchPrev'),
     searchNext: document.getElementById('searchNext'),
@@ -121,6 +129,9 @@ export function setOcrCurrentPage(p) { ocrCurrentPage = p; }
 export function setSelectedTag(tag) { selectedTag = tag; }
 export function setCurrentThicknessPx(px) { currentThicknessPx = px; }
 export function setPendingChunk(chunk) { pendingChunk = chunk; }
+// [추가] 자유필기모드 상태 변경 함수
+export function setMarkerCurrentThicknessPx(px) { markerCurrentThicknessPx = px; }//1
+export function setMarkerCurrentColor(color) { markerCurrentColor = color; }//2
 
 export function setMode(mode) {
     selectMode = mode;

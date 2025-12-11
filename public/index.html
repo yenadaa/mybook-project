@@ -53,8 +53,6 @@
       <button id="undoBtn" title="되돌리기 (Ctrl+Z)"><i class="fa-solid fa-arrow-rotate-left"></i></button>
       <button id="redoBtn" title="다시하기 (Ctrl+Y)"><i class="fa-solid fa-arrow-rotate-right"></i></button>
       <button id="penBtn" title="형광펜 (H)"><i class="fa-solid fa-pen"></i></button>
-      <!--[추가][12-09][검정펜]-->
-      <button id="markerBtn" title="자유 필기 펜 (M)"><i class="fa-solid fa-highlighter"></i></button>
       <button id="eraserBtn" title="지우개 (E)"><i class="fa-solid fa-eraser"></i></button>
       <button id="ocrSelectBtn" title="텍스트 선택 (OCR)"><i class="fa-solid fa-i-cursor"></i></button>
       <div class="divider"></div>
@@ -69,6 +67,19 @@
       <input id="thickness" type="range" min="6" max="48" step="2" value="20" style="width:140px; padding:0 6px" />
       <div id="thicknessLabel" class="zoom-label" style="min-width:60px">20 px</div>
     </div>
+
+    <!--[추가][12-11][검정펜]-->
+      <button id="markerBtn" title="자유 필기 펜 (M)"><i class="fa-solid fa-highlighter"></i></button>
+    <div class="group" id="markerSettings" title="자유 필기 설정">
+      <span style="padding-left:8px">필기 두께</span>
+      <input id="markerThickness" type="range" min="3" max="30" step="1" value="15" style="width:140px; padding:0 6px" />
+      <div id="markerThicknessLabel" class="zoom-label" style="min-width:60px">15 px</div>
+      
+      <select id="markerColorSelect" title="필기 색상" style="padding:6px 8px; background:var(--panel); color:var(--fg);">
+        <option value="rgb(0, 0, 0)" selected>검정</option>
+        <option value="rgb(255, 0, 0)">빨강</option>
+        <option value="rgb(0, 0, 255)">파랑</option>
+      </select>
 
     <div class="group">
       <i class="fa-solid fa-magnifying-glass" style="padding-left:8px"></i>
