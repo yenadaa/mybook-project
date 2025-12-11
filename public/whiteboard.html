@@ -4,8 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>백지 복습 모드</title>
+  
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
   <style>
     :root {
       --bg: #f0f2f5;
@@ -44,8 +46,6 @@
     .btn-primary { background: var(--primary); color: #fff; }
     .btn-danger  { background: var(--danger);  color: #fff; }
     .btn-answer  { background: var(--success) !important; color: #fff !important; font-weight: 700; }
-    
-    /* 모드 전환 버튼 스타일 */
     .btn-mode { background: #8b5cf6; color: white; }
     .btn-mode:hover { background: #7c3aed; }
 
@@ -56,9 +56,9 @@
       position: relative;
       background: var(--panel);
       margin: 12px;
-      /* 오른쪽 패널 공간 확보 */
+      /* 오른쪽 패널 공간 확보 (반응형은 아래 media query 참고) */
       width: calc(100% - 24px - 380px); 
-      height: calc(100vh - 84px);
+      height: calc(100vh - 140px); /* 툴바 높이 고려 */
       border-radius: 12px;
       overflow: hidden;
       box-shadow: var(--shadow);
@@ -74,10 +74,10 @@
         color: #333; background: #fff;
     }
 
-    /* 심화 질문 박스 */
+    /* 심화 질문 박스 (플로팅) */
     #challenge-area {
       display:none; position:absolute;
-      top: 80px; left: 50%; transform: translateX(-50%);
+      top: 130px; left: 50%; transform: translateX(-50%);
       background: #eef2ff; color: #111827;
       padding: 14px 16px; border-radius: 12px;
       box-shadow: 0 10px 24px rgba(0,0,0,0.18);
@@ -89,7 +89,7 @@
     #session-questions-panel {
       width: 380px; 
       position: absolute;
-      right: 12px; top: 80px; bottom: 12px;
+      right: 12px; top: 130px; bottom: 12px;
       background: var(--panel);
       border-radius: 12px;
       border: var(--border);
@@ -99,7 +99,6 @@
       display: flex; flex-direction: column;
     }
     
-    /* 반응형 처리 */
     @media (max-width: 1000px) {
         #session-questions-panel { display: none; }
         .content-area { width: calc(100% - 24px); }
@@ -119,7 +118,7 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* 커스텀 알림창(모달) 스타일 */
+    /* 모달 스타일 */
     .custom-modal-overlay {
       display: none; position: fixed; top: 0; left: 0;
       width: 100%; height: 100%;
@@ -158,10 +157,12 @@
     <button id="btn-export-pdf" class="btn" style="background:#ff9800; color:white;">📄 PDF 저장</button>
     <div class="divider"></div>
 
-    <div id="page-title-bar" style="background:#fff; padding:12px 20px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; gap:10px;">
-    <span style="font-size:20px;">📌</span>
-    <strong id="current-page-topic" style="font-size:16px; color:#374151;">자유 복습 노트</strong>
+    <div id="page-nav-container" style="display:flex; align-items:center; gap:5px; background:#f3f4f6; padding:4px 8px; border-radius:8px;">
+        <button id="btn-prev-page" class="btn" style="padding:6px 10px; font-size:12px;">◀</button>
+        <span id="page-indicator" style="font-weight:bold; font-size:14px; color:#333; min-width:40px; text-align:center;">1 p</span>
+        <button id="btn-next-page" class="btn" style="padding:6px 10px; font-size:12px;">▶</button>
     </div>
+    <div class="divider"></div>
     
     <button id="btn-mode-switch" class="btn btn-mode">⌨️ 타이핑 모드</button>
     <div class="divider"></div>
@@ -181,14 +182,23 @@
     <button id="btn-hint" class="btn">💡 힌트 보기</button>
     <button id="btn-submit" class="btn btn-primary">📝 채점받기</button>
   </div>
-  
-    <div class="divider"></div>
-    <div style="display:flex; align-items:center; gap:5px; background:#f3f4f6; padding:4px 8px; border-radius:8px;">
-      <button id="btn-prev-page" class="btn" style="padding:6px 10px; font-size:12px;">◀ 이전</button>
-      <span id="page-indicator" style="font-weight:bold; font-size:14px; color:#333; min-width:40px; text-align:center;">1 p</span>
-      <button id="btn-next-page" class="btn" style="padding:6px 10px; font-size:12px;">다음 ▶</button>
-  </div>
 
+  <div id="capture-area" style="background-color: white; width: 100%;">
+      
+      <div id="page-title-bar" style="background:#fff; padding:12px 20px; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; gap:10px;">
+        <span style="font-size:20px;">📌</span>
+        <strong id="current-page-topic" style="font-size:16px; color:#374151;">자유 복습 노트</strong>
+      </div>
+
+      <div id="canvas-container" class="content-area">
+        <canvas id="drawingCanvas"></canvas>
+      </div>
+
+      <div id="text-editor-container" class="content-area" style="display:none;">
+        <textarea id="typingArea" placeholder="여기에 복습한 내용을 자유롭게 작성하세요..."></textarea>
+      </div>
+
+  </div> 
   <div id="challenge-area">
     <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
       <strong style="color:var(--primary);">🤔 심화 질문 (소크라테스 튜터)</strong>
@@ -197,17 +207,9 @@
     <p id="challenge-text">...</p>
   </div>
 
-  <button id="btn-open-challenge" style="display:none; position:absolute; top:80px; left:50%; transform:translateX(-50%); z-index:90; padding:8px 16px; border-radius:20px; background:#eef2ff; color:#3b82f6; border:2px solid #3b82f6; font-weight:bold; cursor:pointer; box-shadow:0 4px 10px rgba(0,0,0,0.1);">
+  <button id="btn-open-challenge" style="display:none; position:absolute; top:130px; left:50%; transform:translateX(-50%); z-index:90; padding:8px 16px; border-radius:20px; background:#eef2ff; color:#3b82f6; border:2px solid #3b82f6; font-weight:bold; cursor:pointer; box-shadow:0 4px 10px rgba(0,0,0,0.1);">
     ❓ 질문 다시 보기
   </button>
-
-  <div id="canvas-container" class="content-area">
-    <canvas id="drawingCanvas"></canvas>
-  </div>
-
-  <div id="text-editor-container" class="content-area" style="display:none;">
-    <textarea id="typingArea" placeholder="여기에 복습한 내용을 자유롭게 작성하세요..."></textarea>
-  </div>
 
   <aside id="session-questions-panel">
     <div style="padding:12px; border-bottom:1px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center;">
@@ -233,6 +235,7 @@
       <button id="btn-modal-close" class="custom-modal-btn">확인</button>
     </div>
   </div>
+
   <script src="whiteboard.js"></script>
 </body>
 </html>

@@ -377,17 +377,16 @@ document.addEventListener("DOMContentLoaded", () => {
     // =========================================
     async function exportToPDF() {
         const loading = document.getElementById('loading');
-        const originalPage = currentPage; // 현재 페이지 기억 (나중에 되돌아오기 위해)
+        const originalPage = currentPage; 
         
         try {
-            // 1. PDF 초기화 (가로 방향: 'l', 단위: mm, 포맷: a4)
-            // 가로로 설정하면 PC 화면 비율과 잘 맞아서 여백이 줄어듭니다.
+            // 1. PDF 설정 (가로 방향)
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF('l', 'mm', 'a4'); 
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = pdf.internal.pageSize.getHeight();
 
-            // 2. UI 숨기기 (깔끔한 캡처를 위해)
+            // 2. UI 정리 (툴바 등 숨기기)
             const toolbar = document.querySelector('.toolbar');
             const panel = document.getElementById('session-questions-panel');
             const openBtn = document.getElementById('btn-open-panel');
@@ -396,16 +395,14 @@ document.addEventListener("DOMContentLoaded", () => {
             if(panel) panel.style.display = 'none';
             if(openBtn) openBtn.style.display = 'none';
 
-            // 3. 1페이지부터 순회하며 캡처 시작
             let iterPage = 1;
             let hasData = true;
 
             while (hasData) {
-                // 로딩 메시지 업데이트
                 loading.style.display = 'flex';
                 loading.querySelector('span').textContent = `${iterPage}페이지 굽는 중... 🍳`;
 
-                // (1) 해당 페이지 데이터 가져오기
+                // (1) 데이터 불러오기
                 const pageId = `${BASE_BOOK_ID}_page_${iterPage}`;
                 const res = await fetch(LOAD_API_URL, {
                     method: 'POST',
@@ -413,24 +410,16 @@ document.addEventListener("DOMContentLoaded", () => {
                     body: JSON.stringify({ bookId: pageId })
                 });
 
-                if (!res.ok) {
-                    // 데이터가 없으면 루프 종료 (마지막 페이지 도달)
-                    hasData = false;
-                    break;
-                }
-
+                if (!res.ok) { hasData = false; break; }
                 const data = await res.json();
-                
-                // 텍스트나 그림 둘 다 없으면 빈 페이지로 간주하고 종료 (선택사항)
-                // 만약 중간에 빈 페이지가 있을 수 있다면 이 부분은 제거해도 됩니다.
-                if (!data.text && !data.imageData) {
-                    hasData = false; 
-                    break;
-                }
+                if (!data.text && !data.imageData) { hasData = false; break; }
 
-                // (2) 화면에 데이터 그리기 (캡처를 위해 잠시 렌더링)
+                // (2) 화면 그리기
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 document.getElementById('typingArea').value = data.text || "";
+                
+                const titleEl = document.getElementById('current-page-topic');
+                if(titleEl) titleEl.textContent = pageTitles[iterPage] || `복습 노트 (${iterPage}페이지)`;
 
                 if (data.imageData) {
                     await new Promise((resolve) => {
@@ -445,38 +434,36 @@ document.addEventListener("DOMContentLoaded", () => {
                     });
                 }
 
-                // (3) 화면 캡처 (html2canvas)
-                const targetElement = document.querySelector('.content-area');
+                // (3) ⭐️ 핵심 수정: 캡처 영역을 'capture-area'로 한정!
+                const targetElement = document.getElementById('capture-area');
+                
                 const canvasElement = await html2canvas(targetElement, {
                     scale: 2, 
                     useCORS: true,
-                    backgroundColor: '#ffffff',
-                    ignoreElements: (el) => el.id === 'loading' || el.id === 'resultModal' || el.id === 'page-title-bar'
+                    backgroundColor: '#ffffff', // 배경 흰색
+                    logging: false,
+                    // 로딩창만 무시하면 됨 (툴바는 위에서 display:none 함)
+                    ignoreElements: (el) => el.id === 'loading' || el.id === 'resultModal'
                 });
 
                 const imgData = canvasElement.toDataURL('image/jpeg', 0.95);
 
-                // (4) PDF에 추가
-                if (iterPage > 1) pdf.addPage(); // 2페이지부터는 새 장 추가
+                if (iterPage > 1) pdf.addPage(); 
 
-                // 이미지 비율 계산 (꽉 차게 맞추기)
+                // (4) 이미지 비율 맞춰 꽉 채우기
                 const imgProps = pdf.getImageProperties(imgData);
                 const ratio = imgProps.width / imgProps.height;
                 const windowRatio = pdfWidth / pdfHeight;
 
                 let renderWidth, renderHeight;
-                
-                // PDF 종이보다 그림이 더 납작하면 -> 가로를 꽉 채움
                 if (ratio > windowRatio) {
                     renderWidth = pdfWidth;
                     renderHeight = pdfWidth / ratio;
                 } else { 
-                    // 그림이 더 길쭉하면 -> 세로를 꽉 채움
                     renderHeight = pdfHeight;
                     renderWidth = pdfHeight * ratio;
                 }
 
-                // 중앙 정렬
                 const x = (pdfWidth - renderWidth) / 2;
                 const y = (pdfHeight - renderHeight) / 2;
 
@@ -485,29 +472,30 @@ document.addEventListener("DOMContentLoaded", () => {
                 iterPage++;
             }
 
-            // 4. 저장 및 완료
             if (iterPage > 1) {
-                const fileName = `MyBook_Full_Note.pdf`;
-                pdf.save(fileName);
-                showCustomModal("✅ 전체 저장 완료", `총 ${iterPage - 1}페이지가 PDF로 저장되었습니다!`);
+                pdf.save(`MyBook_Full_Note.pdf`);
+                showCustomModal("✅ 변환 완료", `총 ${iterPage - 1}페이지가 저장되었습니다!`);
             } else {
                 showCustomModal("알림", "저장할 내용이 없습니다.");
             }
 
         } catch (e) {
             console.error(e);
-            showCustomModal("❌ 변환 실패", e.message);
+            showCustomModal("❌ 실패", e.message);
         } finally {
-            // 5. 원래 보던 페이지로 복구
+            // 복구
             currentPage = originalPage;
-            
-            // UI 복구
             const toolbar = document.querySelector('.toolbar');
             const openBtn = document.getElementById('btn-open-panel');
+            const panel = document.getElementById('session-questions-panel'); // 패널도 복구
+
             toolbar.style.display = 'flex';
-            if(openBtn) openBtn.style.display = 'block';
+            if(panel) panel.style.display = 'flex'; // 원래대로 복구
+            if(openBtn) openBtn.style.display = 'block'; // 버튼 상태에 따라 조정 필요
             
-            // 로딩 끄기 전 원래 페이지 데이터 다시 로드
+            const titleEl = document.getElementById('current-page-topic');
+            if(titleEl) titleEl.textContent = pageTitles[currentPage] || "자유 복습 노트";
+
             await loadTempData(); 
             loading.style.display = 'none';
             loading.querySelector('span').textContent = "AI 선생님이 채점 중입니다... 🤖";
