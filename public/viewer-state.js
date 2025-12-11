@@ -31,17 +31,8 @@ export const HIGHLIGHT_COLORS = {
     '암기': 'rgba(144, 238, 144, 0.35)',
     '참고': 'rgba(135, 206, 250, 0.35)',
     'OCR': 'rgba(135, 206, 250, 0.35)',
-    //[삭제][12-11][검은색 펜 색상]
+    '마커': 'rgb(0, 0, 0)', //[추가][12-09][검은색 펜 색상 추가]
 };
-// [추가][12-11][자유 필기 전용 고정 상태 및 태그 정의 (저장용)]
-export const MARKER_STROKE_TAG = '자유필기'; // 파이어스토어 저장을 위한 독립 태그
-export const MARKER_STROKE_COLOR = 'rgb(0, 0, 0)'; 
-export const MARKER_DEFAULT_THICKNESS_PX = 15; // 고정된 기본 두께 (15px)
-
-// [추가][12-11][Marker UI에서 선택한 값 (LocalStorage 로드)]
-export let markerCurrentColor = localStorage.getItem('pdfViewer.markerColor') || 'rgb(0, 0, 0)'; 
-export let markerCurrentThicknessPx = Number(localStorage.getItem('pdfViewer.markerThicknessPx')) || 15;
-
 export let currentThicknessPx = Number(localStorage.getItem('pdfViewer.penThicknessPx')) || 20;
 
 export let pendingChunk = null;

@@ -84,10 +84,7 @@ export function renderNotes() {
     const filter = noteFilterActive();
     state.els.notes.innerHTML = '';
     
-    const items = state.highlights.filter(h =>
-        !h.id.startsWith('temp_') &&
-        h.tag !== state.MARKER_STROKE_TAG && //[추가][12-11][끊김 방지]
-        (filter === 'all' || h.tag === filter));
+    const items = state.highlights.filter(h => !h.id.startsWith('temp_') && (filter === 'all' || h.tag === filter));
     if (!items.length) { 
         const empty = document.createElement('div'); 
         empty.className = 'empty'; 
@@ -241,7 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.els.markerBtn?.addEventListener('click', () => { // [추가][12-09][MarkerBtn 로직 추가]
         drawing.flushPendingIfAny(); 
         state.setMode(state.selectMode === 'marker' ? 'none' : 'marker'); 
-         // [삭제][12-11][자유 필기 모드일 때 '마커' 태그 설정 제거]
+        state.setSelectedTag('마커'); // [자유 필기 모드일 때 '마커' 태그 설정]
     });
 
     state.els.eraserBtn?.addEventListener('click', () => {
