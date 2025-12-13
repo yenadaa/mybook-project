@@ -13,9 +13,12 @@ import { httpsCallable, functions } from './A.firebase.js';
 import { PROMPTS } from './viewer-personas.js';
 console.log("✅ main.js 스크립트 파일 로드됨");
 
-    // --- 팝업창 표시 함수들 ---
+    // --- 팝업창 표시 함수들 ---[수정][12-14][DOM 밖으로 꺼냄]
 
     function showQuizModal(content, isLoading = false, isError = false, loadingText = "AI가 퀴즈를 생성하고 있습니다...") {
+        // [수정][12-14] 함수 내부에서 DOM을 찾고 const로 선언합니다.
+        const quizModalOverlay = document.getElementById("quiz-modal-overlay");
+        const quizModalBody = document.getElementById("quiz-modal-body");
         if (!quizModalOverlay || !quizModalBody) {
             console.error("❌ showQuizModal: 'quizModalOverlay' 또는 'quizModalBody'를 찾을 수 없습니다.");
             return;
@@ -43,6 +46,8 @@ console.log("✅ main.js 스크립트 파일 로드됨");
     }
 
     function hideQuizModal() {
+        // [수정][12-14][함수 내부에서 DOM을 찾고 const로 선언]
+        const quizModalOverlay = document.getElementById("quiz-modal-overlay");
         if (quizModalOverlay) {
             quizModalOverlay.classList.add('hidden');
         }
@@ -194,9 +199,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const modalFullDocBtn = document.getElementById('modal-full-doc-btn');
     const modalHighlightsBtn = document.getElementById('modal-highlights-btn');     
-    const quizModalOverlay = document.getElementById("quiz-modal-overlay");
-    const quizModalBody = document.getElementById("quiz-modal-body");
-    const quizCloseBtn = document.getElementById("quiz-close-btn");
 
     // --- 퀴즈 생성 로직 ---
     modalHighlightsBtn?.addEventListener('click', async () => {
@@ -300,14 +302,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- 퀴즈 결과 팝업 관련 이벤트 핸들러 ---
-    quizCloseBtn?.addEventListener("click", hideQuizModal);
-    quizModalOverlay?.addEventListener("click", (e) => {
-        if (e.target === quizModalOverlay) hideQuizModal();
+    // --- 퀴즈 결과 팝업 관련 이벤트 핸들러 ---[수정][12-14] DOM 요소를 직접 찾아서 리스너 연결
+    document.getElementById("quiz-close-btn")?.addEventListener("click", hideQuizModal);
+    document.getElementById("quiz-modal-overlay")?.addEventListener("click", (e) => {
+        // e.target과 오버레이가 일치하는지 확인 (외부 클릭 시 닫기)
+        if (e.target === document.getElementById("quiz-modal-overlay")) hideQuizModal();
     });
 
-    // 퀴즈 정답 확인 로직
-    quizModalBody?.addEventListener('click', (e) => {
+    // 퀴즈 정답 확인 로직[수정][12-14] [DOM 요소를 직접 찾아서 리스너 연결]
+    document.getElementById("quiz-modal-body")?.addEventListener('click', (e) => {
         const target = e.target;
         const optionLI = target.closest('li');
 
