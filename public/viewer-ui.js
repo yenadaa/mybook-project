@@ -163,6 +163,25 @@ export function switchSidebar(contentId) {
     if (targetPanel) targetPanel.style.display = 'block';
 }
 
+//[추가][12-14][필기 모드 모달 토글 함수]
+function toggleMarkerSettingModal(show) {
+    if (!state.elsMarkerModal.overlay) return;
+
+    if (show) {
+        // 모달을 열 때 현재 값을 반영
+        if (state.elsMarkerModal.thickness) {
+            state.elsMarkerModal.thickness.value = String(state.markerCurrentThicknessPx);
+        }
+        if (state.elsMarkerModal.thicknessLabel) {
+            state.elsMarkerModal.thicknessLabel.textContent = `${state.markerCurrentThicknessPx} px`;
+        }
+        
+        state.elsMarkerModal.overlay.classList.remove('hidden');
+    } else {
+        state.elsMarkerModal.overlay.classList.add('hidden');
+    }
+}
+
 
 // ====== [메인 이벤트 리스너] ======
 document.addEventListener('DOMContentLoaded', () => {
@@ -234,16 +253,24 @@ document.addEventListener('DOMContentLoaded', () => {
         drawing.flushPendingIfAny(); 
         state.setMode(state.selectMode === 'pen' ? 'none' : 'pen'); 
         state.setSelectedTag('기본');//[추가][12-09][형광펜 기본 모드일 때 '기본' 태그 설정]
+        toggleMarkerSettingModal(false); //[추가][12-14][형광펜 클릭 시 필기 모드 모달 닫기]
     });
+
     state.els.markerBtn?.addEventListener('click', () => { // [추가][12-09][MarkerBtn 로직 추가]
         drawing.flushPendingIfAny(); 
         state.setMode(state.selectMode === 'marker' ? 'none' : 'marker'); 
+        toggleMarkerSettingModal(false);//[추가][12-14][필기 클릭-> 혹시 모달창 열려있다면 닫기]
          // [삭제][12-11][자유 필기 모드일 때 '마커' 태그 설정 제거]
     });
-
+    // [추가][12-14][MarkerSettingsBtn: 모달 팝업만 수행 (모드 전환 없음)]
+    state.els.markerSettingsBtn?.addEventListener('click', () => { 
+        // 모드가 무엇이든 설정 모달만 토글
+        toggleMarkerSettingModal(!state.elsMarkerModal.overlay.classList.contains('hidden'));
+    });
     state.els.eraserBtn?.addEventListener('click', () => {
         drawing.flushPendingIfAny();
         state.setMode(state.selectMode === 'eraser' ? 'none' : 'eraser');
+        toggleMarkerSettingModal(false); // [12-14][추가][마커 모달 닫기]
     });
     state.els.ocrSelectBtn?.addEventListener('click', () => {
         state.setMode(state.selectMode === 'ocrSelect' ? 'none' : 'ocrSelect');
@@ -260,6 +287,33 @@ document.addEventListener('DOMContentLoaded', () => {
         state.setCurrentThicknessPx(Number(state.els.thickness.value));
         if (state.els.thicknessLabel) state.els.thicknessLabel.textContent = `${state.currentThicknessPx} px`;
         localStorage.setItem('pdfViewer.penThicknessPx', String(state.currentThicknessPx));
+    });
+    // [추가][12-14][필기 모드 모달 내부 이벤트 리스너]
+    state.elsMarkerModal.closeBtn?.addEventListener('click', () => {
+        toggleMarkerSettingModal(false);
+    });
+
+    state.elsMarkerModal.thickness?.addEventListener('input', () => {
+        const px = Number(state.elsMarkerModal.thickness.value);
+        state.setMarkerCurrentThicknessPx(px);
+        if (state.elsMarkerModal.thicknessLabel) {
+            state.elsMarkerModal.thicknessLabel.textContent = `${px} px`;
+        }
+        localStorage.setItem('pdfViewer.markerThicknessPx', String(px));
+    });
+
+    state.elsMarkerModal.eraserBtn?.addEventListener('click', () => {
+        drawing.flushPendingIfAny();
+        // 지우개 모드로 전환하고 모달 닫기 (모달을 통한 지우개 활성화)
+        state.setMode('eraser');
+        toggleMarkerSettingModal(false);
+    });
+
+    // [추가][12-14][오버레이 클릭 시 닫기]
+    state.elsMarkerModal.overlay?.addEventListener('click', (e) => {
+        if (e.target === state.elsMarkerModal.overlay) {
+            toggleMarkerSettingModal(false);
+        }
     });
 
     // 4. 검색 & 사이드바
