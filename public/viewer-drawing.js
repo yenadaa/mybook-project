@@ -23,11 +23,12 @@ export function initDrawLayer(p, drawCanvas) {
             st.path = [pos];
             const ctx = drawCanvas.getContext('2d');
             ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.globalCompositeOperation = 'source-over';//[12-14][추가][(이전 모드 설정이 남아 펜이 이전 모드처럼 작동하는 오류 방지)]
             // [수정][12-11][모드에 따라 독립적인 색상/두께 상태 변수를 사용]
             if (state.selectMode === 'marker') {
                 ctx.strokeStyle = state.MARKER_STROKE_COLOR;
                 ctx.globalAlpha = 1.0; 
-                ctx.lineWidth = state.MARKER_DEFAULT_THICKNESS_PX; // 자유 필기 모드 전용 두께 사용
+                ctx.lineWidth = state.state.markerCurrentThicknessPx; // 자유 필기 모드 전용 두께 사용
             } else { // 형광펜 모드
                 ctx.strokeStyle = state.HIGHLIGHT_COLORS[state.selectedTag] || state.HIGHLIGHT_COLORS['기본'];
                 ctx.globalAlpha = 1.0; 
@@ -38,6 +39,7 @@ export function initDrawLayer(p, drawCanvas) {
             st.pointerId = e.pointerId;
             try { drawCanvas.setPointerCapture(e.pointerId); } catch (err) { console.warn("Could not set pointer capture:", err); }
             st.startEraser = getPos(e);
+
         } else if (state.selectMode === 'ocrSelect') {
             st.pointerId = e.pointerId;
             try { drawCanvas.setPointerCapture(e.pointerId); } catch (err) { /* ... */ }
@@ -88,7 +90,8 @@ export function initDrawLayer(p, drawCanvas) {
             }
         }                           //[수정][12-09][마우스 떼고 나서 저장하는 조건에 검정펜 추가]
         if (state.selectMode === 'pen' || state.selectMode === 'marker') finishStroke(p, st);
-        else if (state.selectMode === 'eraser') finishEraser(p, st, getPos(e));
+        else if (state.selectMode === 'eraser') 
+            finishEraser(p, st, getPos(e));
         else if (state.selectMode === 'ocrSelect' && st.startOcr) {
             const endPos = getPos(e);
             const startPos = st.startOcr;
@@ -128,7 +131,7 @@ function finishStroke(p, st) {
     // 1. 독립 변수 결정
     const strokeTag = isMarker ? state.MARKER_STROKE_TAG : state.selectedTag;
     const strokeColor = isMarker ? state.MARKER_STROKE_COLOR : (state.HIGHLIGHT_COLORS[state.selectedTag] || state.HIGHLIGHT_COLORS['기본']);
-    const thicknessPx = isMarker ? state.MARKER_DEFAULT_THICKNESS_PX : state.currentThicknessPx; // 독립 두께 사용
+    const thicknessPx = isMarker ? state.markerCurrentThicknessPx : state.currentThicknessPx; //[변수 수정][12-14][독립 두께 사용]
     
     // 2. 텍스트 캡처 분리 (성능 및 로직 독립성)
     const bb = utils.bboxOfPoints(st.path);
@@ -190,7 +193,19 @@ function finishEraser(p, st, end) {
     ).forEach(hh => {
         let bb;
         if (hh.type === 'stroke') {
-            bb = utils.bboxOfPathStyle(hh.paths, w, h, (hh.thicknessNorm || 0) * h);
+            // [196-206추가][12-14][Marker 여부 확인 (hh.tag가 MARKER_STROKE_TAG 인지 확인)]
+            const isMarker = (hh.tag === state.MARKER_STROKE_TAG);
+            
+            let thicknessPx;
+            if (isMarker) {
+                // 마커일 경우 저장된 norm 값 또는 Marker 독립 두께를 fallback으로 사용
+                thicknessPx = Math.round((hh.thicknessNorm || (state.MARKER_DEFAULT_THICKNESS_PX / h)) * h);
+            } else {
+                // 형광펜일 경우 저장된 norm 값 또는 형광펜 두께를 fallback으로 사용
+                thicknessPx = Math.round((hh.thicknessNorm || (state.currentThicknessPx / h)) * h);
+            }
+            //[수정][12-14][bb 계산 시 위에서 구한 thicknessPx 사용]
+            bb = utils.bboxOfPathStyle(hh.paths, w, h, thicknessPx);
         } else if (hh.type === 'ocrBlock' && hh.bbox) {
             bb = {
                 x0: hh.bbox.x0 * w, y0: hh.bbox.y0 * h,
