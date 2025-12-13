@@ -109,7 +109,7 @@ export function initializeDOMElements() {
     });
     
     // OCR 모달 요소
-    bject.assign(elsOcrModal, {
+    Object.assign(elsOcrModal, {
         overlay: document.getElementById('ocr-result-modal'),
         content: document.getElementById('ocr-result-content'),
         textarea: document.getElementById('ocr-result-text'),
