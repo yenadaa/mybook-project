@@ -190,6 +190,8 @@ function finishEraser(p, st, end) {
         hh.page === p &&
         hh.id && !hh.id.startsWith('temp_') &&
         (hh.type === 'stroke' || hh.type === 'ocrBlock')
+        // [추가][12-14][marker 태그를 가진 객체는 지우지 않도록 필터링]
+        && hh.tag !== state.MARKER_STROKE_TAG
     ).forEach(hh => {
         let bb;
         if (hh.type === 'stroke') {
