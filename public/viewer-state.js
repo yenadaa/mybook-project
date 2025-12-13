@@ -36,8 +36,11 @@ export const HIGHLIGHT_COLORS = {
 // [추가][12-11][자유 필기 전용 고정 상태 및 태그 정의 (저장용)]
 export const MARKER_STROKE_TAG = '자유필기'; // 파이어스토어 저장을 위한 독립 태그
 export const MARKER_STROKE_COLOR = 'rgb(0, 0, 0)'; 
-export const MARKER_DEFAULT_THICKNESS_PX = 15; // 고정된 기본 두께 (15px)
+export const MARKER_DEFAULT_THICKNESS_PX = 7; // 고정된 기본 두께 (7px)
 
+//[추가][12-14] 필기 모드 독립 두께 변수 (로컬 스토리지에서 로드, 없으면 7px)
+export let markerCurrentThicknessPx = Number(localStorage.getItem('pdfViewer.markerThicknessPx')) || 7;
+//[형광펜 독립 두께 변수]
 export let currentThicknessPx = Number(localStorage.getItem('pdfViewer.penThicknessPx')) || 20;
 
 export let pendingChunk = null;
@@ -63,6 +66,7 @@ export const els = {
     redoBtn: document.getElementById('redoBtn'),
     penBtn: document.getElementById('penBtn'),
     markerBtn: document.getElementById('markerBtn'),//[추가][12-09][검정펜]
+    markerSettingsBtn: document.getElementById('markerSettingsBtn'),//[추가][12-14][필기 모드 모달]
     eraserBtn: document.getElementById('eraserBtn'),
     tagBtns: Array.from(document.querySelectorAll('.tag-btn')),
     thickness: document.getElementById('thickness'),
@@ -87,6 +91,15 @@ export const els = {
     ocrToggleDebug: document.getElementById('ocrToggleDebug'),
     ocrStatus: document.getElementById('ocrStatus'), //[복구수정][12-03]
     ocrSelectBtn: document.getElementById('ocrSelectBtn'), // OCR 선택 버튼
+};
+
+//[추가][12-14][필기 모드 모달 요소]
+export const elsMarkerModal = {
+    overlay: document.getElementById('marker-setting-modal-overlay'),
+    thickness: document.getElementById('modalMarkerThickness'), 
+    thicknessLabel: document.getElementById('modalMarkerThicknessLabel'),
+    eraserBtn: document.getElementById('modalMarkerEraserBtn'),
+    closeBtn: document.getElementById('marker-setting-modal-close-btn')
 };
 
 // OCR 모달 요소
@@ -121,6 +134,8 @@ export function setOcrCurrentPage(p) { ocrCurrentPage = p; }
 export function setSelectedTag(tag) { selectedTag = tag; }
 export function setCurrentThicknessPx(px) { currentThicknessPx = px; }
 export function setPendingChunk(chunk) { pendingChunk = chunk; }
+//[추가][12-14][필기 모드 두께 상태 변경 함수]
+export function setMarkerCurrentThicknessPx(px) { markerCurrentThicknessPx = px; }
 
 export function setMode(mode) {
     selectMode = mode;
