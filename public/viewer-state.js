@@ -47,70 +47,77 @@ export let pendingChunk = null;
 // { page, tag, color, thicknessNorm, paths: [normPath, ...], bboxPx:{x0,y0,x1,y1}, timer }
 
 // ====== DOM 요소 (els) ======
-export const els = {
-    file: document.getElementById('file'),
-    pages: document.getElementById('pages'),
-    empty: document.getElementById('empty'),
-    pageIndicator: document.getElementById('pageIndicator'),
-    zoomLabel: document.getElementById('zoomLabel'),
-    prevPage: document.getElementById('prevPage'),
-    nextPage: document.getElementById('nextPage'),
-    jumpInput: document.getElementById('jumpInput'),
-    zoomIn: document.getElementById('zoomIn'),
-    zoomOut: document.getElementById('zoomOut'),
-    zoomReset: document.getElementById('zoomReset'),
-    toggleDark: document.getElementById('toggleDark'),
-    modeContinuous: document.getElementById('modeContinuous'),
-    modeSingle: document.getElementById('modeSingle'),
-    undoBtn: document.getElementById('undoBtn'),
-    redoBtn: document.getElementById('redoBtn'),
-    penBtn: document.getElementById('penBtn'),
-    markerBtn: document.getElementById('markerBtn'),//[추가][12-09][검정펜]
-    markerSettingsBtn: document.getElementById('markerSettingsBtn'),//[추가][12-14][필기 모드 모달]
-    eraserBtn: document.getElementById('eraserBtn'),
-    tagBtns: Array.from(document.querySelectorAll('.tag-btn')),
-    thickness: document.getElementById('thickness'),
-    thicknessLabel: document.getElementById('thicknessLabel'),
-    searchInput: document.getElementById('searchInput'),
-    searchPrev: document.getElementById('searchPrev'),
-    searchNext: document.getElementById('searchNext'),
-    thumbs: document.getElementById('thumbs'),
-    outline: document.getElementById('outline'),
-    bookmarks: document.getElementById('bookmarks'),
-    tabThumbs: document.getElementById('tabThumbs'),
-    tabOutline: document.getElementById('tabOutline'),
-    tabBookmarks: document.getElementById('tabBookmarks'),
-    notes: document.getElementById('notes'),
-    rightFilterTabs: Array.from(document.querySelectorAll('.right-tabs button')),
-    addBookmark: document.getElementById('addBookmark'),
-    exportNotes: document.getElementById('exportNotes'),
-    clearData: document.getElementById('clearData'),
-    ocrPage: document.getElementById('ocrPage'),
-    ocrAll: document.getElementById('ocrAll'),
-    ocrLang: document.getElementById('ocrLang'),
-    ocrToggleDebug: document.getElementById('ocrToggleDebug'),
-    ocrStatus: document.getElementById('ocrStatus'), //[복구수정][12-03]
-    ocrSelectBtn: document.getElementById('ocrSelectBtn'), // OCR 선택 버튼
-};
+// [수정][12-14][빈 객체로 초기화합니다. (ReferenceError 방지)]
+export const els = {}; 
+export const elsMarkerModal = {};
+export const elsOcrModal = {};
 
-//[추가][12-14][필기 모드 모달 요소]
-export const elsMarkerModal = {
-    overlay: document.getElementById('marker-setting-modal-overlay'),
-    thickness: document.getElementById('modalMarkerThickness'), 
-    thicknessLabel: document.getElementById('modalMarkerThicknessLabel'),
-    eraserBtn: document.getElementById('modalMarkerEraserBtn'),
-    closeBtn: document.getElementById('marker-setting-modal-close-btn')
+export function initializeDOMElements() {
+    // [수정] els 객체에 모든 DOM 요소를 할당합니다.
+    Object.assign(els, {
+        file: document.getElementById('file'),
+        pages: document.getElementById('pages'),
+        empty: document.getElementById('empty'),
+        pageIndicator: document.getElementById('pageIndicator'),
+        zoomLabel: document.getElementById('zoomLabel'),
+        prevPage: document.getElementById('prevPage'),
+        nextPage: document.getElementById('nextPage'),
+        jumpInput: document.getElementById('jumpInput'),
+        zoomIn: document.getElementById('zoomIn'),
+        zoomOut: document.getElementById('zoomOut'),
+        zoomReset: document.getElementById('zoomReset'),
+        toggleDark: document.getElementById('toggleDark'),
+        modeContinuous: document.getElementById('modeContinuous'),
+        modeSingle: document.getElementById('modeSingle'),
+        undoBtn: document.getElementById('undoBtn'),
+        redoBtn: document.getElementById('redoBtn'),
+        penBtn: document.getElementById('penBtn'),
+        markerBtn: document.getElementById('markerBtn'),//[추가][12-09][검정펜]
+        markerSettingsBtn: document.getElementById('markerSettingsBtn'),//[추가][12-14][필기 모드 모달]
+        eraserBtn: document.getElementById('eraserBtn'),
+        tagBtns: Array.from(document.querySelectorAll('.tag-btn')),
+        thickness: document.getElementById('thickness'),
+        thicknessLabel: document.getElementById('thicknessLabel'),
+        searchInput: document.getElementById('searchInput'),
+        searchPrev: document.getElementById('searchPrev'),
+        searchNext: document.getElementById('searchNext'),
+        thumbs: document.getElementById('thumbs'),
+        outline: document.getElementById('outline'),
+        bookmarks: document.getElementById('bookmarks'),
+        tabThumbs: document.getElementById('tabThumbs'),
+        tabOutline: document.getElementById('tabOutline'),
+        tabBookmarks: document.getElementById('tabBookmarks'),
+        notes: document.getElementById('notes'),
+        rightFilterTabs: Array.from(document.querySelectorAll('.right-tabs button')),
+        addBookmark: document.getElementById('addBookmark'),
+        exportNotes: document.getElementById('exportNotes'),
+        clearData: document.getElementById('clearData'),
+        ocrPage: document.getElementById('ocrPage'),
+        ocrAll: document.getElementById('ocrAll'),
+        ocrLang: document.getElementById('ocrLang'),
+        ocrToggleDebug: document.getElementById('ocrToggleDebug'),
+        ocrStatus: document.getElementById('ocrStatus'), //[복구수정][12-03]
+        ocrSelectBtn: document.getElementById('ocrSelectBtn'), // OCR 선택 버튼
+    });   
+    //[추가][12-14][필기 모드 모달 요소]
+    Object.assign(elsMarkerModal, {
+        overlay: document.getElementById('marker-setting-modal-overlay'),
+        thickness: document.getElementById('modalMarkerThickness'), 
+        thicknessLabel: document.getElementById('modalMarkerThicknessLabel'),
+        eraserBtn: document.getElementById('modalMarkerEraserBtn'),
+        closeBtn: document.getElementById('marker-setting-modal-close-btn')
+    });
+    
+    // OCR 모달 요소
+    bject.assign(elsOcrModal, {
+        overlay: document.getElementById('ocr-result-modal'),
+        content: document.getElementById('ocr-result-content'),
+        textarea: document.getElementById('ocr-result-text'),
+        copyBtn: document.getElementById('ocr-copy-btn'),
+        closeBtn: document.getElementById('ocr-close-btn')
+    });
 };
-
-// OCR 모달 요소
-export const elsOcrModal = {
-    overlay: document.getElementById('ocr-result-modal'),
-    content: document.getElementById('ocr-result-content'),
-    textarea: document.getElementById('ocr-result-text'),
-    copyBtn: document.getElementById('ocr-copy-btn'),
-    closeBtn: document.getElementById('ocr-close-btn')
-};
-
+    
 // ====== 상태 변경 함수 (State Mutators) ======
 // (다른 모듈에서 이 함수들을 import하여 상태를 변경합니다)
 

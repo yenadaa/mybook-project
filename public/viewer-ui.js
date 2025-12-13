@@ -185,6 +185,9 @@ function toggleMarkerSettingModal(show) {
 
 // ====== [메인 이벤트 리스너] ======
 document.addEventListener('DOMContentLoaded', () => {
+
+    //[추가][12-14][DOM 요소 초기화 (모든 작업보다 먼저 실행)]
+    state.initializeDOMElements();
     
     attachRipplesTo('button, .chip-btn, .label-btn, .right-tabs button, .sidebar-tabs button');
 
