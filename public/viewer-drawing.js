@@ -108,6 +108,9 @@ export function initDrawLayer(p, drawCanvas) {
                 extractAndRunOcr(state.ocrCurrentPage, rect); // (ocr.js)
             }
         }
+        //[2줄 추가][12-14][선 보강]
+        st.drawing = false;
+        st.path = [];
         st.pointerId = null;
     };
     drawCanvas.addEventListener('pointerup', handlePointerEnd);
