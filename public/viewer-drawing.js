@@ -78,39 +78,51 @@ export function initDrawLayer(p, drawCanvas) {
             Object.assign(state.ocrSelectionRect.style, { left: `${x}px`, top: `${y}px`, width: `${width}px`, height: `${height}px` });
         }
     });
-
+    //[함수 전체 수정][12-14][선 이어짐 방지]
     const handlePointerEnd = (e) => {
-        if (st.pointerId !== e.pointerId) return;
-        if (drawCanvas.isConnected) {
+        const isEndingOurPointer = (st.pointerId === e.pointerId);
+        const hasActivePointer = (st.pointerId !== null);
+
+        // 포인터 캡처 해제 (가능한 경우만)
+        if (hasActivePointer && drawCanvas.isConnected) {
             try {
-                if (drawCanvas.hasPointerCapture(e.pointerId)) {
-                    drawCanvas.releasePointerCapture(e.pointerId);
+                const pid = isEndingOurPointer ? e.pointerId : st.pointerId;
+                if (drawCanvas.hasPointerCapture(pid)) {
+                    drawCanvas.releasePointerCapture(pid);
                 }
-            } catch (err) {
-                // console.warn("Could not release pointer capture:", err);
-            }
-        }                           //[수정][12-09][마우스 떼고 나서 저장하는 조건에 검정펜 추가]
-        if (state.selectMode === 'pen' || state.selectMode === 'marker') finishStroke(p, st);
-        else if (state.selectMode === 'eraser') 
-            finishEraser(p, st, getPos(e));
-        else if (state.selectMode === 'ocrSelect' && st.startOcr) {
-            const endPos = getPos(e);
-            const startPos = st.startOcr;
-            st.startOcr = null;
-            if (Math.abs(startPos.x - endPos.x) < 5 || Math.abs(startPos.y - endPos.y) < 5) {
-                removeOcrSelectionRect();
-            } else {
-                const rect = {
-                    x: Math.min(startPos.x, endPos.x), y: Math.min(startPos.y, endPos.y),
-                    width: Math.abs(startPos.x - endPos.x), height: Math.abs(startPos.y - endPos.y)
-                };
-                console.log(`OCR 영역 선택 완료 (페이지 ${state.ocrCurrentPage}):`, rect);
-                extractAndRunOcr(state.ocrCurrentPage, rect); // (ocr.js)
+            } catch (err) {}
+        }
+
+        // 우리가 시작한 포인터일 때만 실제 "작업 완료" 로직 수행
+        if (isEndingOurPointer) {
+            if (state.selectMode === 'pen' || state.selectMode === 'marker') {
+                finishStroke(p, st);
+            } else if (state.selectMode === 'eraser') {
+                finishEraser(p, st, getPos(e));
+            } else if (state.selectMode === 'ocrSelect' && st.startOcr) {
+                const endPos = getPos(e);
+                const startPos = st.startOcr;
+                st.startOcr = null;
+
+                if (Math.abs(startPos.x - endPos.x) < 5 || Math.abs(startPos.y - endPos.y) < 5) {
+                    removeOcrSelectionRect();
+                } else {
+                    const rect = {
+                        x: Math.min(startPos.x, endPos.x),
+                        y: Math.min(startPos.y, endPos.y),
+                        width: Math.abs(startPos.x - endPos.x),
+                        height: Math.abs(startPos.y - endPos.y)
+                    };
+                    extractAndRunOcr(state.ocrCurrentPage, rect);
+                }
             }
         }
-        //[2줄 추가][12-14][선 보강]
+
+        // 어떤 경우든 무조건 상태 초기화 (선 이어짐 방지 핵심)
         st.drawing = false;
         st.path = [];
+        st.startEraser = null;
+        st.startOcr = null;
         st.pointerId = null;
     };
     drawCanvas.addEventListener('pointerup', handlePointerEnd);
