@@ -15,10 +15,10 @@ export function initDrawLayer(p, drawCanvas) {
         if (!state.pdfDoc) return;
         // [추가][12-14][손가락 터치로는 필기 시작 안 함 (펜/마우스만 허용)]
         if (e.pointerType === 'touch') return;
-
+        // [추가][12-14]][이미 그리고 있는 중이면 다운 무시 (끊김 방지 핵심)]
+        if (st.drawing) return;
         // [추가][12-14][이미 다른 포인터로 작업 중이면 이 다운 이벤트는 무시(끊김 방지 핵심)]
         if (st.pointerId !== null && st.pointerId !== e.pointerId) return;
-
         // [추가][12-14][마우스 오른쪽/휠 클릭 방지]
         if (e.pointerType === 'mouse' && e.button !== 0) return;
 
