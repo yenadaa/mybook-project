@@ -12,8 +12,21 @@ export function initDrawLayer(p, drawCanvas) {
     const getPos = (e) => { const rect = drawCanvas.getBoundingClientRect(); return { x: e.clientX - rect.left, y: e.clientY - rect.top }; };
 
     drawCanvas.addEventListener('pointerdown', (e) => {
-        
-        if (!state.pdfDoc || st.pointerId !== null) return;
+        if (!state.pdfDoc) return;
+        // [추가][12-14][손가락 터치로는 필기 시작 안 함 (펜/마우스만 허용)]
+        if (e.pointerType === 'touch') return;
+
+        // [추가][12-14][이미 다른 포인터로 작업 중이면 이 다운 이벤트는 무시(끊김 방지 핵심)]
+        if (st.pointerId !== null && st.pointerId !== e.pointerId) return;
+
+        // [추가][12-14][마우스 오른쪽/휠 클릭 방지]
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+        //[12-14][추가][이전 stroke 흔적 완전 제거 (이어짐 방지 핵심)]
+        st.drawing = false;
+        st.path = [];
+        st.pointerId = null;
+
         if (e.pointerType === 'mouse' && e.button !== 0) return;
                                         //[수정][12-09][검정펜 버튼 눌렀을 때 그리기]
         if (state.selectMode === 'pen' || state.selectMode === 'marker') {
@@ -60,7 +73,9 @@ export function initDrawLayer(p, drawCanvas) {
     });
 
     drawCanvas.addEventListener('pointermove', (e) => {
-        if (!state.pdfDoc || st.pointerId !== e.pointerId) return;
+        if (!state.pdfDoc) return;//[추가][12-14]
+        if (!st.drawing) return; //[추가][12-14]
+        if (st.pointerId !== e.pointerId) return;
         if (e.pointerType === 'mouse' && e.buttons !== 1) return;
 
         const ctx = drawCanvas.getContext('2d');    //[수정][12-09][마우스 움직였을 때 선을 계속 그리는 조건에 검정펜 추가]
