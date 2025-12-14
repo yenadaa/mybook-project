@@ -321,8 +321,62 @@ async function handleSubmitSession() {
 
         console.log("✅ 채점 완료:", result.data);
         const { correctCount, totalCount, message } = result.data;
+// ===== [정답] docId 확보 =====
+const docId =
+  localStorage.getItem("mybook:selectedDocId") ||
+  localStorage.getItem("mybook:currentDocId") ||
+  "unknown-doc";
+
+<<<<<<< HEAD
+
+=======
+// ===== [정답] 오답 목록 만들기: 서버 결과 우선, 없으면 fallback =====
+let wrongQuestions = [];
+
+// 1) 서버가 results를 준다면 그걸 사용(가장 정확)
+const serverResults = result.data.results;
+if (Array.isArray(serverResults) && serverResults.length > 0) {
+  wrongQuestions = serverResults
+    .filter(r => r.correct === false)
+    .map(r => {
+      const item = document.querySelector(`.quiz-item[data-original-id="${r.originalId}"]`);
+      const qText = item?.querySelector(".quiz-question")?.textContent?.trim() || "";
+      const userAnswer = item?.dataset.userAnswer || "";
+      return {
+        question: qText,
+        userAnswer,
+        correctAnswer: r.correctAnswer || "" // 서버가 주는 정답(있다면)
+      };
+    });
+} else {
+  // 2) fallback: 클라이언트 비교(현재 data-answer가 있으니 가능)
+  const normalize = (s) => String(s || "").replace(/\s/g, "").toLowerCase();
+
+  document.querySelectorAll(".quiz-item").forEach(item => {
+    const qText = item.querySelector(".quiz-question")?.textContent?.trim() || "";
+    const correctAnswer = (item.dataset.answer || "").trim();
+    const userAnswer = (item.dataset.userAnswer || "").trim();
+
+    if (!normalize(userAnswer) || normalize(userAnswer) !== normalize(correctAnswer)) {
+      wrongQuestions.push({ question: qText, userAnswer, correctAnswer });
+    }
+  });
+}
+
+// ===== [정답] 점수 계산 + progress 저장(딱 1번만) =====
+const score = totalCount ? Math.round((correctCount / totalCount) * 100) : 0;
+saveQuizResultToProgress(docId, score, wrongQuestions);
 
 
+        // 4. 결과 알림
+        alert(`🎉 채점 완료!\n\n맞은 개수: ${correctCount} / ${totalCount}\n점수: ${score}점\n\n${message}`);
+
+        // 5. 이동 (홈으로)
+        // ✅ home.html을 쓰는 경우 이게 더 정확함:
+        window.location.href = "/";
+        // 프로젝트가 / 라우팅 홈이면 아래를 쓰세요:
+        // window.location.href = '/';
+>>>>>>> 19196ec (home 업데이트(로직 구현중))
 
     } catch (error) {
         console.error("제출 실패:", error);
