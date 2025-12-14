@@ -268,7 +268,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // [추가][12-14][MarkerSettingsBtn: 모달 팝업만 수행 (모드 전환 없음)]
     state.els.markerSettingsBtn?.addEventListener('click', () => { 
         // 모드가 무엇이든 설정 모달만 토글
-        toggleMarkerSettingModal(!state.elsMarkerModal.overlay.classList.contains('hidden'));
+        toggleMarkerSettingModal(state.elsMarkerModal.overlay.classList.contains('hidden'));//[논리반대로수정][12-14]
     });
     state.els.eraserBtn?.addEventListener('click', () => {
         drawing.flushPendingIfAny();

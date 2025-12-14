@@ -12,6 +12,7 @@ export function initDrawLayer(p, drawCanvas) {
     const getPos = (e) => { const rect = drawCanvas.getBoundingClientRect(); return { x: e.clientX - rect.left, y: e.clientY - rect.top }; };
 
     drawCanvas.addEventListener('pointerdown', (e) => {
+        
         if (!state.pdfDoc || st.pointerId !== null) return;
         if (e.pointerType === 'mouse' && e.button !== 0) return;
                                         //[수정][12-09][검정펜 버튼 눌렀을 때 그리기]
@@ -28,7 +29,7 @@ export function initDrawLayer(p, drawCanvas) {
             if (state.selectMode === 'marker') {
                 ctx.strokeStyle = state.MARKER_STROKE_COLOR;
                 ctx.globalAlpha = 1.0; 
-                ctx.lineWidth = state.state.markerCurrentThicknessPx; // 자유 필기 모드 전용 두께 사용
+                ctx.lineWidth = state.markerCurrentThicknessPx; // [오타 수정][12-14]자유 필기 모드 전용 두께 사용
             } else { // 형광펜 모드
                 ctx.strokeStyle = state.HIGHLIGHT_COLORS[state.selectedTag] || state.HIGHLIGHT_COLORS['기본'];
                 ctx.globalAlpha = 1.0; 
@@ -111,6 +112,10 @@ export function initDrawLayer(p, drawCanvas) {
     };
     drawCanvas.addEventListener('pointerup', handlePointerEnd);
     drawCanvas.addEventListener('pointercancel', handlePointerEnd);
+    //[116-117추가][12-14][선 이어짐 보강]
+    drawCanvas.addEventListener('pointerleave', handlePointerEnd);
+    drawCanvas.addEventListener('lostpointercapture', handlePointerEnd);
+
 }
 
 // [함수전체수정][12-11]
