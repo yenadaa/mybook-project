@@ -9,12 +9,15 @@ export let highlights = []; // Firestore에서 받아온 데이터로 채워짐
 export let undoStack = []; // 로컬 Undo/Redo 스택 (Firestore와 별개)
 export let redoStack = []; // 로컬 Undo/Redo 스택
 
-export let selectMode = 'none'; // 'pen' | 'eraser' | 'ocrSelect' | 'none'
+export let selectMode = 'none'; // 'pen'| 'marker' | 'eraser' | 'ocrSelect' | 'none'
 export let selectedTag = '기본';
 export let searchIndex = [];
 export let searchHits = [];
 export let searchCursor = -1;
 export let bookmarks = []; // 로컬 스토리지 사용
+//[18~19 추가][12-14][지우개 타켓 상태 추가]
+export let eraserTarget = 'pen'; // 'pen' | 'marker' | 'both'
+export function setEraserTarget(t) { eraserTarget = t; }
 
 // OCR
 //[복구수정][12-03][테서랙트에 관한 코드]

@@ -272,6 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     state.els.eraserBtn?.addEventListener('click', () => {
         drawing.flushPendingIfAny();
+        state.setEraserTarget('pen'); //[추가][12-14][형광펜만 지우는 지우개]
         state.setMode(state.selectMode === 'eraser' ? 'none' : 'eraser');
         toggleMarkerSettingModal(false); // [12-14][추가][마커 모달 닫기]
     });
@@ -307,6 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     state.elsMarkerModal.eraserBtn?.addEventListener('click', () => {
         drawing.flushPendingIfAny();
+        state.setEraserTarget('marker');//[추가][12-14][자유필기만 지우는 지우개]
         // 지우개 모드로 전환하고 모달 닫기 (모달을 통한 지우개 활성화)
         state.setMode('eraser');
         toggleMarkerSettingModal(false);
