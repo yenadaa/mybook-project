@@ -700,5 +700,4 @@ input[type="range"] { accent-color: var(--accent); }
   .toolbar .group, .toolbar button {
     flex-shrink: 0 !important;
     white-space: nowrap !important;
-  }
-}
+  }}

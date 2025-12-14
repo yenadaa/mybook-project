@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MyBook Home</title>
+  <link rel="stylesheet" href="/fronted/css/home.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">본문 바로가기</a>
+
+  <header class="topbar" role="banner">
+    <div class="topbar__left">
+      <div class="identity" aria-label="로그인 정보">
+        <div class="identity__label">로그인 상태</div>
+        <div class="identity__value" id="userEmail">-</div>
+      </div>
+
+      <div class="streak" aria-live="polite">
+        연속 학습 <strong id="streakDays">0</strong>일째
+      </div>
+    </div>
+
+    <div class="topbar__right">
+      <button type="button" class="icon-btn" id="alarmBtn" aria-pressed="false" aria-label="알림 토글">
+        알림 꺼짐
+      </button>
+
+      <a class="btn btn--primary" href="/index.html" role="button" aria-label="문서 업로드로 이동">
+        문서 업로드
+      </a>
+    </div>
+  </header>
+
+  <main id="main" class="container" role="main">
+    <!-- 오늘의 학습 -->
+    <section class="card card--hero" aria-labelledby="todayTitle">
+      <div class="card__head">
+        <h1 id="todayTitle" class="card__title">오늘의 학습</h1>
+        <div class="card__actions">
+          <button type="button" class="btn btn--primary" id="startTodayBtn">
+            오늘 복습 시작
+          </button>
+        </div>
+      </div>
+
+      <div class="hero-grid">
+        <div class="hero-left">
+          <div class="doc-now" aria-label="현재 학습 중 문서">
+            <div class="doc-now__meta">
+              <div class="doc-now__label">현재 학습 중</div>
+              <div class="doc-now__title" id="currentDocTitle">-</div>
+              <div class="doc-now__sub" id="currentDocSub">-</div>
+            </div>
+
+            <div class="progress" aria-label="학습 진도">
+              <div class="progress__row">
+                <span class="progress__label">학습 진도</span>
+                <span class="progress__value" id="currentProgressText">0%</span>
+              </div>
+              <div class="progress__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div class="progress__fill" id="currentProgressFill" style="width:0%"></div>
+              </div>
+              <div class="progress__hint" id="currentNextStep">다음 추천: -</div>
+
+              <div class="milestones" aria-label="학습 단계">
+                <div class="milestone" id="msRead" aria-label="1차 학습">1차 학습</div>
+                <div class="milestone" id="msQuiz" aria-label="퀴즈">퀴즈</div>
+                <div class="milestone" id="msWhite" aria-label="백지 복습">백지 복습</div>
+              </div>
+            </div>
+
+            <div class="quick-actions" aria-label="오늘의 추천 액션">
+              <button type="button" class="btn btn--ghost" data-action="highlight-quiz">
+                하이라이트 퀴즈
+              </button>
+              <button type="button" class="btn btn--ghost" data-action="full-quiz">
+                전체 문서 퀴즈
+              </button>
+              <button type="button" class="btn btn--ghost" data-action="whiteboard">
+                백지 복습
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-right">
+          <div class="block">
+            <h2 class="block__title">오늘의 목표</h2>
+            <p class="block__text" id="todayGoal">-</p>
+          </div>
+
+          <div class="block">
+            <h2 class="block__title">놓친 키워드</h2>
+            <p class="muted" id="missedHint">오답/취약 키워드가 생기면 여기에 자동으로 쌓여요.</p>
+            <ul class="chips" id="missedKeywords"></ul>
+          </div>
+
+          <div class="block">
+            <h2 class="block__title">복습 메커니즘</h2>
+            <ol class="mini-steps">
+              <li>1차 학습(정독 & 구조화) → PDF 뷰어 + 하이라이트 + 태그 + 노트 + OCR</li>
+              <li>이해 확인 & 즉시 복습 → 하이라이트 퀴즈 + 전체 문서 퀴즈 + 챗봇 Q&A</li>
+              <li>기억 강화 & 시험 직전 → 백지 복습 + AI 채점 + 심화 질문</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 문서 대시보드 -->
+    <section class="card" aria-labelledby="docsTitle">
+      <div class="card__head">
+        <h2 class="card__title" id="docsTitle">내 문서</h2>
+        <button type="button" class="btn btn--text" id="showAllBtn">미완료 모두 보기</button>
+      </div>
+
+      <div class="docs-toolbar" role="region" aria-label="문서 필터/검색">
+        <div class="tabs" role="tablist" aria-label="문서 분류 탭">
+          <button class="tab is-active" role="tab" aria-selected="true" data-tab="incomplete">미완료</button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="recent">최근</button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="done">완료</button>
+        </div>
+
+        <label class="search">
+          <span class="sr-only">문서 검색</span>
+          <input type="search" id="docSearch" placeholder="문서명 검색 (예: 가설검정)" autocomplete="off" />
+        </label>
+      </div>
+
+      <div class="grid" id="docsGrid" aria-label="문서 목록"></div>
+    </section>
+
+    <!-- AI 학습 도우미 -->
+    <section class="card" aria-labelledby="aiTitle">
+      <div class="card__head">
+        <h2 class="card__title" id="aiTitle">AI 학습 도우미</h2>
+      </div>
+
+      <div class="ai">
+        <div class="ai__box">
+          <div class="ai__label">지금 가장 효율 좋은 액션</div>
+          <ul class="list" id="aiActionList"></ul>
+        </div>
+
+        <div class="ai__box">
+          <div class="ai__label">추천 루틴(30분)</div>
+          <ol class="routine" id="aiRoutine"></ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- 캘린더 -->
+    <section class="card" aria-labelledby="calTitle">
+      <div class="card__head">
+        <h2 class="card__title" id="calTitle">다가오는 일정 & 복습 계획</h2>
+        <button type="button" class="btn btn--secondary" id="addEventBtn">일정 추가</button>
+      </div>
+
+      <div class="calendar">
+        <div class="calendar__header">
+          <button type="button" class="btn btn--ghost" id="prevMonthBtn" aria-label="이전 달">이전</button>
+          <div class="calendar__month" id="monthLabel">-</div>
+          <button type="button" class="btn btn--ghost" id="nextMonthBtn" aria-label="다음 달">다음</button>
+        </div>
+
+        <div class="calendar__grid" id="calendarGrid" aria-label="달력"></div>
+
+        <div class="calendar__side">
+          <div class="calendar__side-title" id="selectedDateLabel">선택 날짜: -</div>
+          <ul class="list" id="eventList"></ul>
+          <div class="hint-box" id="reviewHintBox" aria-label="복습 추천">
+            <div class="hint-box__title">복습 추천</div>
+            <div class="hint-box__text" id="reviewHintText">날짜를 선택하면, 문서 진행도 기반 추천이 표시됩니다.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 미완료 모두 보기 모달 -->
+  <dialog class="modal" id="allDocsModal" aria-label="미완료 문서 목록">
+    <div class="modal__head">
+      <div class="modal__title">미완료 문서</div>
+      <button type="button" class="btn btn--text" id="closeAllDocsBtn">닫기</button>
+    </div>
+
+    <div class="modal__filters">
+      <label class="select">
+        <span class="select__label">필터</span>
+        <select id="incompleteFilter">
+          <option value="all">전체(100% 미만)</option>
+          <option value="read">정독 미완료(0~39%)</option>
+          <option value="quiz">퀴즈 미완료(40~74%)</option>
+          <option value="whiteboard">백지 복습 미완료(75~99%)</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="modal__body">
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>문서명</th>
+              <th>진도</th>
+              <th>다음 추천</th>
+              <th>마지막 학습</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="allDocsTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 일정 추가 모달 -->
+  <dialog class="modal" id="eventModal" aria-label="일정 추가">
+    <div class="modal__head">
+      <div class="modal__title">일정 추가</div>
+      <button type="button" class="btn btn--text" id="closeEventBtn">닫기</button>
+    </div>
+
+    <form class="modal__body form" id="eventForm">
+      <label class="field">
+        <span class="field__label">날짜</span>
+        <input type="date" id="eventDate" required />
+      </label>
+
+      <label class="field">
+        <span class="field__label">제목</span>
+        <input type="text" id="eventTitle" maxlength="50" required placeholder="예: 통계학 퀴즈 복습" />
+      </label>
+
+      <div class="form__actions">
+        <button type="submit" class="btn btn--primary">저장</button>
+        <button type="button" class="btn btn--ghost" id="cancelEventBtn">취소</button>
+      </div>
+    </form>
+  </dialog>
+
+<script src="/progress_bootstrap.js"></script>
+<script src="/fronted/js/ui.js"></script>
+<script src="/fronted/js/calendar.js"></script>
+<script src="/fronted/js/home.js"></script>
+
+</body>
+</html>

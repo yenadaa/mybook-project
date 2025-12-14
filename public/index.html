@@ -19,6 +19,10 @@
 <body>
   <div class="toolbar"><!--[수정][11-25][app에서 빼고 상단으로 이동하여 css로 fix]-->
     <div class="group">
+<<<<<<< HEAD
+=======
+      <button id="btnGoHome" class="nav-home-btn" type="button" title="홈으로 이동">홈으로</button>
+>>>>>>> 22893a8 (feat: home 업데이트(로직 연결중))
       <span id="pipeline-status" style="font-size: 12px; color: var(--muted); margin-right: 8px;">
           문서 대기 중...
         </span><!-- 로딩 상태 표시 -->
@@ -238,5 +242,18 @@
   <script src="viewer-main.js" type="module" defer></script>
   <script src="doc_firebase.js" type="module" defer></script>
   <script src="main.js" type="module" defer></script>
+<<<<<<< HEAD
+=======
+  <script src="/progress_bootstrap.js" defer></script>
+  <script src="/action_bridge.js" defer></script>
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const b = document.getElementById("btnGoHome");
+    if (!b) return;
+    b.addEventListener("click", () => location.href = "/home.html");
+  });
+</script>
+
+>>>>>>> 22893a8 (feat: home 업데이트(로직 연결중))
 </body>
 </html>

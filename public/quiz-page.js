@@ -322,11 +322,7 @@ async function handleSubmitSession() {
         console.log("✅ 채점 완료:", result.data);
         const { correctCount, totalCount, message } = result.data;
 
-        // 4. 결과 알림
-        alert(`🎉 채점 완료!\n\n맞은 개수: ${correctCount} / ${totalCount}\n\n${message}`);
 
-        // 5. 이동 (홈으로)
-        window.location.href = '/'; 
 
     } catch (error) {
         console.error("제출 실패:", error);
@@ -350,4 +346,40 @@ function showError(msg) {
 }
 
 // DOM 로드 완료 시 시작
+<<<<<<< HEAD
 document.addEventListener('DOMContentLoaded', loadQuiz);
+=======
+document.addEventListener('DOMContentLoaded', loadQuiz);
+// ===== [추가] 퀴즈 결과를 localStorage progress에 저장 =====
+function saveQuizResultToProgress(docId, score, wrongQuestions) {
+  const PROGRESS_KEY = "mybook:progress:v1";
+  const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) || "{}");
+  const doc = progress[docId] || { docId, missedKeywords: [] };
+
+  doc.quiz = {
+    done: score >= 80,
+    lastScore: score,
+    wrongQuestions
+  };
+
+  // 놓친 키워드: (질문+정답)에서 단어 뽑기(간단 버전)
+  const STOP_WORDS = new Set(["무엇", "의미", "설명", "이란", "하는", "것은", "다음", "중", "옳은", "틀린"]);
+  const keywords = new Set(doc.missedKeywords || []);
+
+  wrongQuestions.forEach(wq => {
+    const combined = `${wq.question || ""} ${wq.correctAnswer || ""}`;
+    combined
+      .replace(/[^\w가-힣 ]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length >= 2 && !STOP_WORDS.has(w))
+      .forEach(w => keywords.add(w));
+  });
+
+  doc.missedKeywords = Array.from(keywords).slice(0, 50);
+  doc.lastActivityAt = Date.now();
+
+  progress[docId] = doc;
+  localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
+}
+// ===== [추가 끝] =====
+>>>>>>> 22893a8 (feat: home 업데이트(로직 연결중))
