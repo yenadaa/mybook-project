@@ -1,31 +1,29 @@
 {
-
-"functions": [
-{
-"source": "functions",
-"codebase": "default",
-"runtime": "python311",
-"ignore": [
-"venv",
-".git",
-"firebase-debug.log",
-"firebase-debug.*.log"
-]
-}
-]
-"hosting": {
-"public": "public",
-"ignore": [
-"firebase.json",
-"**/.*",
-"**/node_modules/**"
-],
-"rewrites": [
-  {
-    "source": "**",
-    "destination": "/index.html"
-}
-],
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "runtime": "python311",
+      "ignore": [
+        "venv",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    }
+  ],
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      { "source": "/", "destination": "/home.html" },
+      { "source": "/home", "destination": "/home.html" },
+      { "source": "**", "destination": "/index.html" }
+    ],
     "headers": [
       {
         "source": "**",
@@ -39,17 +37,3 @@
     ]
   }
 }
-
-  "hosting": {
-    "public": "public",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      { "source": "/", "destination": "/home.html" },
-      { "source": "/home", "destination": "/home.html" }
-    ]
-  }
-
