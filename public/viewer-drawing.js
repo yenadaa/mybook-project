@@ -23,13 +23,7 @@ export function initDrawLayer(p, drawCanvas) {
 
         // [추가][12-14][마우스 오른쪽/휠 클릭 방지]
         if (e.pointerType === 'mouse' && e.button !== 0) return;
-
-        //[12-14][추가][이전 stroke 흔적 완전 제거 (이어짐 방지 핵심)]
-        st.drawing = false;
-        st.path = [];
-        st.pointerId = null;
-
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
+//[중복 초기화 삭제][12-15]
                                         //[수정][12-09][검정펜 버튼 눌렀을 때 그리기]
         if (state.selectMode === 'pen' || state.selectMode === 'marker') {
             st.pointerId = e.pointerId;
@@ -78,14 +72,18 @@ export function initDrawLayer(p, drawCanvas) {
         if (!state.pdfDoc) return;//[추가][12-14]
         if (!st.drawing) return; //[추가][12-14]
         if (st.pointerId !== e.pointerId) return;
-        if (e.pointerType === 'mouse' && e.buttons !== 1) return;
+        if (e.pointerType === 'mouse' && (e.buttons & 1) === 0) return;//[수정][12-15]
 
         const ctx = drawCanvas.getContext('2d');    //[수정][12-09][마우스 움직였을 때 선을 계속 그리는 조건에 검정펜 추가]
+
         if ((state.selectMode === 'pen' || state.selectMode === 'marker') && st.drawing) {
             const pos = getPos(e);
             st.path.push(pos);
             ctx.lineTo(pos.x, pos.y);
             ctx.stroke();
+            //[12-15][추가][path를 끊고 현재 점부터 다시 시작]
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
         } else if (state.selectMode === 'ocrSelect' && st.startOcr && state.ocrSelectionRect) {
             const currentPos = getPos(e);
             const x = Math.min(st.startOcr.x, currentPos.x);
@@ -97,6 +95,8 @@ export function initDrawLayer(p, drawCanvas) {
     });
     //[함수 전체 수정][12-14][선 이어짐 방지]
     const handlePointerEnd = (e) => {
+        // 그리는 중(버튼 눌림/펜 압력)인데 pointerleave면 종료 처리 안 함
+        if (e.type === 'pointerleave' && (e.buttons === 1 || e.pressure > 0)) return;
         const isEndingOurPointer = (st.pointerId === e.pointerId);
         const hasActivePointer = (st.pointerId !== null);
 
@@ -144,8 +144,7 @@ export function initDrawLayer(p, drawCanvas) {
     };
     drawCanvas.addEventListener('pointerup', handlePointerEnd);
     drawCanvas.addEventListener('pointercancel', handlePointerEnd);
-    //[116-117추가][12-14][선 이어짐 보강]
-    drawCanvas.addEventListener('pointerleave', handlePointerEnd);
+    //[추가][12-14][선 이어짐 보강]
     drawCanvas.addEventListener('lostpointercapture', handlePointerEnd);
 
 }
