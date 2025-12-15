@@ -7,7 +7,16 @@ import { extractAndRunOcr, removeOcrSelectionRect } from './viewer-ocr.js';
 const drawState = new Map();
 
 export function initDrawLayer(p, drawCanvas) {
-    const st = { drawing: false, path: [], startErasher: null, startOcr: null, pointerId: null, lastPos: null}; //[추가][12-15][직전 좌표 저장용]
+    const st = { 
+        drawing: false, 
+        path: [], 
+        pointerId: null,
+        // 지우개/OCR용
+        startEraser: null, // startErasher 오타 수정
+        startOcr: null,
+        // [핵심 추가] 부드러운 곡선을 위한 좌표 저장소 (getCoalescedEvents용)
+        points: [] 
+    };
     drawState.set(p, st);
     const getPos = (e) => { 
         const rect = drawCanvas.getBoundingClientRect(); 
@@ -16,34 +25,37 @@ export function initDrawLayer(p, drawCanvas) {
             y: e.clientY - rect.top 
         }; 
     };
+        // [헬퍼] 중간점 계산 (부드러운 곡선용)
+    const getMidPoint = (p1, p2) => {
+        return {
+            x: p1.x + (p2.x - p1.x) / 2,
+            y: p1.y + (p2.y - p1.y) / 2
+        };
+    };
 
     drawCanvas.addEventListener('pointerdown', (e) => {
         if (!state.pdfDoc) return;
         // [추가][12-14][손가락 터치로는 필기 시작 안 함 (펜/마우스만 허용)]
         if (e.pointerType === 'touch') return;
-        // [추가][12-14]][이미 그리고 있는 중이면 다운 무시 (끊김 방지 핵심)]
-        if (st.drawing) return;
-
-        // [추가][12-14][이미 다른 포인터로 작업 중이면 이 다운 이벤트는 무시(끊김 방지 핵심)]
-        if (st.pointerId !== null && st.pointerId !== e.pointerId) return;
-
-        // [추가][12-14][마우스 오른쪽/휠 클릭 방지]
+        // [수정][12-16]][이미 그리고 있는 중이면 다운 무시 (끊김 방지 핵심)]
+        if (st.drawing || (st.pointerId !== null && st.pointerId !== e.pointerId)) return;
         if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+        st.pointerId = e.pointerId;
+        try { drawCanvas.setPointerCapture(e.pointerId); } catch (err) {}
         //[추가][12-15]
         const pos = getPos(e);
                                         //[수정][12-09][검정펜 버튼 눌렀을 때 그리기]
-        if (state.selectMode === 'pen' || state.selectMode === 'marker') {
-            st.pointerId = e.pointerId;
-            try { drawCanvas.setPointerCapture(e.pointerId); } catch (err) {}
-            
+        if (state.selectMode === 'pen' || state.selectMode === 'marker') {            
             st.drawing = true;
-            st.path = [pos];
-            st.lastPos = pos;
+            st.path = [pos];// 곡선 계산용 점 배열 초기화
+            st.lastPos = pos;// 데이터 저장용 전체 경로 초기화
 
             const ctx = drawCanvas.getContext('2d');
             ctx.lineCap = 'round'; 
             ctx.lineJoin = 'round';
             ctx.globalCompositeOperation = 'source-over';//[12-14][추가][(이전 모드 설정이 남아 펜이 이전 모드처럼 작동하는 오류 방지)]
+            
             // [수정][12-11][모드에 따라 독립적인 색상/두께 상태 변수를 사용]
             if (state.selectMode === 'marker') {
                 ctx.strokeStyle = state.MARKER_STROKE_COLOR;
@@ -54,30 +66,26 @@ export function initDrawLayer(p, drawCanvas) {
                 ctx.globalAlpha = 1.0; 
                 ctx.lineWidth = state.currentThicknessPx; // 형광펜 전용 두께 사용(기존 방식)
             }
+            // [핵심 수정] 무조건 경로를 새로 시작 (이전 획과 연결 방지)
             ctx.beginPath();
+
+            // 점만 찍었을 때를 위해 점 그리기
+            ctx.arc(pos.x, pos.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath(); // 다시 경로 열기
             ctx.moveTo(pos.x, pos.y);
-            //[추가][12-15]
-            ctx.lineTo(pos.x, pos.y);
-            ctx.stroke();
+
         // --- B. 지우개 모드 ---
         } else if (state.selectMode === 'eraser') {
-            st.pointerId = e.pointerId;
-            try { drawCanvas.setPointerCapture(e.pointerId); } catch (err) { console.warn("Could not set pointer capture:", err); }
             st.startEraser = getPos(e);
         // --- C. OCR 모드 ---
         } else if (state.selectMode === 'ocrSelect') {
-            st.pointerId = e.pointerId;
-            try { drawCanvas.setPointerCapture(e.pointerId); } catch (err) {}
             st.startOcr = getPos(e);
             state.setOcrCurrentPage(p);
-            removeOcrSelectionRect(); // (ocr.js)
-
+            removeOcrSelectionRect(); 
             const rect = document.createElement('div');
             rect.className = 'ocr-selection-rect';
-            Object.assign(rect.style, {
-                left: `${st.startOcr.x}px`, top: `${st.startOcr.y}px`,
-                width: '0px', height: '0px'
-            });
+            Object.assign(rect.style, { left: `${st.startOcr.x}px`, top: `${st.startOcr.y}px`, width: '0px', height: '0px' });
             drawCanvas.parentNode.appendChild(rect);
             state.setOcrSelectionRect(rect);
         }
@@ -85,44 +93,65 @@ export function initDrawLayer(p, drawCanvas) {
     // 2. Pointer Move (그리는 중)
     drawCanvas.addEventListener('pointermove', (e) => {
         if (!state.pdfDoc) return;//[추가][12-14]
-        // 포인터 ID가 다르면 무시 (멀티터치 오작동 방지)
-        if (st.pointerId !== null && st.pointerId !== e.pointerId) return;
-        if (e.pointerType === 'mouse' && (e.buttons & 1) === 0) return;//[수정][12-15]
-
-        const ctx = drawCanvas.getContext('2d');    //[수정][12-09][마우스 움직였을 때 선을 계속 그리는 조건에 검정펜 추가]
-        const currentPos = getPos(e);
+        if (st.pointerId !== e.pointerId) return;
 
         // --- A. 펜/마커 그리기 ---
         if ((state.selectMode === 'pen' || state.selectMode === 'marker') && st.drawing) {
-            // [중요] 끊김없는 그리기를 위한 로직
-            // 1. Path 시작
-            ctx.beginPath();
-            // 2. 직전 좌표로 이동 (없으면 현재 좌표)
-            if (st.lastPos) {
-                ctx.moveTo(st.lastPos.x, st.lastPos.y);
-            } else {
-                ctx.moveTo(currentPos.x, currentPos.y);
+            const ctx = drawCanvas.getContext('2d');
+  // [핵심] getCoalescedEvents: 브라우저가 화면 갱신 사이에 놓친 미세한 움직임까지 모두 가져옴
+            const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+
+            for (let ev of events) {
+                const p2 = getPos(ev);
+                st.points.push(p2);
+                st.path.push(p2); // 저장용 데이터에도 추가
+
+                // 점이 3개 이상 모이면 곡선 그리기 (Quadratic Curve)
+                if (st.points.length >= 3) {
+                    const lastTwo = st.points.slice(-2);
+                    const p0 = st.points[st.points.length - 3];
+                    const p1 = lastTwo[0];
+                    // p1과 p2의 중간점 계산
+                    const mid = getMidPoint(p0, p1);
+
+                    // 곡선 그리기 (이전 중간점 ~ 현재 중간점)
+                    // ctx.quadraticCurveTo(controlPoint.x, controlPoint.y, endPoint.x, endPoint.y)
+                    // 여기서는 단순화하여 lineTo 대신 부드러운 연결을 시도
+                    
+                    // 하지만 성능과 반응성을 위해 단순히 lineTo를 촘촘하게 찍는 방식이 더 안정적일 수 있음.
+                    // 위 영상의 오류(직선 연결)를 막기 위해 가장 확실한 방법은
+                    // coalesced event를 순회하며 lineTo를 수행하는 것입니다.
+                }
             }
-            // 3. 현재 좌표까지 선 긋기
-            ctx.lineTo(currentPos.x, currentPos.y);
-            ctx.stroke();
 
-            // 4. 상태 업데이트
-            st.path.push(currentPos); // 전체 데이터용 저장
-            st.lastPos = currentPos;  // 다음 프레임용 직전 좌표 갱신
+            // [수정] 복잡한 곡선 알고리즘 대신 Coalesced Events를 이용한 촘촘한 lineTo 방식 적용
+            // 이유: 곡선 알고리즘은 계산 비용 때문에 아주 빠른 필기에서 딜레이가 생길 수 있음.
+            // Coalesced Events는 브라우저가 제공하는 실제 경로이므로 이것만 잘 이어도 매우 부드러움.
+            
+            // 루프 재실행 (위의 for문은 points 수집용, 그리기용으로 다시 순회)
+            for (let ev of events) {
+                const point = getPos(ev);
+                ctx.lineTo(point.x, point.y);
+                ctx.stroke();
+                
+                // [매우 중요] stroke 후 다시 beginPath/moveTo를 하지 않으면
+                // 다음 프레임에서 거대한 다각형이 그려질 수 있음.
+                // 캔버스 상태 유지를 위해 아래 패턴 사용:
+                ctx.beginPath();
+                ctx.moveTo(point.x, point.y);
+            }
 
-        // --- B. OCR 선택 박스 그리기 ---
+        // B. OCR 선택 박스
         } else if (state.selectMode === 'ocrSelect' && st.startOcr && state.ocrSelectionRect) {
+            const currentPos = getPos(e);
             const x = Math.min(st.startOcr.x, currentPos.x);
             const y = Math.min(st.startOcr.y, currentPos.y);
             const width = Math.abs(st.startOcr.x - currentPos.x);
             const height = Math.abs(st.startOcr.y - currentPos.y);
-            Object.assign(state.ocrSelectionRect.style, { 
-                left: `${x}px`, top: `${y}px`, 
-                width: `${width}px`, height: `${height}px` 
-            });
+            Object.assign(state.ocrSelectionRect.style, { left: `${x}px`, top: `${y}px`, width: `${width}px`, height: `${height}px` });
         }
     });
+
     // 3. Pointer Up / Cancel / LostCapture (종료)
     //[함수 전체 수정][12-15][선 이어짐 방지]
     const handlePointerEnd = (e) => {
@@ -130,16 +159,16 @@ export function initDrawLayer(p, drawCanvas) {
         // 오직 우리가 시작한 포인터 ID일 때만 종료 처리
         if (st.pointerId !== e.pointerId) return;
 
-        const isMarker = (state.selectMode === 'marker');
 
         if (st.drawing) {
-            // [A] 펜 스트로크 종료 처리
+            // 마지막 점까지 처리
+            const ctx = drawCanvas.getContext('2d');
+            ctx.closePath(); // 경로 닫기 아님, 단순히 상태 종료 의미
             finishStroke(p, st);
         } else if (state.selectMode === 'eraser' && st.startEraser) {
-            // [B] 지우개 처리
             finishEraser(p, st, getPos(e));
         } else if (state.selectMode === 'ocrSelect' && st.startOcr) {
-            // [C] OCR 처리
+            // OCR 처리 로직
             const endPos = getPos(e);
             const startPos = st.startOcr;
             if (Math.abs(startPos.x - endPos.x) > 5 || Math.abs(startPos.y - endPos.y) > 5) {
@@ -155,14 +184,14 @@ export function initDrawLayer(p, drawCanvas) {
             }
         }
 
-        // [공통] 캡처 해제 및 상태 초기화
         if (drawCanvas.hasPointerCapture(e.pointerId)) {
             try { drawCanvas.releasePointerCapture(e.pointerId); } catch (err) {}
         }
-        // 어떤 경우든 무조건 상태 초기화 (선 이어짐 방지 핵심)
+        
+        // 상태 완전 초기화
         st.drawing = false;
         st.path = [];
-        st.lastPos = null; // 초기화
+        st.points = [];
         st.startEraser = null;
         st.startOcr = null;
         st.pointerId = null;
@@ -174,13 +203,10 @@ export function initDrawLayer(p, drawCanvas) {
 
 }
 
-// [함수전체수정][12-15]
+// [함수전체수정][12-15]스트로크 저장 로직
 function finishStroke(p, st) {
-        if (!st.path || st.path.length < 2) { 
-        st.path = []; 
-        st.lastPos = null;
-        return; 
-    }
+        if (!st.path || st.path.length < 2) return;
+
     const wrap = document.querySelector(`.page-wrap[data-page="${p}"]`);
     const draw = wrap?.querySelector('canvas.draw-layer');
     if (!draw) return;
@@ -188,16 +214,16 @@ function finishStroke(p, st) {
     const w = parseFloat(draw.style.width);
     const h = parseFloat(draw.style.height);
     if (!w || !h) return;
-
+    // 데이터 저장용 경로 정규화
     const normPath = { points: st.path.map(pt => ({ x: pt.x / w, y: pt.y / h })) };
     
     // 모드에 따라 태그, 색상, 두께를 독립적으로 설정
     const isMarker = (state.selectMode === 'marker');
     
     // 1. 독립 변수 결정
-    const strokeTag = isMarker ? state.MARKER_STROKE_TAG : state.selectedTag;
+   const strokeTag = isMarker ? state.MARKER_STROKE_TAG : state.selectedTag;
     const strokeColor = isMarker ? state.MARKER_STROKE_COLOR : (state.HIGHLIGHT_COLORS[state.selectedTag] || state.HIGHLIGHT_COLORS['기본']);
-    const thicknessPx = isMarker ? state.markerCurrentThicknessPx : state.currentThicknessPx; //[변수 수정][12-14][독립 두께 사용]
+    const thicknessPx = isMarker ? state.markerCurrentThicknessPx : state.currentThicknessPx;//[변수 수정][12-14][독립 두께 사용]
     
     // 2. 텍스트 캡처 분리 (성능 및 로직 독립성)
     const bb = utils.bboxOfPoints(st.path);
@@ -240,7 +266,6 @@ function finishStroke(p, st) {
 function finishEraser(p, st, end) {
     if (!st.startEraser) return;
     const start = st.startEraser; 
-
      // 너무 작은 움직임은 무시 (클릭 실수 방지)
     if (Math.abs(end.x - start.x) < 2 && Math.abs(end.y - start.y) < 2) return;
     
