@@ -13,192 +13,12 @@ import { httpsCallable, functions } from './A.firebase.js';
 import { PROMPTS } from './viewer-personas.js';
 console.log("✅ main.js 스크립트 파일 로드됨");
 
-// ⭐️ [복구] 챗봇 변수
-let chatbotInitialized = false;
-let chatHistory = [];
-
-// DOM 로드 후 UI 이벤트 핸들러 연결
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("✅ main.js DOMContentLoaded 이벤트 발생");
-
-    const modalFullDocBtn = document.getElementById('modal-full-doc-btn');
-    const modalHighlightsBtn = document.getElementById('modal-highlights-btn');     
-    const quizModalOverlay = document.getElementById("quiz-modal-overlay");
-    const quizModalBody = document.getElementById("quiz-modal-body");
-    const quizCloseBtn = document.getElementById("quiz-close-btn");
-
-    // --- 퀴즈 생성 로직 ---
-    modalHighlightsBtn?.addEventListener('click', async () => {
-        const bookId = getCurrentBookId();
-        const user = getCurrentUser();
-
-        if (!bookId || !user) {
-            console.warn("하이라이트 퀴즈 생성 중단: bookId 또는 user가 없습니다.");
-            return alert("퀴즈를 만들 문서를 먼저 열어주세요.");
-        }
-
-        showQuizModal(null, true, false, "미리 생성된 하이라이트 퀴즈 로드 중...");
-    
-        try {
-            const generateCustomReview = httpsCallable(functions, 'generateCustomReview');
-            const result = await generateCustomReview({ bookId });
-            const resultData = result.data; 
-
-            // ⭐️ [디버깅용 로그 추가]
-            console.log("🔥 전체 데이터:", resultData);
-            console.log("🔥 Discussion 데이터:", resultData?.review?.discussion);
-
-            // 만약 discussion 데이터가 있다면 첫 번째 문제의 힌트도 찍어보기
-            if (resultData?.review?.discussion?.length > 0) {
-                console.log("🔥 첫 번째 문제 힌트:", resultData.review.discussion[0].hint);
-            }
-
-            const items = [];
-            if (resultData?.review?.ox) {
-                resultData.review.ox.forEach(it =>
-                    items.push({ type: 'ox', q: it.q, answer: String(it.answer), sources: it.sources || [], tags: it.tags || [] })
-                );
-            }
-            if (resultData?.review?.short) {
-                resultData.review.short.forEach(it =>
-                    items.push({ type: 'short', q: it.q, answer: it.answer || "", sources: it.sources || [], tags: it.tags || [] })
-                );
-            }
-            if (resultData?.review?.discussion) {
-                resultData.review.discussion.forEach(it =>items.push({ type: 'discussion', q: it.q, hint: it.hint || '힌트가 없습니다.', sources: it.sources || [], tags: it.tags || [] }));
-            }
-    
-            const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
-            const saved = await saveQuizItems({ bookId, scope: 'highlight', items });
-    
-            showFullDocQuiz(resultData, saved.data);
-            
-        } catch (error) {
-            console.error("하이라이트 퀴즈 생성 오류:", error);
-            let errorMessage = error.message;
-            if (error.code === 'functions/deadline-exceeded') {
-                errorMessage = "AI 서버가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.";
-            } else if (error.code === 'functions/aborted' || error.code === 'functions/not-found') {
-                errorMessage = "PDF가 아직 처리 중입니다. 1~2분 후 다시 시도해 주세요.";
-            }
-            showQuizModal(null, false, true, `오류가 발생했습니다: ${errorMessage}`);
-        }
-    });
-
-    modalFullDocBtn?.addEventListener('click', async () => {        
-        const bookId = getCurrentBookId();
-        const user = getCurrentUser();
-        if (!bookId || !user) {
-            console.warn("전체 문서 퀴즈 생성 중단: bookId 또는 user가 없습니다.");
-            return;
-        }
-
-        showQuizModal(null, true, false, "미리 생성된 전체 요약/퀴즈 로드 중...");
-        
-        try {
-            const generateFullDocQuiz = httpsCallable(functions, 'generateFullDocQuiz');
-            const result = await generateFullDocQuiz({ bookId });
-            const data = result.data; 
-
-           const items = [];
-           if (data?.review?.ox) {
-             data.review.ox.forEach(it => items.push({ type: 'ox', q: it.q, answer: String(it.answer), sources: it.sources || [], tags: it.tags || [] }));
-           }
-           if (data?.review?.short) {
-             data.review.short.forEach(it => items.push({ type: 'short', q: it.q, answer: it.answer || "", sources: it.sources || [], tags: it.tags || [] }));
-           }
-           if (data?.review?.discussion) {
-             data.review.discussion.forEach(it => items.push({ type: 'discussion', q: it.q, hint: it.hint, sources: it.sources || [], tags: it.tags || [] }));//12.07 수정
-           }
-
-           const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
-           const saved = await saveQuizItems({ bookId, scope: 'full', items });
-           console.log('saveQuizItems:', saved.data);
-
-           showFullDocQuiz(data, saved.data);
-
-        } catch (error) {
-            console.error("전체 문서 퀴즈 생성 과정 오류:", error);
-            let errorMessage = error.message;
-            if (error.code === 'functions/deadline-exceeded') {
-                errorMessage = "AI 서버가 응답하지 않습니다. (시간 초과) 잠시 후 다시 시도해 주세요.";
-            } else if (error.code === 'functions/aborted' || error.code === 'functions/not-found') {
-                errorMessage = "PDF가 아직 처리 중입니다. 1~2분 후 다시 시도해 주세요.";
-            }
-            showQuizModal(null, false, true, `오류가 발생했습니다: ${errorMessage}`);
-        }
-    });
-
-    // --- 퀴즈 결과 팝업 관련 이벤트 핸들러 ---
-    quizCloseBtn?.addEventListener("click", hideQuizModal);
-    quizModalOverlay?.addEventListener("click", (e) => {
-        if (e.target === quizModalOverlay) hideQuizModal();
-    });
-
-    // 퀴즈 정답 확인 로직
-    quizModalBody?.addEventListener('click', (e) => {
-        const target = e.target;
-        const optionLI = target.closest('li');
-
-        // [추가][12-01][힌트 버튼 클릭 로직]
-        // [12.07]💡 [수정] 힌트 버튼 클릭 시 토글
-        if (target.matches('.hint-button')) {
-            const hintContent = target.nextElementSibling; // 버튼 바로 뒤 요소 찾기
-            if (hintContent && hintContent.classList.contains('hint-content')) {
-                const isHidden = hintContent.style.display === 'none';
-                hintContent.style.display = isHidden ? 'block' : 'none';
-                target.textContent = isHidden ? '💡 힌트 숨기기' : '💡 힌트 보기';
-            }
-            return;
-        }
-
-        // 📝 [수정] 정답 제출 버튼 클릭 시
-        if (target.matches('.submit-discussion-btn')) {
-            handleDiscussionSubmit(target);
-            return;
-        }
-
-        if (optionLI && optionLI.parentElement.classList.contains('quiz-options')) {
-            const quizItem = optionLI.closest('.quiz-item');
-            if (!quizItem || quizItem.classList.contains('answered')) return;
-            const correctAnswer = String(quizItem.dataset.answer).toLowerCase();
-            const selectedAnswer = optionLI.textContent.toLowerCase();
-            const options = quizItem.querySelectorAll('.quiz-options li');
-            quizItem.classList.add('answered');
-            if (selectedAnswer === correctAnswer) {
-                optionLI.classList.add('correct');
-            } else {
-                optionLI.classList.add('incorrect');
-                options.forEach(opt => {
-                    if (opt.textContent.toLowerCase() === correctAnswer) {
-                        opt.classList.add('correct');
-                    }
-                });
-            }
-            options.forEach(opt => opt.classList.add('disabled'));
-        }
-        else if (target.matches('.check-answer-btn')) {
-            const quizItem = target.closest('.quiz-item');
-            if (!quizItem || quizItem.classList.contains('answered')) return;
-            const correctAnswer = quizItem.dataset.answer;
-            const input = quizItem.querySelector('.short-answer-input');
-            const userAnswer = input.value.trim();
-            const feedback = quizItem.querySelector('.answer-feedback');
-            quizItem.classList.add('answered');
-            input.disabled = true;
-            target.disabled = true;
-            feedback.classList.remove('hidden');
-            if (userAnswer.replace(/\s/g, '').toLowerCase() === correctAnswer.replace(/\s/g, '').toLowerCase()) {
-                input.classList.add('correct');
-            } else {
-                input.classList.add('incorrect');
-            }
-        }
-    });
-
-    // --- 팝업창 표시 함수들 ---
+    // --- 팝업창 표시 함수들 ---[수정][12-14][DOM 밖으로 꺼냄]
 
     function showQuizModal(content, isLoading = false, isError = false, loadingText = "AI가 퀴즈를 생성하고 있습니다...") {
+        // [수정][12-14] 함수 내부에서 DOM을 찾고 const로 선언합니다.
+        const quizModalOverlay = document.getElementById("quiz-modal-overlay");
+        const quizModalBody = document.getElementById("quiz-modal-body");
         if (!quizModalOverlay || !quizModalBody) {
             console.error("❌ showQuizModal: 'quizModalOverlay' 또는 'quizModalBody'를 찾을 수 없습니다.");
             return;
@@ -226,6 +46,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function hideQuizModal() {
+        // [수정][12-14][함수 내부에서 DOM을 찾고 const로 선언]
+        const quizModalOverlay = document.getElementById("quiz-modal-overlay");
         if (quizModalOverlay) {
             quizModalOverlay.classList.add('hidden');
         }
@@ -364,6 +186,189 @@ document.addEventListener('DOMContentLoaded', () => {
             submitButton.textContent = "정답 제출";
         }
     }
+
+
+
+// ⭐️ [복구] 챗봇 변수
+let chatbotInitialized = false;
+let chatHistory = [];
+
+// DOM 로드 후 UI 이벤트 핸들러 연결
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("✅ main.js DOMContentLoaded 이벤트 발생");
+
+    const modalFullDocBtn = document.getElementById('modal-full-doc-btn');
+    const modalHighlightsBtn = document.getElementById('modal-highlights-btn');     
+
+    // --- 퀴즈 생성 로직 ---
+    modalHighlightsBtn?.addEventListener('click', async () => {
+        const bookId = getCurrentBookId();
+        const user = getCurrentUser();
+
+        if (!bookId || !user) {
+            console.warn("하이라이트 퀴즈 생성 중단: bookId 또는 user가 없습니다.");
+            return alert("퀴즈를 만들 문서를 먼저 열어주세요.");
+        }
+
+        showQuizModal(null, true, false, "미리 생성된 하이라이트 퀴즈 로드 중...");
+    
+        try {
+            const generateCustomReview = httpsCallable(functions, 'generateCustomReview');
+            const result = await generateCustomReview({ bookId });
+            const resultData = result.data; 
+
+            // ⭐️ [디버깅용 로그 추가]
+            console.log("🔥 전체 데이터:", resultData);
+            console.log("🔥 Discussion 데이터:", resultData?.review?.discussion);
+
+            // 만약 discussion 데이터가 있다면 첫 번째 문제의 힌트도 찍어보기
+            if (resultData?.review?.discussion?.length > 0) {
+                console.log("🔥 첫 번째 문제 힌트:", resultData.review.discussion[0].hint);
+            }
+
+            const items = [];
+            if (resultData?.review?.ox) {
+                resultData.review.ox.forEach(it =>
+                    items.push({ type: 'ox', q: it.q, answer: String(it.answer), sources: it.sources || [], tags: it.tags || [] })
+                );
+            }
+            if (resultData?.review?.short) {
+                resultData.review.short.forEach(it =>
+                    items.push({ type: 'short', q: it.q, answer: it.answer || "", sources: it.sources || [], tags: it.tags || [] })
+                );
+            }
+            if (resultData?.review?.discussion) {
+                resultData.review.discussion.forEach(it =>items.push({ type: 'discussion', q: it.q, hint: it.hint || '힌트가 없습니다.', sources: it.sources || [], tags: it.tags || [] }));
+            }
+    
+            const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
+            const saved = await saveQuizItems({ bookId, scope: 'highlight', items });
+    
+            showFullDocQuiz(resultData, saved.data);
+            
+        } catch (error) {
+            console.error("하이라이트 퀴즈 생성 오류:", error);
+            let errorMessage = error.message;
+            if (error.code === 'functions/deadline-exceeded') {
+                errorMessage = "AI 서버가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.";
+            } else if (error.code === 'functions/aborted' || error.code === 'functions/not-found') {
+                errorMessage = "PDF가 아직 처리 중입니다. 1~2분 후 다시 시도해 주세요.";
+            }
+            showQuizModal(null, false, true, `오류가 발생했습니다: ${errorMessage}`);
+        }
+    });
+
+    modalFullDocBtn?.addEventListener('click', async () => {        
+        const bookId = getCurrentBookId();
+        const user = getCurrentUser();
+        if (!bookId || !user) {
+            console.warn("전체 문서 퀴즈 생성 중단: bookId 또는 user가 없습니다.");
+            return;
+        }
+
+        showQuizModal(null, true, false, "미리 생성된 전체 요약/퀴즈 로드 중...");
+        
+        try {
+            const generateFullDocQuiz = httpsCallable(functions, 'generateFullDocQuiz');
+            const result = await generateFullDocQuiz({ bookId });
+            const data = result.data; 
+
+           const items = [];
+           if (data?.review?.ox) {
+             data.review.ox.forEach(it => items.push({ type: 'ox', q: it.q, answer: String(it.answer), sources: it.sources || [], tags: it.tags || [] }));
+           }
+           if (data?.review?.short) {
+             data.review.short.forEach(it => items.push({ type: 'short', q: it.q, answer: it.answer || "", sources: it.sources || [], tags: it.tags || [] }));
+           }
+           if (data?.review?.discussion) {
+             data.review.discussion.forEach(it => items.push({ type: 'discussion', q: it.q, hint: it.hint, sources: it.sources || [], tags: it.tags || [] }));//12.07 수정
+           }
+
+           const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
+           const saved = await saveQuizItems({ bookId, scope: 'full', items });
+           console.log('saveQuizItems:', saved.data);
+
+           showFullDocQuiz(data, saved.data);
+
+        } catch (error) {
+            console.error("전체 문서 퀴즈 생성 과정 오류:", error);
+            let errorMessage = error.message;
+            if (error.code === 'functions/deadline-exceeded') {
+                errorMessage = "AI 서버가 응답하지 않습니다. (시간 초과) 잠시 후 다시 시도해 주세요.";
+            } else if (error.code === 'functions/aborted' || error.code === 'functions/not-found') {
+                errorMessage = "PDF가 아직 처리 중입니다. 1~2분 후 다시 시도해 주세요.";
+            }
+            showQuizModal(null, false, true, `오류가 발생했습니다: ${errorMessage}`);
+        }
+    });
+
+    // --- 퀴즈 결과 팝업 관련 이벤트 핸들러 ---[수정][12-14] DOM 요소를 직접 찾아서 리스너 연결
+    document.getElementById("quiz-close-btn")?.addEventListener("click", hideQuizModal);
+    document.getElementById("quiz-modal-overlay")?.addEventListener("click", (e) => {
+        // e.target과 오버레이가 일치하는지 확인 (외부 클릭 시 닫기)
+        if (e.target === document.getElementById("quiz-modal-overlay")) hideQuizModal();
+    });
+
+    // 퀴즈 정답 확인 로직[수정][12-14] [DOM 요소를 직접 찾아서 리스너 연결]
+    document.getElementById("quiz-modal-body")?.addEventListener('click', (e) => {
+        const target = e.target;
+        const optionLI = target.closest('li');
+
+        // [추가][12-01][힌트 버튼 클릭 로직]
+        // [12.07]💡 [수정] 힌트 버튼 클릭 시 토글
+        if (target.matches('.hint-button')) {
+            const hintContent = target.nextElementSibling; // 버튼 바로 뒤 요소 찾기
+            if (hintContent && hintContent.classList.contains('hint-content')) {
+                const isHidden = hintContent.style.display === 'none';
+                hintContent.style.display = isHidden ? 'block' : 'none';
+                target.textContent = isHidden ? '💡 힌트 숨기기' : '💡 힌트 보기';
+            }
+            return;
+        }
+
+        // 📝 [수정] 정답 제출 버튼 클릭 시
+        if (target.matches('.submit-discussion-btn')) {
+            handleDiscussionSubmit(target);
+            return;
+        }
+
+        if (optionLI && optionLI.parentElement.classList.contains('quiz-options')) {
+            const quizItem = optionLI.closest('.quiz-item');
+            if (!quizItem || quizItem.classList.contains('answered')) return;
+            const correctAnswer = String(quizItem.dataset.answer).toLowerCase();
+            const selectedAnswer = optionLI.textContent.toLowerCase();
+            const options = quizItem.querySelectorAll('.quiz-options li');
+            quizItem.classList.add('answered');
+            if (selectedAnswer === correctAnswer) {
+                optionLI.classList.add('correct');
+            } else {
+                optionLI.classList.add('incorrect');
+                options.forEach(opt => {
+                    if (opt.textContent.toLowerCase() === correctAnswer) {
+                        opt.classList.add('correct');
+                    }
+                });
+            }
+            options.forEach(opt => opt.classList.add('disabled'));
+        }
+        else if (target.matches('.check-answer-btn')) {
+            const quizItem = target.closest('.quiz-item');
+            if (!quizItem || quizItem.classList.contains('answered')) return;
+            const correctAnswer = quizItem.dataset.answer;
+            const input = quizItem.querySelector('.short-answer-input');
+            const userAnswer = input.value.trim();
+            const feedback = quizItem.querySelector('.answer-feedback');
+            quizItem.classList.add('answered');
+            input.disabled = true;
+            target.disabled = true;
+            feedback.classList.remove('hidden');
+            if (userAnswer.replace(/\s/g, '').toLowerCase() === correctAnswer.replace(/\s/g, '').toLowerCase()) {
+                input.classList.add('correct');
+            } else {
+                input.classList.add('incorrect');
+            }
+        }
+    });
 
     // ⭐️ [복구] 챗봇 초기화 실행
     initChatbot();

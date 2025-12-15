@@ -19,6 +19,8 @@
 <body>
   <div class="toolbar"><!--[수정][11-25][app에서 빼고 상단으로 이동하여 css로 fix]-->
     <div class="group">
+
+      <button id="btnGoHome" class="nav-home-btn" type="button" >홈으로</button>
       <span id="pipeline-status" style="font-size: 12px; color: var(--muted); margin-right: 8px;">
           문서 대기 중...
         </span><!-- 로딩 상태 표시 -->
@@ -53,8 +55,7 @@
       <button id="undoBtn" title="되돌리기 (Ctrl+Z)"><i class="fa-solid fa-arrow-rotate-left"></i></button>
       <button id="redoBtn" title="다시하기 (Ctrl+Y)"><i class="fa-solid fa-arrow-rotate-right"></i></button>
       <button id="penBtn" title="형광펜 (H)"><i class="fa-solid fa-pen"></i></button>
-      <!--[추가][12-09][검정펜]-->
-      <button id="markerBtn" title="자유 필기 펜 (M)"><i class="fa-solid fa-highlighter"></i></button>
+      <!--[수정][12-14][검정펜 삭제 후 위치 이동]-->
       <button id="eraserBtn" title="지우개 (E)"><i class="fa-solid fa-eraser"></i></button>
       <button id="ocrSelectBtn" title="텍스트 선택 (OCR)"><i class="fa-solid fa-i-cursor"></i></button>
       <div class="divider"></div>
@@ -75,6 +76,33 @@
       <input id="searchInput" class="jump-input" style="width:150px" placeholder="문서 검색" />
       <button id="searchPrev" title="이전 결과"><i class="fa-solid fa-angle-up"></i></button>
       <button id="searchNext" title="다음 결과"><i class="fa-solid fa-angle-down"></i></button>
+    </div>
+    
+   <!--[추가][12-14][필기 모드 + 필기 모드 모달(두께, 지우개 설정)]--> 
+    <div class="group" title="자유 필기 툴">
+      <button id="markerBtn" title="자유 필기 펜 (M)"><i class="fa-solid fa-highlighter"></i></button>
+      
+      <button id="markerSettingsBtn" title="자유 필기 설정"><i class="fa-solid fa-gear"></i></button> 
+    </div>
+
+    <div id="marker-setting-modal-overlay" class="modal-overlay hidden">
+      <div class="modal-body" id="marker-setting-modal-body">
+        <h2>자유 필기 펜 설정</h2>
+        
+        <div class="form-group" style="margin-top: 15px;">
+          <label for="modalMarkerThickness">필기 두께</label>
+          <input id="modalMarkerThickness" type="range" min="3" max="30" step="1" value="15" style="width:100%;" />
+          <div id="modalMarkerThicknessLabel" style="text-align: right; font-size: 14px;">15 px</div>
+        </div>
+        
+        <div class="form-group" style="margin-top: 20px;">
+          <button id="modalMarkerEraserBtn" class="primary-btn" style="width: 100%;">
+            <i class="fa-solid fa-eraser"></i> 지우개 모드로 전환
+          </button>
+        </div>
+
+        <button id="marker-setting-modal-close-btn" class="modal-close-btn">&times;</button>
+      </div>
     </div>
 
     <div class="group">
@@ -212,5 +240,6 @@
   <script src="viewer-main.js" type="module" defer></script>
   <script src="doc_firebase.js" type="module" defer></script>
   <script src="main.js" type="module" defer></script>
+
 </body>
 </html>
