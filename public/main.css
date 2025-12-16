@@ -32,9 +32,9 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .jump-input { width: 68px; padding: 6px 8px; border: 1px solid #e6e6e6; border-radius: 8px; background: var(--panel); color: var(--fg); }
 .zoom-label { min-width: 54px; text-align: center; }
 
-/*[수정][11-25][기존 app역할]*/     /* [12-17] 260px (왼쪽) / 1fr (중앙) / 4px (리사이저) / var(오른쪽) */
+/*[수정][11-25][기존 app역할]*/     /* [수정 12-17] 260px (왼쪽) / 1fr (중앙) / 4px (리사이저) / var(오른쪽) */
 .main { height: 100%;display: grid;grid-template-columns: 260px 1fr 4px var(--right-panel-width);background: var(--bg);color: var(--fg);}
-/* 3. .resizer (크기 조절 핸들) 스타일 (유지) */
+/*  [추가 12-17].resizer (크기 조절 핸들) 스타일 (유지) */
 .resizer {
     width: 4px;
     height: 100%;
@@ -50,7 +50,7 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
     background-color: var(--accent); 
 }
 
-/* 4. 오른쪽 패널을 숨기는 클래스 수정 */
+/*  [추가 12-17]오른쪽 패널을 숨기는 클래스 수정 */
 .main.right-hidden {
     /* 변경: 오른쪽 패널 너비와 리사이저 너비를 0으로 설정 */
     grid-template-columns: 260px 1fr 0px 0px !important;
@@ -60,6 +60,19 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 }
 .main.right-hidden #right-resizer {
     display: none !important; 
+}
+
+/* [추가 12-17] 오른쪽 패널 토글 버튼 스타일 */
+#toggleRightPanel {
+    /* 기존 툴바 버튼과 동일한 기본 스타일 사용 */
+    padding: 6px 10px; /* 버튼의 크기 조정 */
+    margin: 0;
+    border-radius: 8px; 
+}
+#toggleRightPanel i {
+    /* 아이콘 색상을 강조 (선택 사항) */
+    color: var(--accent); 
+    transition: transform 0.3s;
 }
 
 .sidebar { border-right: 1px solid #e5e5e5; background: var(--panel); overflow: hidden; display: grid; grid-template-rows: 44px 1fr; }

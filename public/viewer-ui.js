@@ -511,7 +511,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const rightEl = document.querySelector('.right');
     const mainEl = document.querySelector('.main');
     const toggleRightPanelBtn = document.getElementById('toggleRightPanel'); 
-
+    const toggleIcon = toggleRightPanelBtn?.querySelector('i');
     // 로컬 스토리지에서 이전 너비 로드
     const storedRightPanelWidth = localStorage.getItem('rightPanelWidth');
 
@@ -524,24 +524,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 리사이저 설정 함수 호출 (오른쪽 패널만: 최소 100px 또는 0)
     if (rightEl) setupResizer('right-resizer', rightEl, 100, true);  
+
+    // [수정 12-17] 초기 상태에 따라 아이콘 설정 (새로고침 시)
+    if (mainEl.classList.contains('right-hidden')) {
+        if (toggleIcon) toggleIcon.className = 'fa-solid fa-angles-left'; // 닫힘: 왼쪽 화살표
+    } else {
+        if (toggleIcon) toggleIcon.className = 'fa-solid fa-angles-right'; // 열림: 오른쪽 화살표
+    }
     
-    // 오른쪽 패널 토글 버튼 이벤트
+    // [수정 12-17]오른쪽 패널 토글 버튼 이벤트
     toggleRightPanelBtn?.addEventListener('click', () => {
-        const isHidden = mainEl.classList.toggle('right-hidden');
-        
-        if (isHidden) {
-            // 숨길 때: CSS 변수를 0으로 설정하고 저장
+        // right-hidden 클래스를 토글하기 전에, 현재 상태를 확인합니다.
+        const willBeHidden = !mainEl.classList.contains('right-hidden'); 
+
+        if (willBeHidden) {
+            // 숨길 때: CSS 변수를 0으로 설정하고 right-hidden 클래스 추가
             document.documentElement.style.setProperty('--right-panel-width', `0px`);
             localStorage.setItem('rightPanelWidth', '0');
+            mainEl.classList.add('right-hidden'); // 클래스 추가
+            if (toggleIcon) toggleIcon.className = 'fa-solid fa-angles-left'; // 왼쪽 화살표로 변경
         } else {
-            // 보일 때: 이전 너비 (또는 기본값 360)로 복구하고 저장
+            // 보일 때: 이전 너비 (또는 기본값 360)로 복구하고 right-hidden 클래스 제거
             const prevWidth = localStorage.getItem('rightPanelWidth') || '360';
             const restoredWidth = prevWidth === '0' ? '360' : prevWidth; 
             document.documentElement.style.setProperty('--right-panel-width', `${restoredWidth}px`);
             localStorage.setItem('rightPanelWidth', restoredWidth);
+            mainEl.classList.remove('right-hidden'); // 클래스 제거
+            if (toggleIcon) toggleIcon.className = 'fa-solid fa-angles-right'; // 오른쪽 화살표로 변경
         }
     });
-
     // -------------------------------------------------------
     // ⭐️ [추가] 백지 복습 모드 진입 버튼
     // -------------------------------------------------------
