@@ -2,8 +2,6 @@ from firebase_functions import https_fn
 from firebase_admin import firestore
 import json
 
-# ❌ [삭제됨] 파일 맨 위의 db = firestore.client() 제거!
-
 # 1. 화이트보드 저장 함수
 @https_fn.on_request()
 def saveWhiteboard(req: https_fn.Request) -> https_fn.Response:
@@ -16,14 +14,22 @@ def saveWhiteboard(req: https_fn.Request) -> https_fn.Response:
         })
 
     try:
-        # ✅ [이동] 함수가 실행될 때 DB 연결 (배포 시에는 실행 안 됨)
         db = firestore.client()
 
-        data = req.get_json(silent=True)
+        # ⭐️ [수정] force=True 추가 (안전장치)
+        data = req.get_json(silent=True, force=True)
+        
+        # 데이터가 문자열로 들어왔을 경우 대비 (수동 파싱)
+        if not data and req.data:
+            try:
+                data = json.loads(req.data)
+            except:
+                pass
+
         print(f"🔵 [Save] Received Data: {data}")
 
         if not data:
-            return https_fn.Response(json.dumps({'error': 'JSON 데이터가 비어있습니다.'}), status=400)
+            return https_fn.Response(json.dumps({'error': '데이터가 비어있습니다.'}), status=400, headers={"Access-Control-Allow-Origin": "*"})
 
         book_id = str(data.get('bookId'))
         
@@ -47,7 +53,7 @@ def saveWhiteboard(req: https_fn.Request) -> https_fn.Response:
             headers={"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"}
         )
 
-# 2. 화이트보드 불러오기 함수
+# 2. 화이트보드 불러오기 함수 (기존 코드 유지하되 주석 정리)
 @https_fn.on_request()
 def loadWhiteboard(req: https_fn.Request) -> https_fn.Response:
     # CORS 처리
@@ -61,13 +67,10 @@ def loadWhiteboard(req: https_fn.Request) -> https_fn.Response:
     try:
         db = firestore.client()
 
-        # [수정] force=True 추가 (헤더 무시하고 강제로 JSON 파싱)
+        # force=True로 강제 파싱 (이미 잘 되어 있음)
         data = req.get_json(silent=True, force=True)
         
-        # [디버깅] 만약 JSON 파싱 실패했으면 raw data라도 찍어봄
-        if not data:
-            print(f"⚠️ JSON Parsing Failed. Raw Data: {req.data}")
-            # 최후의 수단: 문자열로 들어온 경우 수동 파싱 시도
+        if not data and req.data:
             try:
                 data = json.loads(req.data)
             except:
@@ -78,7 +81,7 @@ def loadWhiteboard(req: https_fn.Request) -> https_fn.Response:
         if not data or 'bookId' not in data:
             print("🔴 [Load Error] bookId is missing!")
             return https_fn.Response(
-                json.dumps({'error': 'bookId가 필요합니다. 데이터가 전송되지 않았습니다.'}), 
+                json.dumps({'error': 'bookId가 필요합니다.'}), 
                 status=400,
                 headers={"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"}
             )
@@ -94,6 +97,7 @@ def loadWhiteboard(req: https_fn.Request) -> https_fn.Response:
             if 'updatedAt' in result:
                 del result['updatedAt'] 
         else:
+            # 문서가 없으면 빈 값 반환 (에러 아님)
             result = {'text': '', 'imageData': ''}
             
         return https_fn.Response(

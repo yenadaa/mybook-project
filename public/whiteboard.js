@@ -3,7 +3,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // =========================================
     // [1] 공통 변수 및 초기화
     // =========================================
-    let pageTitles = { 1: "자유 복습 노트" }; // 페이지별 제목 저장
+    let pageTitles = { 1: "자유 복습 노트" }; 
     const BASE_BOOK_ID = "test-book-1";
     let currentPage = 1;
 
@@ -16,7 +16,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const canvasContainer = document.getElementById('canvas-container');
     const textContainer = document.getElementById('text-editor-container');
     const canvas = document.getElementById('drawingCanvas');
-    // willReadFrequently: 캔버스 성능 최적화 옵션
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const btnModeSwitch = document.getElementById('btn-mode-switch');
     const drawingTools = document.getElementById('drawing-tools');
@@ -28,7 +27,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     // =========================================
-    // [2] 유틸리티 함수들 (모달, 이미지 처리 등)
+    // [2] 유틸리티 함수들
     // =========================================
     function showCustomModal(title, text) {
         const modal = document.getElementById('resultModal');
@@ -43,7 +42,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (modal) modal.style.display = 'none';
     }
 
-    // AI 전송용 (배경을 흰색으로 합쳐서 추출)
     function getCanvasDataURLWithWhiteBackground() {
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = canvas.width;
@@ -172,7 +170,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     // =========================================
-    // [5] 서버 통신 기능 (채점, 힌트, 저장, 로드)
+    // [5] 서버 통신 기능
     // =========================================
 
     // 1. 채점 요청
@@ -254,7 +252,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // 3. 데이터 저장 (자동저장 지원)
+    // 3. 데이터 저장
     async function saveTempData(isSilent = false) {
         const loading = document.getElementById('loading');
         try {
@@ -289,7 +287,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // 4. 데이터 불러오기 (이미지 명찰 오류 해결)
+    // 4. 데이터 불러오기
     async function loadTempData() {
         console.log("Loading Page:", currentPage);
         const loading = document.getElementById('loading');
@@ -307,10 +305,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify({ bookId: getCurrentPageId() })
             });
 
-            if (!res.ok) {
-                // 데이터 없음 = 새 페이지
-                return;
-            }
+            if (!res.ok) return;
 
             const data = await res.json();
 
@@ -319,7 +314,6 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.imageData) {
                 const img = new Image();
                 let imageSrc = data.imageData;
-                // 명찰 없으면 붙여주기
                 if (!imageSrc.startsWith('data:image')) {
                     imageSrc = 'data:image/png;base64,' + imageSrc;
                 }
@@ -338,7 +332,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // 5. 페이지 변경 (다음 장 제목 자동설정)
+    // 5. 페이지 변경
     async function changePage(offset) {
         const newPage = currentPage + offset;
         if (newPage < 1) {
@@ -346,10 +340,8 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        // 현재 페이지 저장
         await saveTempData(true); 
 
-        // 심화 질문 제목으로 넘기기
         if (offset > 0 && currentChallengeQuestion) {
             if (!pageTitles[newPage]) {
                 pageTitles[newPage] = "Q. " + currentChallengeQuestion;
@@ -359,7 +351,6 @@ document.addEventListener("DOMContentLoaded", () => {
             if(btnOpenChallenge) btnOpenChallenge.style.display = 'none';
         }
 
-        // 페이지 이동
         currentPage = newPage;
         
         const titleEl = document.getElementById('current-page-topic');
@@ -373,26 +364,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     // =========================================
-    // [6] PDF 내보내기 (로딩화면 무시)
+    // [6] PDF 내보내기 (가이드라인 패널 숨김 처리 추가)
     // =========================================
     async function exportToPDF() {
         const loading = document.getElementById('loading');
         const originalPage = currentPage; 
         
         try {
-            // 1. PDF 설정 (가로 방향)
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF('l', 'mm', 'a4'); 
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = pdf.internal.pageSize.getHeight();
 
-            // 2. UI 정리 (툴바 등 숨기기)
+            // [수정] PDF 생성 중 UI 숨기기 (가이드라인 포함)
             const toolbar = document.querySelector('.toolbar');
-            const panel = document.getElementById('session-questions-panel');
+            const guidePanel = document.getElementById('guideline-panel'); // 가이드라인
             const openBtn = document.getElementById('btn-open-panel');
             
             toolbar.style.display = 'none';
-            if(panel) panel.style.display = 'none';
+            if(guidePanel) guidePanel.style.display = 'none';
             if(openBtn) openBtn.style.display = 'none';
 
             let iterPage = 1;
@@ -402,7 +392,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 loading.style.display = 'flex';
                 loading.querySelector('span').textContent = `${iterPage}페이지 굽는 중... 🍳`;
 
-                // (1) 데이터 불러오기
                 const pageId = `${BASE_BOOK_ID}_page_${iterPage}`;
                 const res = await fetch(LOAD_API_URL, {
                     method: 'POST',
@@ -414,7 +403,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 const data = await res.json();
                 if (!data.text && !data.imageData) { hasData = false; break; }
 
-                // (2) 화면 그리기
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 document.getElementById('typingArea').value = data.text || "";
                 
@@ -434,15 +422,14 @@ document.addEventListener("DOMContentLoaded", () => {
                     });
                 }
 
-                // (3) ⭐️ 핵심 수정: 캡처 영역을 'capture-area'로 한정!
+                // 캡처
                 const targetElement = document.getElementById('capture-area');
                 
                 const canvasElement = await html2canvas(targetElement, {
                     scale: 2, 
                     useCORS: true,
-                    backgroundColor: '#ffffff', // 배경 흰색
+                    backgroundColor: '#ffffff',
                     logging: false,
-                    // 로딩창만 무시하면 됨 (툴바는 위에서 display:none 함)
                     ignoreElements: (el) => el.id === 'loading' || el.id === 'resultModal'
                 });
 
@@ -450,7 +437,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 if (iterPage > 1) pdf.addPage(); 
 
-                // (4) 이미지 비율 맞춰 꽉 채우기
                 const imgProps = pdf.getImageProperties(imgData);
                 const ratio = imgProps.width / imgProps.height;
                 const windowRatio = pdfWidth / pdfHeight;
@@ -483,15 +469,15 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error(e);
             showCustomModal("❌ 실패", e.message);
         } finally {
-            // 복구
+            // [수정] UI 복구
             currentPage = originalPage;
             const toolbar = document.querySelector('.toolbar');
             const openBtn = document.getElementById('btn-open-panel');
-            const panel = document.getElementById('session-questions-panel'); // 패널도 복구
+            const guidePanel = document.getElementById('guideline-panel'); // 가이드라인 복구
 
             toolbar.style.display = 'flex';
-            if(panel) panel.style.display = 'flex'; // 원래대로 복구
-            if(openBtn) openBtn.style.display = 'block'; // 버튼 상태에 따라 조정 필요
+            if(guidePanel) guidePanel.style.display = 'flex'; // 다시 보이게
+            if(openBtn) openBtn.style.display = 'block';
             
             const titleEl = document.getElementById('current-page-topic');
             if(titleEl) titleEl.textContent = pageTitles[currentPage] || "자유 복습 노트";
@@ -503,19 +489,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // =========================================
-    // [7] 이벤트 리스너 연결 (여기가 핵심!)
+    // [7] 이벤트 리스너 연결
     // =========================================
     
-    // 저장/로드/모달 버튼
     document.getElementById('btn-save-temp').addEventListener('click', () => saveTempData(false));
     document.getElementById('btn-load-temp').addEventListener('click', loadTempData);
     document.getElementById('btn-modal-close').addEventListener('click', closeCustomModal);
     
-    // 채점/힌트 버튼
     document.getElementById('btn-submit').addEventListener('click', submitReview);
     document.getElementById('btn-hint').addEventListener('click', requestHint);
 
-    // 페이지 버튼
     const prevBtn = document.getElementById('btn-prev-page');
     const nextBtn = document.getElementById('btn-next-page');
     if(prevBtn && nextBtn) {
@@ -523,41 +506,17 @@ document.addEventListener("DOMContentLoaded", () => {
         nextBtn.addEventListener('click', () => changePage(1));
     }
 
-    // [중요] PDF 버튼 연결 확인!
     const pdfBtn = document.getElementById('btn-export-pdf');
     if(pdfBtn) {
         pdfBtn.addEventListener('click', exportToPDF);
-        console.log("PDF 버튼 연결됨!");
-    } else {
-        console.error("PDF 버튼이 HTML에 없습니다!");
     }
 
-    // 패널 열고 닫기
-    const panelOpenBtn = document.getElementById('btn-open-panel');
-    const panelCloseBtn = document.getElementById('btn-close-panel');
-    const panel = document.getElementById('session-questions-panel');
-    const contentArea = document.querySelector('.content-area');
-
-    if(panelCloseBtn) {
-        panelCloseBtn.addEventListener('click', () => {
-            panel.style.display = 'none';
-            panelOpenBtn.style.display = 'block'; 
-            contentArea.style.width = 'calc(100% - 24px)';
-            resizeCanvas();
-        });
-    }
-    if(panelOpenBtn) {
-        panelOpenBtn.addEventListener('click', () => {
-            panel.style.display = 'flex';
-            panelOpenBtn.style.display = 'none'; 
-            if (window.innerWidth > 1000) {
-                contentArea.style.width = 'calc(100% - 24px - 380px)';
-            }
-            resizeCanvas();
-        });
-    }
+    // [수정] 가이드라인 패널 토글 버튼은 HTML inline script로 처리했으므로
+    // 여기서는 별도로 추가하지 않아도 되지만, 
+    // content-area 사이즈 조정과 연동이 필요하다면 여기서도 제어 가능.
+    // (현재 HTML의 script 태그에서 이미 잘 처리하고 있으므로 생략)
 
     // 초기 로딩
     loadTempData();
 
-}); // DOMContentLoaded 닫기
+});
