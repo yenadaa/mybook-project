@@ -4,7 +4,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // [1] 공통 변수 및 초기화
     // =========================================
     let pageTitles = { 1: "자유 복습 노트" }; 
-    const BASE_BOOK_ID = "test-book-1";
+    //12-16 수정
+    const urlParams = new URLSearchParams(window.location.search);
+    const BASE_BOOK_ID = urlParams.get('bookId') || "unknown-book";
+    console.log("현재 백지 모드 ID:", BASE_BOOK_ID); // 확인용 로그
     let currentPage = 1;
 
     // --- 서버 주소 설정 ---

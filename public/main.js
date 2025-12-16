@@ -370,6 +370,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    //[12.16]백지복습에 ID 넘겨주기
+    const btnWhiteboard = document.getElementById('btn-whiteboard');
+    if (btnWhiteboard) {
+    btnWhiteboard.addEventListener('click', () => {
+        // 현재 선택된 책 ID (없으면 폴더 ID, 그것도 없으면 에러)
+        const targetId = window.currentBookId || window.currentFolderId;
+
+        if (!targetId) {
+            alert("백지 복습을 할 문서를 먼저 열어주세요!");
+            return;
+        }
+        const width = 1200;
+        const height = 800;
+        const left = (window.screen.width - width) / 2;
+        const top = (window.screen.height - height) / 2;
+
+        window.open(
+            `whiteboard.html?bookId=${targetId}`, 
+            'WhiteboardWindow', 
+            `width=${width},height=${height},top=${top},left=${left},resizable=yes,scrollbars=yes`
+        );
+    });
+    }
     // ⭐️ [복구] 챗봇 초기화 실행
     initChatbot();
 
