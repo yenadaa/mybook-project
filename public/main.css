@@ -16,8 +16,8 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 /*[수정][11-25][툴바를 상단에 고정]*/
 .toolbar { position: fixed;top: 0;left: 0;width: 100%;height: 56px;z-index: 9999; /* 최상단에 표시 */display: flex; align-items: center; gap: 12px;padding: 8px 12px; border-bottom: 1px solid #e5e5e5; background: var(--toolbar-bg); color: var(--fg);}
 
-:root { --bg: #f6f7fb; --fg: #111; --panel: #fff; --toolbar-bg: #fff; --accent: #3b82f6; --muted: #8a8a8a; --chip:#eef2ff; }
-.dark { --bg: #0f1217; --fg: #f2f2f2; --panel: #171a21; --toolbar-bg: #131722; --accent: #60a5fa; --muted: #b9c0cc; --chip:#1f2937; }
+:root { --bg: #f6f7fb; --fg: #111; --panel: #fff; --toolbar-bg: #fff; --accent: #3b82f6; --muted: #8a8a8a; --chip:#eef2ff;--right-panel-width: 360px; /* [12-17]초기 오른쪽 패널 너비 */ }
+.dark { --bg: #0f1217; --fg: #f2f2f2; --panel: #171a21; --toolbar-bg: #131722; --accent: #60a5fa; --muted: #b9c0cc; --chip:#1f2937; --right-panel-width: 360px; /* [12-17]초기 오른쪽 패널 너비 */}
 
 .toolbar .group { display: inline-flex; align-items: center; border: 1px solid #e6e6e6; border-radius: 10px; overflow: hidden; background: var(--panel); }
 .dark .toolbar .group { border-color: #2b2f36; }
@@ -32,18 +32,36 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .jump-input { width: 68px; padding: 6px 8px; border: 1px solid #e6e6e6; border-radius: 8px; background: var(--panel); color: var(--fg); }
 .zoom-label { min-width: 54px; text-align: center; }
 
-/*[수정][11-25][기존 app역할]*/
-.main { height: 100%;display: grid;grid-template-columns: 260px 1fr 360px;background: var(--bg);color: var(--fg);}
-/* ⭐️ [추가] 태블릿/모바일 화면용 설정 (화면 너비가 1200px 이하일 때) */
-@media (max-width: 1200px) {
-    .main {
-        /* 오른쪽 챗봇 영역을 0px로 만들어서 숨김 -> 가운데 PDF가 넓어짐 */
-        grid-template-columns: 200px 1fr 0px; 
-        
-        /* 만약 왼쪽 목록도 줄이고 PDF만 보고 싶다면 아래 주석을 푸세요 */
-        /* grid-template-columns: 0px 1fr 0px; */
-    }
+/*[수정][11-25][기존 app역할]*/     /* [12-17] 260px (왼쪽) / 1fr (중앙) / 4px (리사이저) / var(오른쪽) */
+.main { height: 100%;display: grid;grid-template-columns: 260px 1fr 4px var(--right-panel-width);background: var(--bg);color: var(--fg);}
+/* 3. .resizer (크기 조절 핸들) 스타일 (유지) */
+.resizer {
+    width: 4px;
+    height: 100%;
+    cursor: col-resize; 
+    background: transparent; 
+    z-index: 50; 
+    transition: background-color 0.2s;
 }
+.resizer:hover {
+    background-color: rgba(99, 102, 241, 0.3); 
+}
+.resizer.is-dragging {
+    background-color: var(--accent); 
+}
+
+/* 4. 오른쪽 패널을 숨기는 클래스 수정 */
+.main.right-hidden {
+    /* 변경: 오른쪽 패널 너비와 리사이저 너비를 0으로 설정 */
+    grid-template-columns: 260px 1fr 0px 0px !important;
+}
+.main.right-hidden .right {
+    display: none !important; 
+}
+.main.right-hidden #right-resizer {
+    display: none !important; 
+}
+
 .sidebar { border-right: 1px solid #e5e5e5; background: var(--panel); overflow: hidden; display: grid; grid-template-rows: 44px 1fr; }
 .dark .sidebar { border-right-color:#2b2f36; }
 .sidebar-tabs { display: grid; grid-auto-flow: column; }
@@ -632,8 +650,8 @@ input[type="range"] { accent-color: var(--accent); }
   /* 2. 전체 레이아웃 틀 잡기 */
   .main {
     display: grid !important;
-    /* [목록 220px] [PDF 자동] [오른쪽 300px] */
-    grid-template-columns: 220px 1fr 300px !important;
+    /* [수정12-17][목록 220px] [PDF 자동] [리사이저 4px] [오른쪽 가변]*/
+    grid-template-columns: 220px 1fr 4px var(--right-panel-width) !important;
     height: 100% !important; /* 높이 꽉 채우기 */
     overflow: hidden !important;
   }
@@ -641,11 +659,16 @@ input[type="range"] { accent-color: var(--accent); }
   /* 3. 오른쪽 패널 틀 고정 */
   .right {
     display: block !important;
-    width: 300px !important;
+    width:auto !important;/* [수정12-17]고정된 300px 대신 Grid가 제어하도록 width: auto */
     height: 100% !important; /* 높이 고정 */
     border-left: 1px solid #e5e5e5;
     background: #fff;
     overflow: hidden !important; /* 패널 자체는 스크롤 X (내부에서 함) */
+  }
+
+  /* [추가 12-17] right-hidden 클래스가 적용될 경우 1400px 이하에서도 제대로 숨겨지도록 오버라이드 */
+  .main.right-hidden {
+    grid-template-columns: 220px 1fr 0px 0px !important;
   }
 
   /* 4. 오른쪽 내부 컨테이너 (탭 - 내용 - 입력창) */

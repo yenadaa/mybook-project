@@ -201,6 +201,81 @@ document.addEventListener('DOMContentLoaded', () => {
 
     console.log("Viewer UI: Event listeners setup started...");
 
+    // [추가12-17] 패널 리사이저 로직 함수 (setupResizer)
+    function setupResizer(resizerId, panelEl, minWidth, isRight) {
+        const resizer = document.getElementById(resizerId);
+        if (!resizer) return;
+
+        let isDragging = false;
+        let initialX;
+        let initialWidth;
+        let newWidth; // 전역 스코프로 이동
+
+        resizer.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return; 
+            isDragging = true;
+            resizer.classList.add('is-dragging');
+            initialX = e.clientX;
+            
+            // 숨겨져 있을 경우 초기 너비를 '이전 저장된 값'으로 설정
+            const currentProp = document.documentElement.style.getPropertyValue('--right-panel-width');
+            initialWidth = (currentProp === '0px' || currentProp === '') 
+                ? parseInt(localStorage.getItem('rightPanelWidth') || '360', 10) 
+                : panelEl.offsetWidth;
+            
+            document.body.style.userSelect = 'none'; 
+            document.body.style.cursor = 'col-resize'; 
+        }, { passive: true }); // passive: true 추가
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            e.preventDefault(); // 드래그 중 다른 선택 방지
+
+            const deltaX = e.clientX - initialX;
+            
+            // 오른쪽 패널: 마우스가 왼쪽으로 이동(deltaX < 0)하면 너비 증가
+            // isRight는 항상 true로 설정되므로 조건문은 필요 없지만 구조 유지를 위해 남김
+            if (isRight) {
+                newWidth = initialWidth - deltaX;
+                
+                // minWidth(100px)보다 작아지면 0으로 '스냅'
+                if (newWidth < minWidth) {
+                     newWidth = 0;
+                } else {
+                    const maxWidth = window.innerWidth * 0.5;
+                    if (newWidth > maxWidth) newWidth = maxWidth;
+                }
+                
+                // CSS 변수 업데이트
+                document.documentElement.style.setProperty('--right-panel-width', `${newWidth}px`);
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!isDragging) return; 
+
+            isDragging = false;
+            resizer.classList.remove('is-dragging');
+            document.body.style.userSelect = '';
+            document.body.style.cursor = '';
+            
+            // 0px 여부 확인 및 클래스 토글
+            const currentRightWidth = document.documentElement.style.getPropertyValue('--right-panel-width');
+            const finalWidth = parseInt(currentRightWidth, 10);
+            
+            const mainEl = document.querySelector('.main');
+            
+            if (finalWidth === 0) {
+                mainEl.classList.add('right-hidden');
+            } else if (mainEl.classList.contains('right-hidden')) {
+                 mainEl.classList.remove('right-hidden');
+            }
+
+            // 로컬 스토리지에 최종 너비 저장 
+            localStorage.setItem('rightPanelWidth', String(finalWidth));
+        });
+    } // setupResizer 함수 종료
+
     // 1. 네비게이션 & 줌
     state.els.prevPage?.addEventListener('click', () => { if (state.pdfDoc) { state.setCurrentPage(Math.max(1, state.currentPage - 1)); renderer.scrollToPage(state.currentPage); }});
     state.els.nextPage?.addEventListener('click', () => { if (state.pdfDoc) { state.setCurrentPage(Math.min(state.pdfDoc.numPages, state.currentPage + 1)); renderer.scrollToPage(state.currentPage); }});
@@ -426,6 +501,45 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         if (e.key === ']') { e.preventDefault(); updateT(Math.min(48, state.currentThicknessPx + 2)); }
         if (e.key === '[') { e.preventDefault(); updateT(Math.max(6, state.currentThicknessPx - 2)); }
+    });
+
+// -------------------------------------------------------
+    // [추가 12-17] 리사이저 초기화 및 토글 버튼 연결
+    // -------------------------------------------------------
+    
+    // DOM 요소 가져오기
+    const rightEl = document.querySelector('.right');
+    const mainEl = document.querySelector('.main');
+    const toggleRightPanelBtn = document.getElementById('toggleRightPanel'); 
+
+    // 로컬 스토리지에서 이전 너비 로드
+    const storedRightPanelWidth = localStorage.getItem('rightPanelWidth');
+
+    if (storedRightPanelWidth) {
+        document.documentElement.style.setProperty('--right-panel-width', `${storedRightPanelWidth}px`);
+        if (storedRightPanelWidth === '0') {
+             mainEl.classList.add('right-hidden');
+        }
+    }
+
+    // 리사이저 설정 함수 호출 (오른쪽 패널만: 최소 100px 또는 0)
+    if (rightEl) setupResizer('right-resizer', rightEl, 100, true);  
+    
+    // 오른쪽 패널 토글 버튼 이벤트
+    toggleRightPanelBtn?.addEventListener('click', () => {
+        const isHidden = mainEl.classList.toggle('right-hidden');
+        
+        if (isHidden) {
+            // 숨길 때: CSS 변수를 0으로 설정하고 저장
+            document.documentElement.style.setProperty('--right-panel-width', `0px`);
+            localStorage.setItem('rightPanelWidth', '0');
+        } else {
+            // 보일 때: 이전 너비 (또는 기본값 360)로 복구하고 저장
+            const prevWidth = localStorage.getItem('rightPanelWidth') || '360';
+            const restoredWidth = prevWidth === '0' ? '360' : prevWidth; 
+            document.documentElement.style.setProperty('--right-panel-width', `${restoredWidth}px`);
+            localStorage.setItem('rightPanelWidth', restoredWidth);
+        }
     });
 
     // -------------------------------------------------------
