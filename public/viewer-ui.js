@@ -428,7 +428,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === '[') { e.preventDefault(); updateT(Math.max(6, state.currentThicknessPx - 2)); }
     });
 
-    /*[12.16] [main에서 쓰는 기능이라서 삭제]
     // -------------------------------------------------------
     // ⭐️ [추가] 백지 복습 모드 진입 버튼
     // -------------------------------------------------------
@@ -446,7 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             window.location.href = `whiteboard.html?bookId=${bookId}&v=2`;
         });
-    } */
+    }
     // -------------------------------------------------------
     // ⭐️ [추가] 챗봇 메시지 자동 감지 (MutationObserver)
     // -------------------------------------------------------

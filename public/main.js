@@ -370,7 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    //[12.16]백지복습에 ID 넘겨주기
+    /*/[12.16]백지복습에 ID 넘겨주기
     const btnWhiteboard = document.getElementById('btn-whiteboard');
     if (btnWhiteboard) {
     btnWhiteboard.addEventListener('click', () => {
@@ -393,6 +393,7 @@ document.addEventListener('DOMContentLoaded', () => {
         );
     });
     }
+    */
     // ⭐️ [복구] 챗봇 초기화 실행
     initChatbot();
 
