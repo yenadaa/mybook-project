@@ -80,15 +80,59 @@
         color: #333; background: #fff;
     }
 
-    /* 심화 질문 박스 (플로팅) */
+  /* [수정] 심화 질문 박스 (플로팅 바 형태) */
     #challenge-area {
-      display:none; position:absolute;
-      top: 130px; left: 50%; transform: translateX(-50%);
-      background: #eef2ff; color: #111827;
-      padding: 14px 16px; border-radius: 12px;
-      box-shadow: 0 10px 24px rgba(0,0,0,0.18);
-      border: 2px solid var(--primary);
-      width: 680px; max-width: 90%; z-index: 100;
+      display: none; /* 기본 숨김 */
+      position: fixed; /* 화면 상단 고정 */
+      top: 70px; /* 툴바 바로 아래 */
+      left: 50%;
+      transform: translateX(-50%);
+      
+      width: 90%; 
+      max-width: 800px;
+      
+      background: #eef2ff; /* 연한 파란색 배경 */
+      color: #1e3a8a; /* 진한 파란색 글씨 */
+      border: 1px solid #bfdbfe;
+      border-radius: 50px; /* 둥근 알약 모양 */
+      padding: 10px 20px;
+      
+      box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2);
+      z-index: 1000;
+      
+      /* 내부 정렬 (가로 배치) */
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 15px;
+    }
+
+    /* 질문 텍스트 스타일 */
+    #challenge-text {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        flex: 1; /* 남은 공간 다 차지 */
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis; /* 너무 길면 ... 처리 */
+    }
+
+    /* 닫기 버튼 스타일 */
+    #btn-challenge-close {
+        background: white;
+        color: #ef4444;
+        border: 1px solid #fecaca;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 13px;
+        font-weight: bold;
+        cursor: pointer;
+        white-space: nowrap; /* 줄바꿈 방지 */
+        flex-shrink: 0; /* 크기 줄어듦 방지 */
+    }
+    #btn-challenge-close:hover {
+        background: #fef2f2;
     }
 
     /* [수정] 오른쪽 가이드라인 패널 */
@@ -233,11 +277,9 @@
   </div> 
 
   <div id="challenge-area">
-    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
-      <strong style="color:var(--primary);">🤔 심화 질문 (소크라테스 튜터)</strong>
-      <button id="btn-challenge-close" class="btn" style="padding:4px 8px; font-size:12px">닫기</button>
-    </div>
-    <p id="challenge-text">...</p>
+    <span style="font-size:20px;">🤔</span>
+    <p id="challenge-text">질문 내용이 여기에 표시됩니다...</p>
+    <button id="btn-challenge-close">닫기</button>
   </div>
 
   <button id="btn-open-challenge" style="display:none; position:absolute; top:130px; left:50%; transform:translateX(-50%); z-index:90; padding:8px 16px; border-radius:20px; background:#eef2ff; color:#3b82f6; border:2px solid #3b82f6; font-weight:bold; cursor:pointer; box-shadow:0 4px 10px rgba(0,0,0,0.1);">

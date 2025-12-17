@@ -4,10 +4,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // [1] 공통 변수 및 초기화
     // =========================================
     let pageTitles = { 1: "자유 복습 노트" }; 
-    //12-16 수정
+
     const urlParams = new URLSearchParams(window.location.search);
     const BASE_BOOK_ID = urlParams.get('bookId') || "unknown-book";
-    console.log("현재 백지 모드 ID:", BASE_BOOK_ID); // 확인용 로그
+    console.log("현재 백지 모드 ID:", BASE_BOOK_ID);
+
     let currentPage = 1;
 
     // --- 서버 주소 설정 ---
@@ -20,8 +21,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const textContainer = document.getElementById('text-editor-container');
     const canvas = document.getElementById('drawingCanvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    
     const btnModeSwitch = document.getElementById('btn-mode-switch');
     const drawingTools = document.getElementById('drawing-tools');
+    
+    // 심화 질문 영역 요소
+    const challengeArea = document.getElementById('challenge-area');
+    const challengeText = document.getElementById('challenge-text');
+    const btnCloseChallenge = document.getElementById('btn-close-challenge');
 
     let inputMode = 'drawing'; 
     let isDrawing = false; 
@@ -64,7 +71,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     // =========================================
-    // [3] 캔버스 및 그리기 로직
+    // [2.5] 심화 질문(Challenge) 모드 제어 (⭐️ 추가됨)
+    // =========================================
+    function setChallengeMode(question) {
+        console.log("🔥 심화 질문 모드 진입:", question);
+        currentChallengeQuestion = question;
+
+        if (challengeArea && challengeText) {
+            challengeText.textContent = question;
+            challengeArea.style.display = 'flex'; // 패널 보이기
+            challengeArea.classList.remove('hidden');
+        } else {
+            // HTML 요소가 없을 경우 알림으로 대체
+            showCustomModal("🔥 심화 질문 도착", question + "\n\n(상단에 표시될 질문입니다)");
+        }
+    }
+
+    function closeChallenge() {
+        console.log("심화 질문 모드 종료");
+        currentChallengeQuestion = null;
+        
+        if (challengeArea) {
+            challengeArea.style.display = 'none';
+            challengeArea.classList.add('hidden');
+        }
+    }
+
+
+    // =========================================
+    // [3] 캔버스 및 그리기 로직 (Pointer Event)
     // =========================================
     // 1. CSS 설정 (필수: 스크롤/확대 방지)
     canvas.style.touchAction = 'none'; 
@@ -156,12 +191,13 @@ document.addEventListener("DOMContentLoaded", () => {
     canvas.addEventListener('pointercancel', endDraw); 
     canvas.addEventListener('pointerout', endDraw);
 
-    // ⭐️ [복구됨] 툴바 버튼 이벤트 연결 (여기가 빠져서 안 됐던 겁니다!)
+    // 툴바 버튼 이벤트 연결
     document.getElementById('btn-pen').onclick = () => { currentTool='pen'; updateToolStyle(); };
     document.getElementById('btn-eraser').onclick = () => { currentTool='eraser'; updateToolStyle(); };
     document.getElementById('btn-clear').onclick = () => ctx.clearRect(0,0,canvas.width, canvas.height);
     document.getElementById('colorPicker').onchange = () => { currentTool='pen'; updateToolStyle(); };
     document.getElementById('btn-back').addEventListener('click', goBack);
+
 
     // =========================================
     // [5] 서버 통신 기능
@@ -336,13 +372,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
         await saveTempData(true); 
 
+        // 페이지 이동 시 심화 질문 초기화
         if (offset > 0 && currentChallengeQuestion) {
             if (!pageTitles[newPage]) {
                 pageTitles[newPage] = "Q. " + currentChallengeQuestion;
             }
-            currentChallengeQuestion = null; 
-            challengeArea.style.display = 'none';
-            if(btnOpenChallenge) btnOpenChallenge.style.display = 'none';
+            closeChallenge(); // ⭐️ [수정] 함수 호출로 변경
         }
 
         currentPage = newPage;
@@ -358,7 +393,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
     // =========================================
-    // [6] PDF 내보내기 (가이드라인 패널 숨김 처리 추가)
+    // [6] PDF 내보내기 (Full Width & UI 숨김)
     // =========================================
     async function exportToPDF() {
         const loading = document.getElementById('loading');
@@ -366,7 +401,6 @@ document.addEventListener("DOMContentLoaded", () => {
         
         try {
             const { jsPDF } = window.jspdf;
-            // A4 가로 모드 (landscape)
             const pdf = new jsPDF('l', 'mm', 'a4'); 
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = pdf.internal.pageSize.getHeight();
@@ -379,6 +413,9 @@ document.addEventListener("DOMContentLoaded", () => {
             toolbar.style.display = 'none';
             if(guidePanel) guidePanel.style.display = 'none';
             if(openBtn) openBtn.style.display = 'none';
+            
+            // ⭐️ 심화 질문바도 숨겨야 깔끔함
+            if(challengeArea) challengeArea.style.display = 'none';
 
             let iterPage = 1;
             let hasData = true;
@@ -432,38 +469,31 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 if (iterPage > 1) pdf.addPage(); 
 
-                // ⭐️ [수정] A4 꽉 채우기 계산 로직
-                // 여백을 최소화하고 가로/세로 중 더 긴 쪽에 맞춰 꽉 채웁니다.
+                // A4 꽉 채우기 계산 로직
                 const imgProps = pdf.getImageProperties(imgData);
                 const imgRatio = imgProps.width / imgProps.height;
                 const pdfRatio = pdfWidth / pdfHeight;
 
                 let renderWidth, renderHeight, offsetX, offsetY;
 
-                // 이미지가 PDF보다 더 납작하면 (가로로 긴 경우) -> 가로를 꽉 채움
                 if (imgRatio > pdfRatio) {
                     renderWidth = pdfWidth;
                     renderHeight = pdfWidth / imgRatio;
                     offsetX = 0;
-                    offsetY = (pdfHeight - renderHeight) / 2; // 세로 중앙 정렬
-                } 
-                // 이미지가 PDF보다 더 홀쭉하면 (세로로 긴 경우) -> 세로를 꽉 채움
-                else {
+                    offsetY = (pdfHeight - renderHeight) / 2; 
+                } else {
                     renderHeight = pdfHeight;
                     renderWidth = pdfHeight * imgRatio;
-                    offsetX = (pdfWidth - renderWidth) / 2; // 가로 중앙 정렬
+                    offsetX = (pdfWidth - renderWidth) / 2; 
                     offsetY = 0;
                 }
 
                 pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderWidth, renderHeight);
-
                 iterPage++;
             }
 
             if (iterPage > 1) {
                 pdf.save(`MyBook_Full_Note.pdf`);
-                
-                // ⭐️ [수정] 다운로드 확인 메시지 (태블릿 대응)
                 showCustomModal(
                     "✅ 저장 완료", 
                     `총 ${iterPage - 1}페이지가 PDF로 변환되었습니다.\n\n(태블릿의 '파일' 앱이나 '다운로드' 폴더를 확인해주세요!)`
@@ -486,6 +516,11 @@ document.addEventListener("DOMContentLoaded", () => {
             if(guidePanel) guidePanel.style.display = 'flex';
             if(openBtn) openBtn.style.display = 'block';
             
+            // 심화 질문 상태 복구
+            if(currentChallengeQuestion && challengeArea) {
+                challengeArea.style.display = 'flex';
+            }
+            
             const titleEl = document.getElementById('current-page-topic');
             if(titleEl) titleEl.textContent = pageTitles[currentPage] || "자유 복습 노트";
 
@@ -494,6 +529,8 @@ document.addEventListener("DOMContentLoaded", () => {
             loading.querySelector('span').textContent = "AI 선생님이 채점 중입니다... 🤖";
         }
     }
+
+
     // =========================================
     // [7] 이벤트 리스너 연결
     // =========================================
@@ -516,11 +553,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if(pdfBtn) {
         pdfBtn.addEventListener('click', exportToPDF);
     }
-
-    // [수정] 가이드라인 패널 토글 버튼은 HTML inline script로 처리했으므로
-    // 여기서는 별도로 추가하지 않아도 되지만, 
-    // content-area 사이즈 조정과 연동이 필요하다면 여기서도 제어 가능.
-    // (현재 HTML의 script 태그에서 이미 잘 처리하고 있으므로 생략)
+    
+    if(btnCloseChallenge) {
+        btnCloseChallenge.addEventListener('click', closeChallenge);
+    }
 
     // 초기 로딩
     loadTempData();
