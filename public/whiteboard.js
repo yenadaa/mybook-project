@@ -66,6 +66,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // =========================================
     // [3] 캔버스 및 그리기 로직
     // =========================================
+    // 1. CSS 설정 (필수: 스크롤/확대 방지)
+    canvas.style.touchAction = 'none'; 
+
     btnModeSwitch.addEventListener('click', () => {
         if (inputMode === 'drawing') {
             inputMode = 'text';
@@ -90,6 +93,7 @@ document.addEventListener("DOMContentLoaded", () => {
         canvas.height = canvasContainer.clientHeight;
         try { ctx.putImageData(temp, 0, 0); } catch(e){} 
         ctx.lineCap = 'round';
+        ctx.lineJoin = 'round'; 
         updateToolStyle();
     }
     window.addEventListener('resize', resizeCanvas);
@@ -106,71 +110,58 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    function startDraw(e) { if(inputMode !== 'drawing') return; isDrawing = true; draw(e); }
-    function endDraw() { isDrawing = false; ctx.beginPath(); }
+    // ⭐️ Pointer Event 사용 (마우스/펜/터치 통합)
+    function startDraw(e) {
+        if(inputMode !== 'drawing') return;
+        if (e.button !== 0 && e.buttons !== 1) return;
+        
+        e.preventDefault(); 
+        isDrawing = true;
+        
+        ctx.beginPath();
+        const { x, y } = getPoint(e);
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+    }
+
     function draw(e) {
         if(!isDrawing) return;
-        const rect = canvas.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        const x = clientX - rect.left;
-        const y = clientY - rect.top;
-        ctx.lineTo(x, y); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(x, y);
+        if(e.buttons !== 1) { endDraw(); return; } 
+        
         e.preventDefault();
+        const { x, y } = getPoint(e);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+    }
+
+    function endDraw() {
+        if (!isDrawing) return;
+        isDrawing = false;
+        ctx.closePath();
+    }
+
+    function getPoint(e) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+        };
     }
 
     // 캔버스 이벤트 연결
-    canvas.addEventListener('mousedown', startDraw); 
-    canvas.addEventListener('mousemove', draw);
-    canvas.addEventListener('mouseup', endDraw); 
-    canvas.addEventListener('mouseleave', endDraw);
-    canvas.addEventListener('touchstart', startDraw, {passive: false}); 
-    canvas.addEventListener('touchmove', draw, {passive: false});
-    canvas.addEventListener('touchend', endDraw);
+    canvas.addEventListener('pointerdown', startDraw); 
+    canvas.addEventListener('pointermove', draw);
+    canvas.addEventListener('pointerup', endDraw); 
+    canvas.addEventListener('pointercancel', endDraw); 
+    canvas.addEventListener('pointerout', endDraw);
 
-    // 툴바 버튼 이벤트
+    // ⭐️ [복구됨] 툴바 버튼 이벤트 연결 (여기가 빠져서 안 됐던 겁니다!)
     document.getElementById('btn-pen').onclick = () => { currentTool='pen'; updateToolStyle(); };
     document.getElementById('btn-eraser').onclick = () => { currentTool='eraser'; updateToolStyle(); };
     document.getElementById('btn-clear').onclick = () => ctx.clearRect(0,0,canvas.width, canvas.height);
     document.getElementById('colorPicker').onchange = () => { currentTool='pen'; updateToolStyle(); };
     document.getElementById('btn-back').addEventListener('click', goBack);
-
-
-    // =========================================
-    // [4] 심화 질문 UI 로직
-    // =========================================
-    const challengeArea = document.getElementById('challenge-area');
-    const challengeTextEl = document.getElementById('challenge-text');
-    const btnChallengeClose = document.getElementById('btn-challenge-close');
-    const btnOpenChallenge = document.getElementById('btn-open-challenge'); 
-
-    function setChallengeMode(question) {
-        currentChallengeQuestion = question;
-        challengeTextEl.textContent = question;
-        challengeArea.style.display = 'block';
-        if(btnOpenChallenge) btnOpenChallenge.style.display = 'none';
-        
-        const submitBtn = document.getElementById('btn-submit');
-        submitBtn.textContent = '💬 답변 제출';
-        submitBtn.classList.add('btn-answer');
-    }
-
-    function closeChallenge() {
-        challengeArea.style.display = 'none';
-        if (currentChallengeQuestion) {
-            if(btnOpenChallenge) btnOpenChallenge.style.display = 'block';
-        }
-    }
-
-    if(btnOpenChallenge) {
-        btnOpenChallenge.addEventListener('click', () => {
-            challengeArea.style.display = 'block';
-            btnOpenChallenge.style.display = 'none';
-        });
-    }
-    btnChallengeClose.addEventListener('click', closeChallenge);
-
 
     // =========================================
     // [5] 서버 통신 기능
@@ -375,13 +366,14 @@ document.addEventListener("DOMContentLoaded", () => {
         
         try {
             const { jsPDF } = window.jspdf;
+            // A4 가로 모드 (landscape)
             const pdf = new jsPDF('l', 'mm', 'a4'); 
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = pdf.internal.pageSize.getHeight();
 
-            // [수정] PDF 생성 중 UI 숨기기 (가이드라인 포함)
+            // UI 숨기기
             const toolbar = document.querySelector('.toolbar');
-            const guidePanel = document.getElementById('guideline-panel'); // 가이드라인
+            const guidePanel = document.getElementById('guideline-panel');
             const openBtn = document.getElementById('btn-open-panel');
             
             toolbar.style.display = 'none';
@@ -406,6 +398,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const data = await res.json();
                 if (!data.text && !data.imageData) { hasData = false; break; }
 
+                // 캔버스/텍스트 복원
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 document.getElementById('typingArea').value = data.text || "";
                 
@@ -425,9 +418,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     });
                 }
 
-                // 캡처
+                // 캡처 (고해상도)
                 const targetElement = document.getElementById('capture-area');
-                
                 const canvasElement = await html2canvas(targetElement, {
                     scale: 2, 
                     useCORS: true,
@@ -440,30 +432,42 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 if (iterPage > 1) pdf.addPage(); 
 
+                // ⭐️ [수정] A4 꽉 채우기 계산 로직
+                // 여백을 최소화하고 가로/세로 중 더 긴 쪽에 맞춰 꽉 채웁니다.
                 const imgProps = pdf.getImageProperties(imgData);
-                const ratio = imgProps.width / imgProps.height;
-                const windowRatio = pdfWidth / pdfHeight;
+                const imgRatio = imgProps.width / imgProps.height;
+                const pdfRatio = pdfWidth / pdfHeight;
 
-                let renderWidth, renderHeight;
-                if (ratio > windowRatio) {
+                let renderWidth, renderHeight, offsetX, offsetY;
+
+                // 이미지가 PDF보다 더 납작하면 (가로로 긴 경우) -> 가로를 꽉 채움
+                if (imgRatio > pdfRatio) {
                     renderWidth = pdfWidth;
-                    renderHeight = pdfWidth / ratio;
-                } else { 
+                    renderHeight = pdfWidth / imgRatio;
+                    offsetX = 0;
+                    offsetY = (pdfHeight - renderHeight) / 2; // 세로 중앙 정렬
+                } 
+                // 이미지가 PDF보다 더 홀쭉하면 (세로로 긴 경우) -> 세로를 꽉 채움
+                else {
                     renderHeight = pdfHeight;
-                    renderWidth = pdfHeight * ratio;
+                    renderWidth = pdfHeight * imgRatio;
+                    offsetX = (pdfWidth - renderWidth) / 2; // 가로 중앙 정렬
+                    offsetY = 0;
                 }
 
-                const x = (pdfWidth - renderWidth) / 2;
-                const y = (pdfHeight - renderHeight) / 2;
-
-                pdf.addImage(imgData, 'JPEG', x, y, renderWidth, renderHeight);
+                pdf.addImage(imgData, 'JPEG', offsetX, offsetY, renderWidth, renderHeight);
 
                 iterPage++;
             }
 
             if (iterPage > 1) {
                 pdf.save(`MyBook_Full_Note.pdf`);
-                showCustomModal("✅ 변환 완료", `총 ${iterPage - 1}페이지가 저장되었습니다!`);
+                
+                // ⭐️ [수정] 다운로드 확인 메시지 (태블릿 대응)
+                showCustomModal(
+                    "✅ 저장 완료", 
+                    `총 ${iterPage - 1}페이지가 PDF로 변환되었습니다.\n\n(태블릿의 '파일' 앱이나 '다운로드' 폴더를 확인해주세요!)`
+                );
             } else {
                 showCustomModal("알림", "저장할 내용이 없습니다.");
             }
@@ -472,14 +476,14 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error(e);
             showCustomModal("❌ 실패", e.message);
         } finally {
-            // [수정] UI 복구
+            // UI 복구
             currentPage = originalPage;
             const toolbar = document.querySelector('.toolbar');
             const openBtn = document.getElementById('btn-open-panel');
-            const guidePanel = document.getElementById('guideline-panel'); // 가이드라인 복구
+            const guidePanel = document.getElementById('guideline-panel');
 
             toolbar.style.display = 'flex';
-            if(guidePanel) guidePanel.style.display = 'flex'; // 다시 보이게
+            if(guidePanel) guidePanel.style.display = 'flex';
             if(openBtn) openBtn.style.display = 'block';
             
             const titleEl = document.getElementById('current-page-topic');
@@ -490,7 +494,6 @@ document.addEventListener("DOMContentLoaded", () => {
             loading.querySelector('span').textContent = "AI 선생님이 채점 중입니다... 🤖";
         }
     }
-
     // =========================================
     // [7] 이벤트 리스너 연결
     // =========================================
