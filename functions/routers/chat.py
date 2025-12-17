@@ -2,42 +2,38 @@ from firebase_functions import https_fn, options
 from core.config import get_db, ALLOWED_ORIGIN
 import json
 import os
+import sys
 import traceback
+from openai import OpenAI
+
+# 상위 폴더 모듈 가져오기
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    # quiz_generator에서 필요한 모듈 가져오기
+    from quiz_generator import search_chunks_with_bm25, PreprocessedDoc
+    # ⭐️ quiz.py에 있는 공통 로더 가져오기 (1MB 제한 해결됨)
+    from routers.quiz import _load_doc_data 
+except ImportError:
+    pass
 
 @https_fn.on_request(
     secrets=["OPENAI_API_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_KEY"],
     memory=options.MemoryOption.GB_1,
-    timeout_sec=60
+    timeout_sec=60,
+    region="asia-northeast3"
 )
 def ragChat(req: https_fn.Request) -> https_fn.Response:
+    # 1. CORS
     if req.method == "OPTIONS":
         headers = {
             "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
             "Access-Control-Allow-Methods": "POST, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            "Access-Control-Max-Age": "3600",
         }
         return https_fn.Response("", status=204, headers=headers)
     
-    response_headers = {"Access-Control-Allow-Origin": ALLOWED_ORIGIN}
-
-    db = get_db()
-    
-    from quiz_generator import search_chunks_with_bm25, PreprocessedDoc
-
-    try:
-        from supabase import create_client
-        from langchain_openai import OpenAIEmbeddings
-        from openai import OpenAI
-        
-        supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
-        supabase_client = create_client(supabase_url, supabase_key)
-        supabase_embeddings = OpenAIEmbeddings(openai_api_key=os.environ.get("OPENAI_API_KEY"))
-        openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-    except Exception as e:
-        return https_fn.Response(json.dumps({"error": f"초기화 실패: {e}"}), status=500, headers=response_headers)
+    headers = {"Access-Control-Allow-Origin": ALLOWED_ORIGIN}
 
     try:
         data = req.get_json(silent=True)
@@ -45,89 +41,122 @@ def ragChat(req: https_fn.Request) -> https_fn.Response:
         
         base_system_prompt = data.get("system_prompt", "")
         chat_history = data.get("messages", [])
-        book_id = data.get("book_id")
         user_query = chat_history[-1]["content"] if chat_history else ""
+        
+        # ⭐️ [추가] persona 확인 (기본값 professor)
+        persona = data.get("persona", "professor")
+        
+        book_id = data.get("book_id")
+        folder_id = data.get("folder_id")
 
-        if not book_id or not user_query:
-            raise Exception("book_id 또는 질문 내용이 없습니다.")
+        if not book_id and not folder_id:
+            raise Exception("대상을 선택해주세요 (book_id or folder_id).")
+        if not user_query:
+            raise Exception("질문 내용이 없습니다.")
 
     except Exception as e:
-        return https_fn.Response(json.dumps({"error": str(e)}), status=422, headers=response_headers)
+        return https_fn.Response(json.dumps({"error": str(e)}), status=400, headers=headers)
 
-    context_text = ""
-    
+    # 2. 문서 로드 (공통 로더 사용 -> 1MB 제한 극복 & 폴더 지원)
+    doc_obj = None
     try:
-        # [Step 3-1] BM25 검색
-        try:
-            # _load_processed_doc_from_firestore 함수는 routers/tools.py에 있거나 여기서 정의해야 함
-            # 여기서는 편의상 내부 정의 없이 직접 DB 접근한다고 가정 (혹은 tools에서 import)
-            doc_ref = db.collection("books").document(book_id)
-            doc_snapshot = doc_ref.get()
-            if doc_snapshot.exists and doc_snapshot.get("processedData"):
-                doc_obj = PreprocessedDoc(**doc_snapshot.get("processedData"))
-                bm25_chunks = search_chunks_with_bm25(doc_obj, user_query, top_k=4)
-                if bm25_chunks:
-                    context_list = []
-                    for c in bm25_chunks:
-                        page_num = c.metadata.get("page", 1) if c.metadata else 1
-                        context_list.append(f"[PAGE {page_num}] {c.text}")
-                    context_text = "\n\n".join(context_list)
-                    print(f"--- ✅ BM25 검색 성공 ({len(bm25_chunks)}개) ---")
-        except Exception as bm25_e:
-            print(f"⚠️ BM25 검색 건너뜀: {bm25_e}")
+        payload = {}
+        if book_id: payload['bookId'] = book_id
+        if folder_id: payload['folderId'] = folder_id
+        
+        doc_obj = _load_doc_data(payload)
+        
+    except Exception as e:
+        print(f"Doc Load Error: {e}")
+        pass
 
-        # [Step 3-2] 벡터 검색
-        if not context_text:
-            print("--- 🔍 벡터 검색(Supabase) 시도 ---")
-            query_vec = supabase_embeddings.embed_query(user_query)
-            rpc_res = supabase_client.rpc("match_documents", {
-                "query_embedding": query_vec,
-                "filter": {"bookId": book_id},
-                "match_count": 4
-            }).execute()
+    # 3. RAG 검색 (BM25)
+    context_text = ""
+    try:
+        if doc_obj:
+            top_k = 10 if folder_id else 5
             
-            valid_docs = []
-            for d in rpc_res.data:
-                if d['similarity'] > 0.5:
-                    meta = d.get('metadata', {})
-                    page_num = meta.get('page', 1)
-                    valid_docs.append(f"[PAGE {page_num}] {d['content']}")
+            search_query = user_query
+            if len(chat_history) > 1:
+                search_query += " " + chat_history[-2]["content"][:50]
+                
+            chunks = search_chunks_with_bm25(doc_obj, search_query, top_k=top_k)
             
-            if valid_docs:
-                context_text = "\n\n".join(valid_docs)
+            if chunks:
+                context_list = []
+                for c in chunks:
+                    src = c.metadata.get('source_book', '문서')
+                    page = c.metadata.get('page', '?')
+                    context_list.append(f"[[출처: {src} | p.{page}]]\n{c.text}")
+                
+                context_text = "\n\n".join(context_list)
+                print(f"✅ RAG 검색 성공: {len(chunks)}개 청크")
             else:
                 context_text = "문서에서 관련 내용을 찾을 수 없습니다."
+    except Exception as e:
+        print(f"RAG Error: {e}")
+
+    # 4. 하이라이트 (단일 파일일 때만)
+    highlights_text = ""
+    if book_id:
+        try:
+            db = get_db()
+            h_docs = db.collection('highlights').where('bookId', '==', book_id).limit(10).stream()
+            h_list = [d.to_dict().get('text') for d in h_docs]
+            if h_list: highlights_text = "\n".join([f"- {t}" for t in h_list if t])
+        except: pass
+
+    # 5. GPT 응답 생성
+    try:
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        
+        # ⭐️ [핵심 수정] 페르소나에 따라 제약 조건 다르게 적용
+        if persona == 'general':
+            # ✅ 자유 모드: 제약 없음, 문서는 '참고용'으로만 제공
+            final_prompt = f"""
+            {base_system_prompt}
+
+            [상황]
+            사용자는 문서 내용을 보고 있지만, 당신에게 자유로운 질문을 하고 싶어합니다.
+            
+            [참조 문서 내용 (참고용)]
+            {context_text}
+            
+            [지시사항]
+            1. 위 [참조 문서]에 내용이 있다면 활용해서 답변하세요.
+            2. **하지만 문서에 내용이 없거나 부족하면, 당신의 일반 지식을 총동원해서 답변하세요.**
+            3. "문서에 없습니다"라는 말은 하지 마세요.
+            """
+        else:
+            # 🔒 엄격 모드 (기존 로직): 문서 내용만 말해라
+            final_prompt = f"""
+            {base_system_prompt}
+            
+            [상황]
+            사용자는 문서(또는 문서 폴더)에 대해 질문하고 있습니다.
+            
+            [참조 문서 내용 (RAG)]
+            {context_text}
+            
+            [사용자의 중요 표시 (Highlights)]
+            {highlights_text}
+            
+            [지시사항]
+            1. [참조 문서 내용]을 최우선으로 근거하여 답변하세요.
+            2. 여러 출처의 내용이 있다면 "A문서에 따르면..., B문서에서는..." 처럼 구분해 주세요.
+            3. **문서에 없는 내용은 지어내지 말고 "문서에 내용이 없습니다"라고 하세요.**
+            """
+
+        messages = [{"role": "system", "content": final_prompt}] + chat_history
+        
+        res = client.chat.completions.create(
+            model="gpt-4o", 
+            messages=messages,
+            temperature=0.3
+        )
+        reply = res.choices[0].message.content
+        
+        return https_fn.Response(json.dumps({"reply": reply}), status=200, headers=headers)
 
     except Exception as e:
-        print(f"검색 프로세스 오류: {traceback.format_exc()}")
-        context_text = "검색 중 오류가 발생하여 문서를 참조하지 못했습니다."
-
-    user_highlights_text = ""
-    try:
-        highlight_docs = db.collection('highlights').where('bookId', '==', book_id).limit(15).stream()
-        h_list = [f"- {d.to_dict()['text']}" for d in highlight_docs if d.to_dict().get('text')]
-        if h_list:
-            user_highlights_text = "\n".join(h_list)
-    except Exception as hl_e:
-        print(f"하이라이트 로드 실패: {hl_e}")
-
-    try:
-        final_system_prompt = f"""
-        {base_system_prompt}
-        ---
-        [시스템 지침]
-        ... (기존 프롬프트 내용 유지) ...
-        [사용자가 밑줄 친 핵심 내용]
-        {user_highlights_text}
-        [문서 문맥]
-        {context_text}
-        """
-
-        messages_for_api = [{"role": "system", "content": final_system_prompt}] + chat_history
-        completion = openai_client.chat.completions.create(model="gpt-4o", messages=messages_for_api)
-        reply = completion.choices[0].message.content
-        return https_fn.Response(json.dumps({"reply": reply}), status=200, headers=response_headers)
-
-    except Exception as e:
-        return https_fn.Response(json.dumps({"error": f"GPT 오류: {e}"}), status=500, headers=response_headers)
-    
+        return https_fn.Response(json.dumps({"error": f"GPT Error: {e}"}), status=500, headers=headers)

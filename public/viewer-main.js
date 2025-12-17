@@ -92,6 +92,9 @@ function initChatbot() {
                 default:
                     systemPromptText = PROMPTS.builder_v3;  // 개념 구축형 (교수)
                     break;
+                case "general":
+                    systemPromptText = PROMPTS.general_v1; 
+                    break;
             }
 
             localChatHistory.push({ role: "user", content: userText });
