@@ -201,7 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     console.log("Viewer UI: Event listeners setup started...");
 
-    // [추가12-17] 패널 리사이저 로직 함수 (setupResizer)
+    // [추가12-17] 패널 리사이저 로직 함수 (setupResizer) - [12-17 수정] 태블릿 터치 지원 추가
     function setupResizer(resizerId, panelEl, minWidth, isRight) {
         const resizer = document.getElementById(resizerId);
         if (!resizer) return;
@@ -211,11 +211,13 @@ document.addEventListener('DOMContentLoaded', () => {
         let initialWidth;
         let newWidth; // 전역 스코프로 이동
 
-        resizer.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return; 
+        // ---------------------------------------------------------
+        // [공통 로직 1] 드래그 시작 (마우스/터치 공용)
+        // ---------------------------------------------------------
+        const startDrag = (clientX) => {
             isDragging = true;
             resizer.classList.add('is-dragging');
-            initialX = e.clientX;
+            initialX = clientX;
             
             // 숨겨져 있을 경우 초기 너비를 '이전 저장된 값'으로 설정
             const currentProp = document.documentElement.style.getPropertyValue('--right-panel-width');
@@ -225,16 +227,17 @@ document.addEventListener('DOMContentLoaded', () => {
             
             document.body.style.userSelect = 'none'; 
             document.body.style.cursor = 'col-resize'; 
-        }, { passive: true }); // passive: true 추가
+        };
 
-        document.addEventListener('mousemove', (e) => {
+        // ---------------------------------------------------------
+        // [공통 로직 2] 드래그 중 계산 (마우스/터치 공용)
+        // ---------------------------------------------------------
+        const onDrag = (clientX) => {
             if (!isDragging) return;
-            e.preventDefault(); // 드래그 중 다른 선택 방지
-
-            const deltaX = e.clientX - initialX;
+            
+            const deltaX = clientX - initialX;
             
             // 오른쪽 패널: 마우스가 왼쪽으로 이동(deltaX < 0)하면 너비 증가
-            // isRight는 항상 true로 설정되므로 조건문은 필요 없지만 구조 유지를 위해 남김
             if (isRight) {
                 newWidth = initialWidth - deltaX;
                 
@@ -249,17 +252,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 // CSS 변수 업데이트
                 document.documentElement.style.setProperty('--right-panel-width', `${newWidth}px`);
             }
-        });
+        };
 
-        document.addEventListener('mouseup', () => {
+        // ---------------------------------------------------------
+        // [공통 로직 3] 드래그 종료 (마우스/터치 공용)
+        // ---------------------------------------------------------
+        const endDrag = () => {
             if (!isDragging) return; 
-
             isDragging = false;
             resizer.classList.remove('is-dragging');
             document.body.style.userSelect = '';
             document.body.style.cursor = '';
             
-            // 0px 여부 확인 및 클래스 토글
+            // 0px 여부 확인 및 클래스 토글 (팀원 로직 유지)
             const currentRightWidth = document.documentElement.style.getPropertyValue('--right-panel-width');
             const finalWidth = parseInt(currentRightWidth, 10);
             
@@ -273,7 +278,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // 로컬 스토리지에 최종 너비 저장 
             localStorage.setItem('rightPanelWidth', String(finalWidth));
+        };
+
+        // ---------------------------------------------------------
+        // [이벤트 연결 1] 마우스 이벤트 (PC)
+        // ---------------------------------------------------------
+        resizer.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return; 
+            startDrag(e.clientX);
+        }, { passive: true });
+
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                e.preventDefault(); // 드래그 중 텍스트 선택 방지
+                onDrag(e.clientX);
+            }
         });
+
+        document.addEventListener('mouseup', endDrag);
+
+        // ---------------------------------------------------------
+        // [이벤트 연결 2] 터치 이벤트 (태블릿/모바일) - 새로 추가된 부분
+        // ---------------------------------------------------------
+        resizer.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 0) {
+                startDrag(e.touches[0].clientX);
+            }
+        }, { passive: false }); // 스크롤 방지를 위해 passive: false
+
+        document.addEventListener('touchmove', (e) => {
+            if (isDragging && e.touches.length > 0) {
+                e.preventDefault(); // 중요: 터치 드래그 중 화면 스크롤 막기
+                onDrag(e.touches[0].clientX);
+            }
+        }, { passive: false });
+
+        document.addEventListener('touchend', endDrag);
+
     } // setupResizer 함수 종료
 
     // 1. 네비게이션 & 줌

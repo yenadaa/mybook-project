@@ -42,6 +42,7 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
     background: transparent; 
     z-index: 50; 
     transition: background-color 0.2s;
+    touch-action: none;
 }
 .resizer:hover {
     background-color: rgba(99, 102, 241, 0.3); 
