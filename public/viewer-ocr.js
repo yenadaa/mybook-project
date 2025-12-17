@@ -143,6 +143,12 @@ export async function extractAndRunOcr(pageNumber, rect) {
         const result = await runOcrOnSelection({ imageData: base64ImageData });
         const detectedText = result.data.text || "";
         console.log("Cloud Vision API 결과:", detectedText);
+        if (detectedText.trim()) {
+            // 👇 [추가] 챗봇에게 바로 물어볼지 확인
+            if(confirm("OCR 추출 성공! 🤖 챗봇에게 이 내용을 설명해달라고 할까요?")) {
+                sendOcrToChat(detectedText);
+            }
+        }
 
         if (detectedText.trim()) {
             const drawCanvas = pageCache.drawCanvas;
@@ -202,4 +208,17 @@ export function showOcrResultModal(isLoading = false, text = "", isError = false
 
 export function hideOcrResultModal() { 
     state.elsOcrModal.overlay?.classList.add('hidden'); 
+}
+
+// [추가] OCR 텍스트를 챗봇으로 전송하는 헬퍼 함수
+export function sendOcrToChat(ocrText) {
+    if(!ocrText) return alert("전송할 텍스트가 없습니다.");
+    
+    const event = new CustomEvent('triggerChatQuery', {
+        detail: { 
+            text: `다음 이미지(OCR 추출) 내용을 분석하고 설명해줘:\n\n${ocrText}`, 
+            mode: 'general' 
+        }
+    });
+    document.dispatchEvent(event);
 }

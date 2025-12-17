@@ -6,7 +6,7 @@ import './viewer-state.js';
 import './viewer-ui.js'; 
 
 // 2. 렌더링 및 하이라이트 함수 임포트
-import { renderDocument, clearDocument } from './viewer-renderer.js';
+import { renderDocument, scrollToPage, clearDocument } from './viewer-renderer.js';
 import { setHighlightsData } from './viewer-highlight-manager.js';
 
 // 3. 챗봇 관련 임포트
@@ -146,7 +146,7 @@ function initChatbot() {
         }
     });
 
-    // ⭐️ [UI 헬퍼 함수] 말풍선 추가
+    // ⭐️ [UI 헬퍼 함수] 말풍선 추가 [12.17 수정]
     function addChatMessage(sender, text, type, id) {
         const msgDiv = document.createElement("div");
         msgDiv.classList.add("chat-message", sender);
@@ -154,24 +154,101 @@ function initChatbot() {
         if (id) msgDiv.id = id;
         
         const p = document.createElement("p");
-        p.textContent = text;
+        
+        // 🤖 봇이 말한 경우에만 링크 변환 기능 적용
+        if (sender === 'bot' || sender === 'assistant') {
+            p.innerHTML = formatPageLink(text); // 텍스트를 HTML 버튼으로 변환
+        } else {
+            p.textContent = text;
+        }
+
         msgDiv.appendChild(p);
         
         if (chatMessages) {
-             chatMessages.appendChild(msgDiv);
-             chatMessages.scrollTop = chatMessages.scrollHeight;
+                chatMessages.appendChild(msgDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
         }
         return msgDiv;
     }
 
+    // [2] 텍스트 -> 버튼 변환 함수 (새로 추가)
+    function formatPageLink(text) {
+        // 1. 볼드체(**) 제거: **p.12** -> p.12 (버튼이 깨지는 원인 제거)
+        let cleanText = text.replace(/\*\*(p\.\s*\d+|page\s*\d+|페이지\s*\d+)\*\*/gi, '$1');
+
+        // 2. 정규식: "p.12", "p. 12", "page 12", "페이지 12" 다 잡음
+        const regex = /(?:p\.|page|페이지)\s*(\d+)/gi;
+        
+        // 3. 줄바꿈 처리 및 버튼 변환
+        return cleanText.replace(/\n/g, '<br>').replace(regex, (match, pageNum) => {
+            return `<button onclick="window.moveToPage(${pageNum})" 
+                    style="color:#2563eb; background:#eff6ff; border:none; padding:2px 6px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:0.9em; margin:0 2px; vertical-align:middle;">
+                    📄 ${pageNum}p 이동
+                    </button>`;
+        });
+    }
+
     // ⭐️ [UI 헬퍼 함수] 말풍선 내용 업데이트
     function updateChatMessage(element, newText) {
-        if (element) {
-            element.classList.remove("loading");
-            const p = element.querySelector("p");
-            if (p) p.textContent = newText;
-            
-            if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+            if (element) {
+                element.classList.remove("loading");
+                const p = element.querySelector("p");
+                
+                if (p) {
+                    // 🤖 봇 메시지(bot/assistant)인 경우에만 링크 변환 + HTML 적용
+                    if (element.classList.contains('bot') || element.classList.contains('assistant')) {
+                        p.innerHTML = formatPageLink(newText);
+                    } else {
+                        // 사용자 메시지는 보안상 텍스트로 처리
+                        p.textContent = newText;
+                    }
+                }
+                
+                if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
         }
     }
-}
+
+window.moveToPage = function(pageNum) {
+    console.log(`🚀 챗봇 요청으로 ${pageNum}페이지로 이동합니다.`);
+    
+    // [수정] renderDocument나 renderPage가 아니라, 'scrollToPage'를 호출합니다!
+    if (typeof scrollToPage === 'function') { // import한 함수 직접 사용
+        scrollToPage(parseInt(pageNum));
+    } 
+    // 만약 import가 안 되는 구조라면 window 전역 객체 등을 확인해야 함
+    else {
+        console.error("scrollToPage 함수를 찾을 수 없습니다.");
+    }
+};
+
+// [추가] 외부에서 챗봇 질문 트리거 (드래그 검색 / OCR 연동용)
+// =========================================
+document.addEventListener('triggerChatQuery', (e) => {
+    const { text, mode } = e.detail;
+    if (!text) return;
+
+    // 1. 채팅 패널 열기 (숨겨져 있을 경우)
+    // ※ 주의: 본인의 HTML ID에 맞게 수정 필요 (보통 chat-container 또는 chat-sidebar)
+    const chatContainer = document.getElementById('chat-messages')?.parentElement; 
+    const toggleBtn = document.getElementById('chat-toggle-btn'); // 토글 버튼 ID
+    
+    // 채팅창이 안 보이면 토글 버튼 클릭해서 열기
+    if (chatContainer && (chatContainer.style.display === 'none' || chatContainer.classList.contains('hidden'))) {
+        if(toggleBtn) toggleBtn.click();
+    }
+
+    // 2. 채팅 입력창에 텍스트 넣기
+    const chatInput = document.getElementById('chat-input');
+    if (chatInput) {
+        chatInput.value = text;
+        chatInput.focus(); // 포커스 이동 (타이핑 준비)
+    }
+
+    // 3. 자동으로 전송 버튼 누르기 (0.5초 뒤)
+    setTimeout(() => {
+        const sendBtn = document.getElementById('chat-send-btn');
+        // 모드 변경이 필요하면 여기서 select 변경 로직 추가 가능
+        if (sendBtn) sendBtn.click();
+    }, 500);
+});

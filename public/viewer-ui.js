@@ -663,3 +663,98 @@ document.addEventListener('DOMContentLoaded', () => {
 
     console.log("Viewer UI setup complete.");
 });
+
+// [추가] 외부에서 챗봇 질문 트리거 (드래그 검색 / OCR 연동용)12.17
+// =========================================
+document.addEventListener('triggerChatQuery', (e) => {
+    const { text, mode } = e.detail;
+    if (!text) return;
+
+    // 1. 채팅 패널이 닫혀있으면 열기
+    // (chat-container나 toggle 버튼 ID는 프로젝트 상황에 맞춰 동작)
+    const chatContainer = document.getElementById('chat-container'); // 채팅창 ID 확인 필요
+    const toggleBtn = document.getElementById('chat-toggle-btn');   // 토글 버튼 ID 확인 필요
+    
+    // 채팅창이 숨겨져 있다면 토글 버튼 클릭 (또는 클래스 제거)
+    if (chatContainer && (chatContainer.style.display === 'none' || chatContainer.classList.contains('hidden'))) {
+        if(toggleBtn) toggleBtn.click();
+    }
+
+    // 2. 채팅 입력창에 텍스트 넣기
+    const chatInput = document.getElementById('chat-input');
+    if (chatInput) {
+        chatInput.value = text;
+        chatInput.focus(); // 포커스 이동
+    }
+
+    // 3. (선택사항) 자동으로 전송 버튼 누르기
+    // 사용자가 수정할 기회를 주고 싶으면 이 부분은 주석 처리하세요.
+    setTimeout(() => {
+        const sendBtn = document.getElementById('chat-send-btn');
+        if (sendBtn) sendBtn.click();
+    }, 500);
+});
+
+// [추가] 텍스트 드래그 시 'AI 질문하기' 플로팅 버튼 표시
+// =========================================
+document.addEventListener('mouseup', (e) => {
+    const selection = window.getSelection();
+    const selectedText = selection.toString().trim();
+    const existingBtn = document.getElementById('float-ask-btn');
+
+    // 1. 선택된 텍스트가 없으면 버튼 숨김
+    if (selectedText.length === 0) {
+        if (existingBtn) existingBtn.style.display = 'none';
+        return;
+    }
+
+    // 2. 버튼 생성 (없으면 새로 만듦)
+    let btn = existingBtn;
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'float-ask-btn';
+        btn.innerHTML = '🤖 <b>AI에게 물어보기</b>';
+        btn.style.cssText = `
+            position: fixed; 
+            z-index: 9999; 
+            background: #3b82f6; 
+            color: white; 
+            border: none; 
+            padding: 8px 14px; 
+            border-radius: 20px; 
+            cursor: pointer; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            font-size: 14px;
+            font-family: sans-serif;
+            transition: opacity 0.2s;
+        `;
+        document.body.appendChild(btn);
+
+        // 버튼 클릭 이벤트
+        btn.addEventListener('mousedown', (evt) => {
+            evt.preventDefault(); // 선택 영역 풀림 방지
+            evt.stopPropagation();
+            
+            const currentSel = window.getSelection().toString().trim();
+            if (!currentSel) return;
+
+            // -> viewer-main.js로 신호 발사! 🚀
+            const event = new CustomEvent('triggerChatQuery', {
+                detail: { 
+                    text: `다음 텍스트를 설명해줘:\n\n"${currentSel}"`, 
+                    mode: 'general' 
+                }
+            });
+            document.dispatchEvent(event);
+            
+            // 사용 후 숨김 & 선택 해제
+            btn.style.display = 'none';
+            window.getSelection().removeAllRanges();
+        });
+    }
+
+    // 3. 버튼 위치 잡기 (마우스 커서 위쪽)
+    btn.style.display = 'block';
+    btn.style.left = `${e.clientX + 10}px`;
+    btn.style.top = `${e.clientY - 45}px`;
+});
