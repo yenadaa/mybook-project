@@ -35,60 +35,68 @@ function monthLabel(date) {
 async function addReviewSchedule(docId, docTitle) {
     if (!docId) return;
     
-    // 1. 테스트 모드 여부 확인 (시연용)
+    // 1. 시연 모드 선택
     const isTestMode = confirm(
-        `'${docTitle}'의 복습 스케줄을 생성합니다.\n\n[확인] = 지금 당장 알림 테스트 (시연용)\n[취소] = 내일부터 정상 스케줄 시작`
+        `'${docTitle}'의 복습 스케줄을 생성합니다.\n\n[확인] = 시연용 (즉시 퀴즈 생성 & 이동)\n[취소] = 일반용 (내일부터 스케줄 시작)`
     );
 
     try {
         console.log(`📡 스케줄 생성 요청: ${docTitle} (TestMode: ${isTestMode})`);
         
-        // 2. 파이썬 백엔드 호출 (createDemoSchedule)
+        // 2. 스케줄 생성 요청
         const createScheduleFn = httpsCallable(functions, 'createDemoSchedule');
-        
         const result = await createScheduleFn({
             docId: docId,
             title: docTitle,
-            forceNow: isTestMode // True면 1분 전으로 시간 조작
+            forceNow: isTestMode 
         });
 
         const data = result.data;
         
-        // 3. 로컬 캘린더에도 표시를 위해 더미 이벤트 추가 (시각적 피드백용)
+        // 3. 캘린더에 더미 이벤트 표시
         const today = new Date();
         const targetDate = isTestMode ? today : new Date(today.setDate(today.getDate() + 1));
-        const dateKey = ymd(targetDate);
-        
         const events = loadEvents();
         events.push({
              id: `rev_${Date.now()}`,
-             date: dateKey,
+             date: ymd(targetDate),
              title: `📖 ${isTestMode ? '[즉시]' : '[내일]'} 복습: ${docTitle}`,
              docId: docId,
              type: 'review'
         });
         saveEvents(events);
 
-        alert(`✅ ${data.message}`);
-
-        // 4. '지금 당장' 모드라면 알림 강제 발송 트리거
+        // 4. [핵심] 시연 모드일 때: 하이패스 로직
         if (isTestMode) {
-            console.log("🚀 알림 강제 발송 요청 중...");
+            console.log("🚀 [High-Pass] 세션 ID 추적 및 알림 요청...");
             const triggerNotifyFn = httpsCallable(functions, 'testTriggerNotifications');
+            
+            // 여기서 백엔드가 2초 딜레이 후 ID를 가져옵니다.
             const notifyResult = await triggerNotifyFn(); 
-            
-            console.log("📩 알림 발송 로직 실행됨:", notifyResult.data);
-            
-            // 🔥 [추가] 사용자 편의를 위해 콘솔에 안내 문구 출력
-            console.warn("🔔 만약 알림이 오지 않는다면?");
-            console.log("1. Firestore의 'reviewSessions' 컬렉션에 새로 생성된 문서를 확인하세요.");
-            console.log("2. 해당 문서의 ID를 복사하여 아래 주소 뒤에 붙여넣으세요:");
-            console.log("👉 https://mybook-d143d.web.app/quiz-page.html?session=[세션ID]");
-            
-            alert("📩 알림 발송 로직이 실행되었습니다!\n알림이 오지 않는다면 개발자 도구(F12) 콘솔창을 확인하세요.");
+            const sessionId = notifyResult.data.sessionId;
+
+            if (sessionId) {
+                const fullLink = `https://mybook-d143d.web.app/quiz-page.html?session=${sessionId}`;
+                
+                // (1) 콘솔에 멋지게 링크 출력 (혹시 모를 상황 대비)
+                console.group("🎉 복습 세션 준비 완료!");
+                console.log(`🔗 링크: ${fullLink}`);
+                console.groupEnd();
+
+                // (2) 알럿창으로 바로 납치! (알림 기다리지 않음)
+                if(confirm(`✅ 복습 세션이 준비되었습니다!\n(알림 전송됨)\n\n지금 바로 퀴즈를 풀러 이동하시겠습니까?`)) {
+                    window.location.href = fullLink;
+                }
+            } else {
+                // 인덱스 생성 중이거나 예외 상황
+                console.warn("⚠️ 세션 ID를 못 가져왔습니다. (인덱스 생성 확인 필요)");
+                alert("세션은 생성되었으나 ID를 즉시 가져오지 못했습니다.\n잠시 후 알림을 확인하거나 콘솔을 체크하세요.");
+            }
+        } else {
+            alert(`✅ ${data.message}`);
         }
 
-        // 현재 화면 갱신
+        // 화면 갱신
         const state = window.Calendar.state; 
         if(state) {
             renderCalendar(state);
@@ -97,10 +105,16 @@ async function addReviewSchedule(docId, docTitle) {
 
     } catch (error) {
         console.error("스케줄 생성 실패:", error);
-        alert(`오류 발생: ${error.message}`);
+        // 인덱스 에러가 여기서 잡힐 수 있음
+        if (error.message.includes("requires an index")) {
+            alert("⚠️ Firestore 인덱스 생성 중입니다. 잠시만 기다려주세요!");
+            console.log("👇 아래 링크를 클릭해서 인덱스를 만드세요 👇");
+            console.log(error.message); 
+        } else {
+            alert(`오류 발생: ${error.message}`);
+        }
     }
 }
-
 
 function renderCalendar(state) {
   // 전역 state 참조를 위해 저장
