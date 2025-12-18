@@ -90,7 +90,7 @@ def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
 
 @https_fn.on_call(
     region="asia-northeast3",
-    cors=options.CorsOptions("*", ["POST"]) # 키워드(origins=)를 아예 생략
+    cors=options.CorsOptions(cors_origins="*", cors_methods=["POST"])
 )
 def testTriggerNotifications(req: https_fn.CallableRequest) -> https_fn.Response:
     print("👆 [Test] 프론트엔드 요청으로 강제 실행")
@@ -153,6 +153,10 @@ def generateUserReviewSession(req: https_fn.Request) -> https_fn.Response:
             "items": final_items_data,
             "status": "ready"
         })
+
+        quiz_url = f"https://{PROJECT_ID}.web.app/quiz-page.html?session={session_id}"
+        print(f"🚀 [TEST LINK] 세션 생성 완료! 아래 링크로 접속하세요:")
+        print(f"👉 {quiz_url}")
 
         # 3. 알림 전송
         try:
@@ -263,11 +267,10 @@ def submitReviewSession(req: https_fn.CallableRequest) -> https_fn.Response:
 # --------------------------------------------------------
 @https_fn.on_call(
     region="asia-northeast3",
-    # origins도 아니고 cors=True도 아니고 아래 이름이 정답입니다!
-    cors=options.CorsOptions(
-        cors_origins="*",       # origins 대신 cors_origins
-        cors_methods=["POST"]   # methods 대신 cors_methods
-    )
+    secrets=["OPENAI_API_KEY"], 
+    memory=options.MemoryOption.GB_1,
+    # 🔥 [수정] 키워드 인자(cors_origins=)를 빼고 값만 순서대로 전달하여 버전 충돌 방지
+    cors=options.CorsOptions("*", ["POST"]) 
 )
 def createDemoSchedule(req: https_fn.CallableRequest) -> dict:
     """
@@ -279,7 +282,6 @@ def createDemoSchedule(req: https_fn.CallableRequest) -> dict:
     
     doc_id = req.data.get("docId")
     title = req.data.get("title")
-    # force_now가 True면 바로 알림 오게 설정, False면 정석대로(내일) 설정
     force_now = req.data.get("forceNow", False) 
 
     if not doc_id:
@@ -289,24 +291,18 @@ def createDemoSchedule(req: https_fn.CallableRequest) -> dict:
     if not user_id:
         raise https_fn.HttpsError("unauthenticated", "User must be logged in")
 
-    # 1. 기존 퀴즈 아이템이 있는지 확인
     quiz_ref = db.collection("quizItems")
     existing_docs = quiz_ref.where("originalDocId", "==", doc_id).where("userId", "==", user_id).limit(1).get()
 
-    # 2. 퀴즈가 없으면 '더미 퀴즈' 3개 생성 (시연용)
     if not list(existing_docs):
         print(f"[{doc_id}] 퀴즈가 없어서 더미 퀴즈 3개를 생성합니다.")
         batch = db.batch()
         
         for i in range(1, 4):
             new_ref = quiz_ref.document()
-            
-            # 테스트를 위해 날짜를 조작
             if force_now:
-                # 지금 당장 복습해야 할 것으로 설정
                 target_date = datetime.now(timezone.utc) - timedelta(minutes=1)
             else:
-                # 정석: 1일 뒤
                 target_date = datetime.now(timezone.utc) + timedelta(days=1)
 
             dummy_data = {
@@ -315,7 +311,7 @@ def createDemoSchedule(req: https_fn.CallableRequest) -> dict:
                 "docTitle": title,
                 "question": f"[{title}]의 {i}번째 핵심 질문은 무엇인가요? (테스트)",
                 "answer": f"이것은 {i}번째 정답입니다.",
-                "reviewLevel": 0, # 초기 레벨
+                "reviewLevel": 0,
                 "nextReviewDate": target_date,
                 "createdAt": firestore.SERVER_TIMESTAMP
             }
@@ -325,12 +321,10 @@ def createDemoSchedule(req: https_fn.CallableRequest) -> dict:
         msg = "더미 퀴즈 3개 생성 및 스케줄 등록 완료."
     
     else:
-        # 3. 이미 퀴즈가 있다면, 날짜만 '오늘'로 강제 업데이트 (치트키)
         if force_now:
             docs = quiz_ref.where("originalDocId", "==", doc_id).where("userId", "==", user_id).stream()
             batch = db.batch()
             for doc in docs:
-                # 1분 전으로 돌려서 스케줄러가 바로 낚아채게 함
                 past_time = datetime.now(timezone.utc) - timedelta(minutes=1)
                 batch.update(doc.reference, {"nextReviewDate": past_time})
             batch.commit()

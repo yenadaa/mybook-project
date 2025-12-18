@@ -20,7 +20,8 @@ from routers.review import (
     sendReviewNotifications,
     generateUserReviewSession,
     submitReviewSession,
-    testTriggerNotifications
+    testTriggerNotifications,
+    createDemoSchedule
 )
 
 # 5. Tools

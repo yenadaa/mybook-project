@@ -75,8 +75,17 @@ async function addReviewSchedule(docId, docTitle) {
         if (isTestMode) {
             console.log("🚀 알림 강제 발송 요청 중...");
             const triggerNotifyFn = httpsCallable(functions, 'testTriggerNotifications');
-            await triggerNotifyFn(); 
-            alert("📩 알림 발송 완료! (FCM 혹은 콘솔 확인)");
+            const notifyResult = await triggerNotifyFn(); 
+            
+            console.log("📩 알림 발송 로직 실행됨:", notifyResult.data);
+            
+            // 🔥 [추가] 사용자 편의를 위해 콘솔에 안내 문구 출력
+            console.warn("🔔 만약 알림이 오지 않는다면?");
+            console.log("1. Firestore의 'reviewSessions' 컬렉션에 새로 생성된 문서를 확인하세요.");
+            console.log("2. 해당 문서의 ID를 복사하여 아래 주소 뒤에 붙여넣으세요:");
+            console.log("👉 https://mybook-d143d.web.app/quiz-page.html?session=[세션ID]");
+            
+            alert("📩 알림 발송 로직이 실행되었습니다!\n알림이 오지 않는다면 개발자 도구(F12) 콘솔창을 확인하세요.");
         }
 
         // 현재 화면 갱신
