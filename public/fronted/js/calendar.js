@@ -1,4 +1,5 @@
 // calendar.js
+
 const LS_EVENTS = "mybook:calendarEvents";
 const LS_SELECTED_DATE = "mybook:selectedDate";
 
@@ -25,7 +26,49 @@ function monthLabel(date) {
   return date.toLocaleString("ko-KR", { year: "numeric", month: "long" });
 }
 
+// [추가 기능] 망각곡선 주기 계산 (1, 3, 7, 14, 30일 후)
+function addReviewSchedule(docId, docTitle) {
+  const intervals = [1, 3, 7, 14, 30]; // 망각곡선 주기
+  const today = new Date();
+  const events = loadEvents();
+  let addedCount = 0;
+
+  intervals.forEach((gap, index) => {
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() + gap);
+    const dateKey = ymd(targetDate);
+
+    // 중복 방지 (같은 날짜에 같은 문서 복습이 이미 있으면 패스)
+    const exists = events.some(e => e.date === dateKey && e.docId === docId && e.type === 'review');
+    
+    if (!exists) {
+      events.push({
+        id: `rev_${Date.now()}_${index}`,
+        date: dateKey,
+        title: `📖 복습: ${docTitle}`, // 캘린더 표시 제목
+        docId: docId,       // 문서 이동용 ID
+        type: 'review',     // 타입 구분
+        gap: gap            // 며칠 뒤 복습인지 (1일차, 3일차...)
+      });
+      addedCount++;
+    }
+  });
+
+  saveEvents(events);
+  alert(`${addedCount}개의 망각곡선 기반 복습 일정이 캘린더에 등록되었습니다!`);
+  
+  // 현재 화면 갱신
+  const state = window.Calendar.state; 
+  if(state) {
+      renderCalendar(state);
+      renderEventList(state.selectedDate);
+  }
+}
+
 function renderCalendar(state) {
+  // 전역 state 참조를 위해 저장
+  window.Calendar.state = state; 
+
   const grid = document.getElementById("calendarGrid");
   const label = document.getElementById("monthLabel");
   const selectedLabel = document.getElementById("selectedDateLabel");
@@ -38,13 +81,11 @@ function renderCalendar(state) {
   const first = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth(), 1);
   const last = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth() + 1, 0);
 
-  // 시작 요일 보정(일~토)
   const startDay = first.getDay();
   const totalDays = last.getDate();
 
   grid.innerHTML = "";
 
-  // 빈칸
   for (let i = 0; i < startDay; i++) {
     const cell = document.createElement("div");
     cell.className = "day";
@@ -57,16 +98,27 @@ function renderCalendar(state) {
   for (let day = 1; day <= totalDays; day++) {
     const date = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth(), day);
     const key = ymd(date);
-    const hasEvent = events.some(e => e.date === key);
+    
+    // 이벤트가 있는지 확인 (복습 일정은 색상을 다르게 표시할 수도 있음)
+    const dayEvents = events.filter(e => e.date === key);
+    const hasEvent = dayEvents.length > 0;
+    const hasReview = dayEvents.some(e => e.type === 'review');
 
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "day";
+    if (hasReview) btn.classList.add("has-review"); // CSS로 색상 다르게 처리 가능
     btn.setAttribute("aria-selected", selected === key ? "true" : "false");
 
-    btn.innerHTML = `
-      <div class="day__num">${day}${hasEvent ? `<span class="day__dot" aria-hidden="true"></span>` : ""}</div>
-    `;
+    // 점(dot) 표시 로직
+    let dotHtml = "";
+    if (hasEvent) {
+        // 복습 일정이면 빨간 점, 일반 일정이면 기본 점 (예시)
+        const dotClass = hasReview ? "day__dot dot--review" : "day__dot";
+        dotHtml = `<span class="${dotClass}" aria-hidden="true"></span>`;
+    }
+
+    btn.innerHTML = `<div class="day__num">${day}${dotHtml}</div>`;
 
     btn.addEventListener("click", () => {
       state.selectedDate = key;
@@ -86,6 +138,7 @@ function renderEventList(dateKey) {
   if (!list) return;
 
   const events = loadEvents().filter(e => e.date === dateKey);
+  
   if (!dateKey) {
     list.innerHTML = `<li class="muted">날짜를 선택해 주십시오.</li>`;
     return;
@@ -95,16 +148,40 @@ function renderEventList(dateKey) {
     return;
   }
 
-  list.innerHTML = events.map(e => `<li>${window.UI.escapeHtml(e.title)}</li>`).join("");
+  // [수정] 일정 리스트 렌더링 (복습 버튼 추가)
+  list.innerHTML = events.map(e => {
+    const isReview = e.type === 'review';
+    const titleEscaped = window.UI?.escapeHtml ? window.UI.escapeHtml(e.title) : e.title;
+    
+    // 복습 일정이면 '학습하러 가기' 버튼 표시
+    let actionBtn = "";
+    if (isReview && e.docId) {
+        actionBtn = `
+          <div class="event-actions" style="margin-top:4px;">
+            <button class="btn btn--xs btn--primary" onclick="location.href='../index.html?docId=${encodeURIComponent(e.docId)}'">📄 문서 보기</button>
+            <button class="btn btn--xs btn--secondary" onclick="location.href='../whiteboard.html?docId=${encodeURIComponent(e.docId)}'">📝 백지 복습</button>
+          </div>
+        `;
+    }
+
+    return `
+      <li class="event-item ${isReview ? 'review-item' : ''}">
+        <div class="event-title">${titleEscaped}</div>
+        ${actionBtn}
+      </li>
+    `;
+  }).join("");
 }
 
 function addEvent(date, title) {
   const events = loadEvents();
-  events.push({ id: `ev_${Date.now()}`, date, title });
+  events.push({ id: `ev_${Date.now()}`, date, title, type: 'manual' });
   saveEvents(events);
 }
 
+// 전역 객체 노출
 window.Calendar = {
+  state: null, // renderCalendar에서 갱신됨
   init() {
     const storedSelected = localStorage.getItem(LS_SELECTED_DATE) || "";
     const viewDate = new Date();
@@ -133,5 +210,6 @@ window.Calendar = {
   },
 
   addEvent,
+  addReviewSchedule, // 외부(home.js)에서 호출할 수 있게 노출
   renderEventList,
 };

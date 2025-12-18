@@ -20,8 +20,8 @@
   <div class="toolbar"><!--[수정][11-25][app에서 빼고 상단으로 이동하여 css로 fix]-->
     <div class="group">
 
-      <button id="btnGoHome" class="nav-home-btn" type="button" >홈으로</button>
-      <span id="pipeline-status" style="font-size: 12px; color: var(--muted); margin-right: 8px;">
+    <a id="btnGoHome" class="nav-home-btn" href="home.html" style="text-decoration:none; display:inline-block; text-align:center;">홈으로</a>      
+    <span id="pipeline-status" style="font-size: 12px; color: var(--muted); margin-right: 8px;">
           문서 대기 중...
         </span><!-- 로딩 상태 표시 -->
       <button id="btn-whiteboard" class="label-btn">📝 백지 복습</button>
@@ -71,12 +71,6 @@
       <div id="thicknessLabel" class="zoom-label" style="min-width:60px">20 px</div>
     </div>
 
-    <div class="group">
-      <i class="fa-solid fa-magnifying-glass" style="padding-left:8px"></i>
-      <input id="searchInput" class="jump-input" style="width:150px" placeholder="문서 검색" />
-      <button id="searchPrev" title="이전 결과"><i class="fa-solid fa-angle-up"></i></button>
-      <button id="searchNext" title="다음 결과"><i class="fa-solid fa-angle-down"></i></button>
-    </div>
     
    <!--[추가][12-14][필기 모드 + 필기 모드 모달(두께, 지우개 설정)]--> 
     <div class="group" title="자유 필기 툴">
@@ -223,11 +217,10 @@
 
   <button id="chat-toggle-btn" class="chat-toggle-btn">💬</button>
 
-
-  <script src="A.firebase.js" type="module" defer></script>
-  <script src="viewer-main.js" type="module" defer></script>
-  <script src="doc_firebase.js" type="module" defer></script>
-  <script src="main.js" type="module" defer></script>
+<script src="A.firebase.js" type="module" defer></script>
+<script src="viewer-main.js" type="module" defer></script> 
+<script src="doc_firebase.js" type="module" defer></script>
+<script src="main.js" type="module" defer></script>
 
 </body>
 </html>
