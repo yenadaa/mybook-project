@@ -88,7 +88,10 @@ def sendReviewNotifications(event: scheduler_fn.ScheduledEvent) -> None:
     result = _distribute_review_tasks_logic()
     print(result)
 
-@https_fn.on_call()
+@https_fn.on_call(
+    region="asia-northeast3",
+    cors=options.CorsOptions("*", ["POST"]) # 키워드(origins=)를 아예 생략
+)
 def testTriggerNotifications(req: https_fn.CallableRequest) -> https_fn.Response:
     print("👆 [Test] 프론트엔드 요청으로 강제 실행")
     result = _distribute_review_tasks_logic()
@@ -254,3 +257,89 @@ def submitReviewSession(req: https_fn.CallableRequest) -> https_fn.Response:
     except Exception as e:
         print(f"채점 오류: {e}")
         raise https_fn.HttpsError("internal", f"채점 실패: {e}")
+    
+# --------------------------------------------------------
+# [NEW] 시연용 강제 스케줄 생성 함수
+# --------------------------------------------------------
+@https_fn.on_call(
+    region="asia-northeast3",
+    # origins도 아니고 cors=True도 아니고 아래 이름이 정답입니다!
+    cors=options.CorsOptions(
+        cors_origins="*",       # origins 대신 cors_origins
+        cors_methods=["POST"]   # methods 대신 cors_methods
+    )
+)
+def createDemoSchedule(req: https_fn.CallableRequest) -> dict:
+    """
+    프론트에서 '망각곡선 스케줄 생성' 버튼을 누르면 호출.
+    해당 문서에 대한 퀴즈 아이템을 만들고, 
+    테스트를 위해 'nextReviewDate'를 현재 시간보다 1분 전으로 설정해버림 (즉시 알림 대상).
+    """
+    db = get_db()
+    
+    doc_id = req.data.get("docId")
+    title = req.data.get("title")
+    # force_now가 True면 바로 알림 오게 설정, False면 정석대로(내일) 설정
+    force_now = req.data.get("forceNow", False) 
+
+    if not doc_id:
+        raise https_fn.HttpsError("invalid-argument", "docId is required")
+
+    user_id = req.auth.uid
+    if not user_id:
+        raise https_fn.HttpsError("unauthenticated", "User must be logged in")
+
+    # 1. 기존 퀴즈 아이템이 있는지 확인
+    quiz_ref = db.collection("quizItems")
+    existing_docs = quiz_ref.where("originalDocId", "==", doc_id).where("userId", "==", user_id).limit(1).get()
+
+    # 2. 퀴즈가 없으면 '더미 퀴즈' 3개 생성 (시연용)
+    if not list(existing_docs):
+        print(f"[{doc_id}] 퀴즈가 없어서 더미 퀴즈 3개를 생성합니다.")
+        batch = db.batch()
+        
+        for i in range(1, 4):
+            new_ref = quiz_ref.document()
+            
+            # 테스트를 위해 날짜를 조작
+            if force_now:
+                # 지금 당장 복습해야 할 것으로 설정
+                target_date = datetime.now(timezone.utc) - timedelta(minutes=1)
+            else:
+                # 정석: 1일 뒤
+                target_date = datetime.now(timezone.utc) + timedelta(days=1)
+
+            dummy_data = {
+                "userId": user_id,
+                "originalDocId": doc_id,
+                "docTitle": title,
+                "question": f"[{title}]의 {i}번째 핵심 질문은 무엇인가요? (테스트)",
+                "answer": f"이것은 {i}번째 정답입니다.",
+                "reviewLevel": 0, # 초기 레벨
+                "nextReviewDate": target_date,
+                "createdAt": firestore.SERVER_TIMESTAMP
+            }
+            batch.set(new_ref, dummy_data)
+        
+        batch.commit()
+        msg = "더미 퀴즈 3개 생성 및 스케줄 등록 완료."
+    
+    else:
+        # 3. 이미 퀴즈가 있다면, 날짜만 '오늘'로 강제 업데이트 (치트키)
+        if force_now:
+            docs = quiz_ref.where("originalDocId", "==", doc_id).where("userId", "==", user_id).stream()
+            batch = db.batch()
+            for doc in docs:
+                # 1분 전으로 돌려서 스케줄러가 바로 낚아채게 함
+                past_time = datetime.now(timezone.utc) - timedelta(minutes=1)
+                batch.update(doc.reference, {"nextReviewDate": past_time})
+            batch.commit()
+            msg = "기존 퀴즈들의 복습 시간을 '지금'으로 당겼습니다."
+        else:
+            msg = "이미 스케줄이 존재합니다."
+
+    return {
+        "success": True, 
+        "message": msg,
+        "mode": "Immediate Test" if force_now else "Standard Schedule"
+    }

@@ -1,5 +1,8 @@
 // calendar.js
 
+// 1. [핵심] Firebase Functions 기능을 사용하기 위해 Import
+import { functions, httpsCallable } from "/A.firebase.js"; 
+
 const LS_EVENTS = "mybook:calendarEvents";
 const LS_SELECTED_DATE = "mybook:selectedDate";
 
@@ -26,44 +29,69 @@ function monthLabel(date) {
   return date.toLocaleString("ko-KR", { year: "numeric", month: "long" });
 }
 
-// [추가 기능] 망각곡선 주기 계산 (1, 3, 7, 14, 30일 후)
-function addReviewSchedule(docId, docTitle) {
-  const intervals = [1, 3, 7, 14, 30]; // 망각곡선 주기
-  const today = new Date();
-  const events = loadEvents();
-  let addedCount = 0;
-
-  intervals.forEach((gap, index) => {
-    const targetDate = new Date(today);
-    targetDate.setDate(today.getDate() + gap);
-    const dateKey = ymd(targetDate);
-
-    // 중복 방지 (같은 날짜에 같은 문서 복습이 이미 있으면 패스)
-    const exists = events.some(e => e.date === dateKey && e.docId === docId && e.type === 'review');
+// =========================================================
+// [수정] 망각곡선 스케줄 생성 (백엔드 연동 버전)
+// =========================================================
+async function addReviewSchedule(docId, docTitle) {
+    if (!docId) return;
     
-    if (!exists) {
-      events.push({
-        id: `rev_${Date.now()}_${index}`,
-        date: dateKey,
-        title: `📖 복습: ${docTitle}`, // 캘린더 표시 제목
-        docId: docId,       // 문서 이동용 ID
-        type: 'review',     // 타입 구분
-        gap: gap            // 며칠 뒤 복습인지 (1일차, 3일차...)
-      });
-      addedCount++;
-    }
-  });
+    // 1. 테스트 모드 여부 확인 (시연용)
+    const isTestMode = confirm(
+        `'${docTitle}'의 복습 스케줄을 생성합니다.\n\n[확인] = 지금 당장 알림 테스트 (시연용)\n[취소] = 내일부터 정상 스케줄 시작`
+    );
 
-  saveEvents(events);
-  alert(`${addedCount}개의 망각곡선 기반 복습 일정이 캘린더에 등록되었습니다!`);
-  
-  // 현재 화면 갱신
-  const state = window.Calendar.state; 
-  if(state) {
-      renderCalendar(state);
-      renderEventList(state.selectedDate);
-  }
+    try {
+        console.log(`📡 스케줄 생성 요청: ${docTitle} (TestMode: ${isTestMode})`);
+        
+        // 2. 파이썬 백엔드 호출 (createDemoSchedule)
+        const createScheduleFn = httpsCallable(functions, 'createDemoSchedule');
+        
+        const result = await createScheduleFn({
+            docId: docId,
+            title: docTitle,
+            forceNow: isTestMode // True면 1분 전으로 시간 조작
+        });
+
+        const data = result.data;
+        
+        // 3. 로컬 캘린더에도 표시를 위해 더미 이벤트 추가 (시각적 피드백용)
+        const today = new Date();
+        const targetDate = isTestMode ? today : new Date(today.setDate(today.getDate() + 1));
+        const dateKey = ymd(targetDate);
+        
+        const events = loadEvents();
+        events.push({
+             id: `rev_${Date.now()}`,
+             date: dateKey,
+             title: `📖 ${isTestMode ? '[즉시]' : '[내일]'} 복습: ${docTitle}`,
+             docId: docId,
+             type: 'review'
+        });
+        saveEvents(events);
+
+        alert(`✅ ${data.message}`);
+
+        // 4. '지금 당장' 모드라면 알림 강제 발송 트리거
+        if (isTestMode) {
+            console.log("🚀 알림 강제 발송 요청 중...");
+            const triggerNotifyFn = httpsCallable(functions, 'testTriggerNotifications');
+            await triggerNotifyFn(); 
+            alert("📩 알림 발송 완료! (FCM 혹은 콘솔 확인)");
+        }
+
+        // 현재 화면 갱신
+        const state = window.Calendar.state; 
+        if(state) {
+            renderCalendar(state);
+            renderEventList(state.selectedDate);
+        }
+
+    } catch (error) {
+        console.error("스케줄 생성 실패:", error);
+        alert(`오류 발생: ${error.message}`);
+    }
 }
+
 
 function renderCalendar(state) {
   // 전역 state 참조를 위해 저장
@@ -210,6 +238,6 @@ window.Calendar = {
   },
 
   addEvent,
-  addReviewSchedule, // 외부(home.js)에서 호출할 수 있게 노출
+  addReviewSchedule, // 백엔드 연동된 함수
   renderEventList,
 };
