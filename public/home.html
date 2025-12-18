@@ -74,12 +74,13 @@
               </div>
               <div class="progress__hint" id="currentNextStep">다음 추천: -</div>
 
-              <div class="milestones" aria-label="학습 단계">
-                <div class="milestone" id="msRead" aria-label="1차 학습">1차 학습</div>
-                <div class="milestone" id="msQuiz" aria-label="퀴즈">퀴즈</div>
-                <div class="milestone" id="msWhite" aria-label="백지 복습">백지 복습</div>
+              <div class="milestones" aria-label="기억 단계">
+                <div class="milestone" id="ms1">1일</div>
+                <div class="milestone" id="ms3">3일</div>
+                <div class="milestone" id="ms7">7일</div>
+                <div class="milestone" id="ms14">14일</div>
+                <div class="milestone" id="ms30">30일</div>
               </div>
-            </div>
 
             <div class="quick-actions" aria-label="오늘의 추천 액션">
               <button type="button" class="btn btn--ghost" data-action="highlight-quiz">
@@ -139,24 +140,6 @@
       </div>
 
       <div class="grid" id="docsGrid" aria-label="문서 목록"></div>
-    </section>
-
-    <section class="card" aria-labelledby="aiTitle">
-      <div class="card__head">
-        <h2 class="card__title" id="aiTitle">AI 학습 도우미</h2>
-      </div>
-
-      <div class="ai">
-        <div class="ai__box">
-          <div class="ai__label">지금 가장 효율 좋은 액션</div>
-          <ul class="list" id="aiActionList"></ul>
-        </div>
-
-        <div class="ai__box">
-          <div class="ai__label">추천 루틴(30분)</div>
-          <ol class="routine" id="aiRoutine"></ol>
-        </div>
-      </div>
     </section>
 
     <section class="card" aria-labelledby="calTitle">
@@ -247,8 +230,7 @@
   </dialog>
 
   <script src="/fronted/js/ui.js"></script>
-  <<script type="module" src="/fronted/js/calendar.js"></script>
-  
+  <script type="module" src="/fronted/js/calendar.js"></script>
   <script type="module" src="/fronted/js/home.js"></script>
   
 </body>

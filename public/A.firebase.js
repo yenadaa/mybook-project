@@ -4,7 +4,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { 
     getFirestore, 
     initializeFirestore,
-    collection, addDoc, getDocs, doc, setDoc, deleteDoc, writeBatch,
+    collection, addDoc, getDocs, doc, setDoc, deleteDoc, writeBatch,getDoc,
     query, orderBy, limit, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"; 
 import { 
@@ -59,7 +59,7 @@ initMessaging();
 // ⭐️ [수정 2] export 목록에 httpsCallable을 꼭 넣어줘야 다른 파일들이 갖다 씁니다!
 export { 
     app, auth, db, storage, functions, messaging,
-    collection, addDoc, getDocs, doc, setDoc, deleteDoc, writeBatch,
+    collection, addDoc, getDocs, doc, setDoc, deleteDoc, writeBatch,getDoc,
     query, orderBy, limit, Timestamp,
     onAuthStateChanged,
     httpsCallable 

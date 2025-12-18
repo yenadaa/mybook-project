@@ -1,17 +1,15 @@
-// calendar.js
-
-// 1. [핵심] Firebase Functions 기능을 사용하기 위해 Import
-import { functions, httpsCallable } from "/A.firebase.js"; 
+import { functions } from "/A.firebase.js"; 
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 
 const LS_EVENTS = "mybook:calendarEvents";
 const LS_SELECTED_DATE = "mybook:selectedDate";
 
+// --------------------------------------------------------
+// 데이터 관리
+// --------------------------------------------------------
 function loadEvents() {
-  try {
-    return JSON.parse(localStorage.getItem(LS_EVENTS) || "[]");
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(localStorage.getItem(LS_EVENTS) || "[]"); } 
+  catch { return []; }
 }
 
 function saveEvents(events) {
@@ -29,82 +27,93 @@ function monthLabel(date) {
   return date.toLocaleString("ko-KR", { year: "numeric", month: "long" });
 }
 
-// =========================================================
-// [수정] 망각곡선 스케줄 생성 (백엔드 연동 버전)
-// =========================================================
-async function addReviewSchedule(docId, docTitle) {
+// --------------------------------------------------------
+// [기능 1] 망각곡선 스케줄 생성 및 표시
+// --------------------------------------------------------
+export async function addReviewSchedule(docId, docTitle) {
     if (!docId) return;
-    
-    // 1. 테스트 모드 여부 확인 (시연용)
-    const isTestMode = confirm(
-        `'${docTitle}'의 복습 스케줄을 생성합니다.\n\n[확인] = 지금 당장 알림 테스트 (시연용)\n[취소] = 내일부터 정상 스케줄 시작`
-    );
 
-    try {
-        console.log(`📡 스케줄 생성 요청: ${docTitle} (TestMode: ${isTestMode})`);
-        
-        // 2. 파이썬 백엔드 호출 (createDemoSchedule)
-        const createScheduleFn = httpsCallable(functions, 'createDemoSchedule');
-        
-        const result = await createScheduleFn({
-            docId: docId,
-            title: docTitle,
-            forceNow: isTestMode // True면 1분 전으로 시간 조작
-        });
+    if (!confirm(`'${docTitle}'의 망각곡선(1, 3, 7, 14, 30일 후) 복습 스케줄을 생성하시겠습니까?`)) return;
 
-        const data = result.data;
-        
-        // 3. 로컬 캘린더에도 표시를 위해 더미 이벤트 추가 (시각적 피드백용)
-        const today = new Date();
-        const targetDate = isTestMode ? today : new Date(today.setDate(today.getDate() + 1));
+    // 1. 로컬 스토리지에 일정 추가 (시각적 표시용)
+    const offsets = [1, 3, 7, 14, 30]; // 망각곡선 주기
+    const events = loadEvents();
+    const today = new Date();
+    let addedCount = 0;
+
+    offsets.forEach(dayOffset => {
+        const targetDate = new Date(today);
+        targetDate.setDate(today.getDate() + dayOffset);
         const dateKey = ymd(targetDate);
-        
-        const events = loadEvents();
-        events.push({
-             id: `rev_${Date.now()}`,
-             date: dateKey,
-             title: `📖 ${isTestMode ? '[즉시]' : '[내일]'} 복습: ${docTitle}`,
-             docId: docId,
-             type: 'review'
-        });
-        saveEvents(events);
 
-        alert(`✅ ${data.message}`);
-
-        // 4. '지금 당장' 모드라면 알림 강제 발송 트리거
-        if (isTestMode) {
-            console.log("🚀 알림 강제 발송 요청 중...");
-            const triggerNotifyFn = httpsCallable(functions, 'testTriggerNotifications');
-            const notifyResult = await triggerNotifyFn(); 
-            
-            console.log("📩 알림 발송 로직 실행됨:", notifyResult.data);
-            
-            // 🔥 [추가] 사용자 편의를 위해 콘솔에 안내 문구 출력
-            console.warn("🔔 만약 알림이 오지 않는다면?");
-            console.log("1. Firestore의 'reviewSessions' 컬렉션에 새로 생성된 문서를 확인하세요.");
-            console.log("2. 해당 문서의 ID를 복사하여 아래 주소 뒤에 붙여넣으세요:");
-            console.log("👉 https://mybook-d143d.web.app/quiz-page.html?session=[세션ID]");
-            
-            alert("📩 알림 발송 로직이 실행되었습니다!\n알림이 오지 않는다면 개발자 도구(F12) 콘솔창을 확인하세요.");
+        // 중복 방지
+        const exists = events.some(e => e.date === dateKey && e.docId === docId && e.type === 'review');
+        if (!exists) {
+            events.push({
+                id: `rev_${docId}_${dayOffset}`,
+                date: dateKey,
+                title: `[복습] ${docTitle} (${dayOffset}일차)`,
+                type: 'review',
+                docId: docId,
+                docTitle: docTitle // 제목 저장해둠
+            });
+            addedCount++;
         }
+    });
 
-        // 현재 화면 갱신
-        const state = window.Calendar.state; 
-        if(state) {
-            renderCalendar(state);
-            renderEventList(state.selectedDate);
-        }
+    saveEvents(events);
 
-    } catch (error) {
-        console.error("스케줄 생성 실패:", error);
-        alert(`오류 발생: ${error.message}`);
+    // 2. 화면 갱신
+    if (window.Calendar && window.Calendar.state) {
+        renderCalendar(window.Calendar.state);
+        // 오늘 날짜 리스트도 갱신
+        renderEventList(window.Calendar.state.selectedDate);
+    }
+
+    // 3. 백엔드에도 데이터 준비 (선택 사항: 시연을 위해 백엔드에도 퀴즈 생성 요청)
+    try {
+        const createFn = httpsCallable(functions, 'createDemoSchedule');
+        // forceNow=false로 해서 '내일'부터 시작되게 DB 세팅 (시각적 스케줄과 맞춤)
+        await createFn({ docId: docId, title: docTitle, forceNow: false });
+        alert(`✅ 캘린더에 ${addedCount}개의 복습 일정이 등록되었습니다.`);
+    } catch (e) {
+        console.error("백엔드 동기화 실패(무시 가능):", e);
+        alert(`✅ 캘린더에 일정이 등록되었습니다.`);
     }
 }
 
+// --------------------------------------------------------
+// [기능 2] 퀴즈 풀러 가기 (납치 로직)
+// --------------------------------------------------------
+// 전역에서 접근 가능하도록 window에 등록 (HTML onClick에서 사용)
+window.startReviewSession = async function(docId, docTitle) {
+    if(!confirm(`'${docTitle}' 복습 퀴즈를 지금 바로 시작하시겠습니까?`)) return;
 
+    try {
+        // 1. 강제로 "지금 복습할 시간"으로 설정 (시연용 치트키)
+        const createFn = httpsCallable(functions, 'createDemoSchedule');
+        await createFn({ docId: docId, title: docTitle, forceNow: true });
+
+        // 2. 세션 생성 및 ID 발급
+        const triggerFn = httpsCallable(functions, 'testTriggerNotifications');
+        const result = await triggerFn();
+        
+        if (result.data && result.data.sessionId) {
+            window.location.href = `/quiz-page.html?session=${result.data.sessionId}`;
+        } else {
+            alert("⚠️ 복습할 문제가 없습니다.");
+        }
+    } catch (error) {
+        alert(`오류 발생: ${error.message}`);
+    }
+};
+
+
+// --------------------------------------------------------
+// 렌더링 로직
+// --------------------------------------------------------
 function renderCalendar(state) {
-  // 전역 state 참조를 위해 저장
-  window.Calendar.state = state; 
+  if (window.Calendar) window.Calendar.state = state; 
 
   const grid = document.getElementById("calendarGrid");
   const label = document.getElementById("monthLabel");
@@ -136,21 +145,19 @@ function renderCalendar(state) {
     const date = new Date(state.viewDate.getFullYear(), state.viewDate.getMonth(), day);
     const key = ymd(date);
     
-    // 이벤트가 있는지 확인 (복습 일정은 색상을 다르게 표시할 수도 있음)
+    // 해당 날짜의 이벤트 확인
     const dayEvents = events.filter(e => e.date === key);
-    const hasEvent = dayEvents.length > 0;
     const hasReview = dayEvents.some(e => e.type === 'review');
 
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "day";
-    if (hasReview) btn.classList.add("has-review"); // CSS로 색상 다르게 처리 가능
+    if (hasReview) btn.classList.add("has-review"); // CSS로 색상 강조
     btn.setAttribute("aria-selected", selected === key ? "true" : "false");
 
-    // 점(dot) 표시 로직
+    // 점(dot) 표시
     let dotHtml = "";
-    if (hasEvent) {
-        // 복습 일정이면 빨간 점, 일반 일정이면 기본 점 (예시)
+    if (dayEvents.length > 0) {
         const dotClass = hasReview ? "day__dot dot--review" : "day__dot";
         dotHtml = `<span class="${dotClass}" aria-hidden="true"></span>`;
     }
@@ -170,7 +177,7 @@ function renderCalendar(state) {
   selectedLabel.textContent = `선택 날짜: ${selected || "-"}`;
 }
 
-function renderEventList(dateKey) {
+export function renderEventList(dateKey) {
   const list = document.getElementById("eventList");
   if (!list) return;
 
@@ -185,18 +192,20 @@ function renderEventList(dateKey) {
     return;
   }
 
-  // [수정] 일정 리스트 렌더링 (복습 버튼 추가)
   list.innerHTML = events.map(e => {
     const isReview = e.type === 'review';
-    const titleEscaped = window.UI?.escapeHtml ? window.UI.escapeHtml(e.title) : e.title;
+    const titleEscaped = e.title ? e.title.replace(/</g, "&lt;") : "제목 없음";
     
-    // 복습 일정이면 '학습하러 가기' 버튼 표시
+    // [핵심] 복습 일정이면 '퀴즈 풀기' 버튼 표시
     let actionBtn = "";
     if (isReview && e.docId) {
+        // window.startReviewSession 호출
         actionBtn = `
-          <div class="event-actions" style="margin-top:4px;">
-            <button class="btn btn--xs btn--primary" onclick="location.href='../index.html?docId=${encodeURIComponent(e.docId)}'">📄 문서 보기</button>
-            <button class="btn btn--xs btn--secondary" onclick="location.href='../whiteboard.html?docId=${encodeURIComponent(e.docId)}'">📝 백지 복습</button>
+          <div class="event-actions" style="margin-top:6px;">
+            <button class="btn btn--xs btn--primary" 
+              onclick="window.startReviewSession('${e.docId}', '${e.docTitle || e.title}')">
+              🧠 퀴즈 풀기
+            </button>
           </div>
         `;
     }
@@ -210,16 +219,13 @@ function renderEventList(dateKey) {
   }).join("");
 }
 
-function addEvent(date, title) {
+export function addEvent(date, title) {
   const events = loadEvents();
   events.push({ id: `ev_${Date.now()}`, date, title, type: 'manual' });
   saveEvents(events);
 }
 
-// 전역 객체 노출
-window.Calendar = {
-  state: null, // renderCalendar에서 갱신됨
-  init() {
+export function init() {
     const storedSelected = localStorage.getItem(LS_SELECTED_DATE) || "";
     const viewDate = new Date();
 
@@ -244,9 +250,12 @@ window.Calendar = {
     renderEventList(state.selectedDate);
 
     return state;
-  },
+}
 
+window.Calendar = {
+  state: null,
+  init,
   addEvent,
-  addReviewSchedule, // 백엔드 연동된 함수
+  addReviewSchedule, 
   renderEventList,
 };
