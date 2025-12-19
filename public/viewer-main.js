@@ -10,8 +10,16 @@ import { renderDocument, scrollToPage, clearDocument } from './viewer-renderer.j
 import { setHighlightsData } from './viewer-highlight-manager.js';
 
 // 3. 챗봇 관련 임포트
-import { PROMPTS } from './viewer-personas.js'; //[12.04 수정]
+import { PROMPTS } from './viewer-personas.js'; 
 import { onBotMessageHook } from "./viewer-session-hooks.js";
+
+// 4. 파이어베이스 연동 임포트
+import { 
+    saveChatMessageToDb, 
+    loadChatHistoryFromDb, 
+    clearChatHistoryInDb,
+    getCurrentBookId 
+} from './doc_firebase.js';
 
 // ====== 전역 등록 ======
 window.renderDocument = renderDocument;
@@ -39,23 +47,131 @@ document.addEventListener('DOMContentLoaded', () => {
         initChatbot();
         isChatbotInit = true; 
     }
+    const clearDataBtn = document.getElementById('clearData');
+    if (clearDataBtn) {
+        clearDataBtn.addEventListener('click', async () => {
+            if (!confirm("모든 필기, 하이라이트, 그리고 대화 기록을 삭제하시겠습니까?")) return;
+            
+            // 전역 변수 window.currentBookId 또는 import한 함수 사용
+            const bookId = window.currentBookId || getCurrentBookId();
+            
+            if (bookId) {
+                // 1. 대화 기록 DB 삭제
+                if (typeof clearChatHistoryInDb === 'function') {
+                    await clearChatHistoryInDb(bookId);
+                }
+
+                // 2. 화면의 채팅창 비우기
+                const chatMessages = document.getElementById("chat-messages");
+                if (chatMessages) chatMessages.innerHTML = '';
+                
+                // 3. (선택) 하이라이트/필기 삭제 로직이 있다면 여기서 호출
+                // if (window.clearDocument) window.clearDocument(); // 예시
+                
+                alert("모든 기록이 초기화되었습니다.");
+            } else {
+                alert("문서 정보를 찾을 수 없습니다.");
+            }
+        });
+    }
+    // =========================================
 });
 
 function initChatbot() {
     const chatInput = document.getElementById("chat-input");
     const chatSendBtn = document.getElementById("chat-send-btn");
     const personaSelect = document.getElementById("chat-persona-select");
-    const chatMessages = document.getElementById("chat-messages"); // 👈 메시지 창 요소
+    const chatMessages = document.getElementById("chat-messages");
 
-    let localChatHistory = [];
+    // 현재 모드의 대화 기록을 담을 변수
+    window.localChatHistory = [];
     let isSending = false;
 
     if (!chatInput || !chatSendBtn) return;
 
-    // 기존 리스너 제거 후 교체 (중복 방지)
+    // 🚀 [핵심 기능] 특정 모드의 대화를 DB에서 가져와 화면에 그리기
+    window.loadChatToUI = async function(bookId, personaKey) {
+        if (!bookId || !personaKey) return;
+        
+        // 1. 화면 비우기 (새로운 모드를 위해 청소)
+        if (chatMessages) chatMessages.innerHTML = '';
+        window.localChatHistory = []; // 로컬 기록도 초기화
+
+        // 2. 로딩 표시 (선택 사항)
+        // addChatMessage('bot', '대화 기록을 불러오는 중...', 'loading');
+
+        // 3. DB에서 해당 모드의 기록만 가져오기
+        if (typeof loadChatHistoryFromDb === 'function') {
+            const history = await loadChatHistoryFromDb(bookId, personaKey);
+            
+            // 4. 가져온 기록 화면에 뿌리기
+            if (history && history.length > 0) {
+                history.forEach(msg => {
+                    const sender = (msg.role === 'user') ? 'user' : 'bot';
+                    addChatMessage(sender, msg.content);
+                    window.localChatHistory.push(msg); // 전송용 기록에 추가
+                });
+            } else {
+                // 기록이 없으면 첫 인사말
+                const modeName = personaSelect.options[personaSelect.selectedIndex].text;
+                addChatMessage('bot', `반갑습니다! <b>${modeName}</b> 모드입니다.<br>무엇을 도와드릴까요?`);
+            }
+            
+            // 스크롤 맨 아래로
+            if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+    };
+
+    // 전송 버튼 리스너 교체
     const newBtn = chatSendBtn.cloneNode(true);
     chatSendBtn.parentNode.replaceChild(newBtn, chatSendBtn);
     const finalSendBtn = document.getElementById("chat-send-btn");
+
+    // ⭐️ [이벤트] 모드(페르소나) 변경 시 -> 해당 모드의 대화 불러오기
+    if (personaSelect) {
+        personaSelect.addEventListener("change", () => {
+            const newPersona = personaSelect.value;
+            const bookId = window.currentBookId || (typeof getCurrentBookId === 'function' ? getCurrentBookId() : null);
+            
+            if (bookId) {
+                // 즉시 교체 실행!
+                window.loadChatToUI(bookId, newPersona);
+            }
+        });
+    }
+
+        // 🗑️ [채팅방 전용] 대화 지우기 버튼 기능
+    const chatClearBtn = document.getElementById("chat-clear-btn");
+    if (chatClearBtn) {
+        chatClearBtn.addEventListener("click", async () => {
+            // 1. 현재 어떤 모드인지 확인
+            const personaSelect = document.getElementById("chat-persona-select");
+            const currentPersona = personaSelect ? personaSelect.value : 'professor';
+            const currentModeName = personaSelect ? personaSelect.options[personaSelect.selectedIndex].text : '현재 모드';
+
+            // 2. 진짜 지울지 물어보기
+            if (!confirm(`'${currentModeName}'의 대화 기록을 모두 삭제하시겠습니까?`)) return;
+
+            const bookId = window.currentBookId || (typeof getCurrentBookId === 'function' ? getCurrentBookId() : null);
+
+            if (bookId) {
+                // 3. DB에서 삭제 (현재 모드만!)
+                if (typeof clearChatHistoryInDb === 'function') {
+                    await clearChatHistoryInDb(bookId, currentPersona);
+                }
+
+                // 4. 화면 비우기
+                const chatMessages = document.getElementById("chat-messages");
+                if (chatMessages) chatMessages.innerHTML = '';
+                
+                // 5. 로컬 기록 변수 초기화
+                if (window.localChatHistory) window.localChatHistory = [];
+
+                // 6. 안내 메시지 띄우기
+                addChatMessage('bot', `🧹 <b>${currentModeName}</b> 대화 내용이 초기화되었습니다.`);
+            }
+        });
+    }
 
     // ⭐️ 메시지 전송 함수
     async function handleSendMessage() {
@@ -67,53 +183,56 @@ function initChatbot() {
         isSending = true;
         finalSendBtn.disabled = true;
 
-        try {
-            // 1. [UI] 내 말풍선 즉시 표시 (이게 빠져있었음!)
-            addChatMessage('user', userText);
-            chatInput.value = ""; // 입력창 비우기
+        // 현재 선택된 모드 확인
+        const currentPersona = personaSelect ? personaSelect.value : 'professor';
 
-            // 2. [UI] 로딩 말풍선 표시
+        try {
+            const currentId = window.currentBookId || (typeof getCurrentBookId === 'function' ? getCurrentBookId() : null);
+
+            // 1. [UI] 사용자 메시지 표시
+            addChatMessage('user', userText);
+            chatInput.value = ""; 
+
+            // 💾 [저장] 현재 모드(currentPersona) 방에 저장!
+            const userMsgObj = { role: "user", content: userText, timestamp: Date.now() };
+            window.localChatHistory.push(userMsgObj);
+            
+            if (currentId && typeof saveChatMessageToDb === 'function') {
+                saveChatMessageToDb(currentId, userMsgObj, currentPersona); // 👈 persona 전달
+            }
+
+            // 2. [UI] 로딩 표시
             const loadingMsgId = `msg-${Date.now()}`;
             const loadingElement = addChatMessage('bot', '답변을 생성 중입니다...', 'loading', loadingMsgId);
 
-            // 3. 프롬프트 준비
-            const selectedKey = personaSelect ? personaSelect.value : 'professor';
+            // 3. 프롬프트 선택
             let systemPromptText = "";
-
-            // 화면의 선택값(value)에 따라 새로운 프롬프트 키를 매핑
-            switch (selectedKey) {
-                case "socrates": 
-                    systemPromptText = PROMPTS.socrates_v3; // 소크라테스
-                    break;
-                case "senior":   
-                    systemPromptText = PROMPTS.applier_v1;  // 개념 활용형 (선배)
-                    break;
-                case "professor":
-                default:
-                    systemPromptText = PROMPTS.builder_v3;  // 개념 구축형 (교수)
-                    break;
-                case "general":
-                    systemPromptText = PROMPTS.general_v1; 
-                    break;
+            switch (currentPersona) {
+                case "socrates": systemPromptText = PROMPTS.socrates_v3; break;
+                case "senior":   systemPromptText = PROMPTS.applier_v1; break;
+                case "professor": default: systemPromptText = PROMPTS.builder_v3; break;
+                case "general": systemPromptText = PROMPTS.general_v1; break;
             }
-
-            localChatHistory.push({ role: "user", content: userText });
 
             // 4. 백엔드 전송
             if (window.sendQueryToBot) {
-                const bookId = window.currentBookId;
-                if (!bookId) {
+                if (!currentId) {
                     updateChatMessage(loadingElement, "오류: 문서를 먼저 열어주세요.");
-                    localChatHistory.pop();
                     return;
                 }
 
-                const botReply = await window.sendQueryToBot(bookId, localChatHistory, systemPromptText);
+                const botReply = await window.sendQueryToBot(currentId, window.localChatHistory, systemPromptText);
                 
                 if (botReply) {
-                    // 5. [UI] 로딩 -> 실제 답변으로 교체 (이게 빠져있었음!)
                     updateChatMessage(loadingElement, botReply);
-                    localChatHistory.push({ role: "assistant", content: botReply });
+                    
+                    // 💾 [저장] 답변도 현재 모드 방에 저장!
+                    const botMsgObj = { role: "assistant", content: botReply, timestamp: Date.now() };
+                    window.localChatHistory.push(botMsgObj);
+                    
+                    if (currentId && typeof saveChatMessageToDb === 'function') {
+                        saveChatMessageToDb(currentId, botMsgObj, currentPersona); // 👈 persona 전달
+                    }
                 } else {
                     updateChatMessage(loadingElement, "답변을 받아오지 못했습니다.");
                 }
@@ -122,14 +241,11 @@ function initChatbot() {
             }
 
         } catch (err) {
-            console.error("메시지 전송 실패:", err);
-            // 실패 시 에러 메시지 표시
-            // (loadingElement가 정의되어 있다면 업데이트)
+            console.error("전송 실패:", err);
             const chatList = document.getElementById("chat-messages");
             if (chatList && chatList.lastElementChild && chatList.lastElementChild.classList.contains('loading')) {
                  updateChatMessage(chatList.lastElementChild, "오류가 발생했습니다.");
             }
-            localChatHistory.pop();
         } finally {
             isSending = false;
             finalSendBtn.disabled = false;
@@ -138,117 +254,132 @@ function initChatbot() {
     }
 
     finalSendBtn.addEventListener("click", handleSendMessage);
-    
     chatInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             handleSendMessage();
         }
     });
+}
+// ============================================================
+// ⭐️ [통합 렌더러] 버튼 + 수식 + 볼드체 모두 처리하는 함수들
+// ============================================================
 
-    // ⭐️ [UI 헬퍼 함수] 말풍선 추가 [12.17 수정]
-    function addChatMessage(sender, text, type, id) {
-        const msgDiv = document.createElement("div");
-        msgDiv.classList.add("chat-message", sender);
-        if (type === 'loading') msgDiv.classList.add("loading");
-        if (id) msgDiv.id = id;
-        
-        const p = document.createElement("p");
-        
-        // 🤖 봇이 말한 경우에만 링크 변환 기능 적용
-        if (sender === 'bot' || sender === 'assistant') {
-            p.innerHTML = formatPageLink(text); // 텍스트를 HTML 버튼으로 변환
-        } else {
-            p.textContent = text;
-        }
-
-        msgDiv.appendChild(p);
-        
-        if (chatMessages) {
-                chatMessages.appendChild(msgDiv);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-        return msgDiv;
+// 1. 메시지 추가 함수
+function addChatMessage(sender, text, type, id) {
+    const msgDiv = document.createElement("div");
+    msgDiv.classList.add("chat-message", sender);
+    if (type === 'loading') msgDiv.classList.add("loading");
+    if (id) msgDiv.id = id;
+    
+    const p = document.createElement("p");
+    
+    // 🤖 봇 메시지: 링크 변환 + 볼드체 + 수식 적용
+    if (sender === 'bot' || sender === 'assistant') {
+        p.innerHTML = formatPageLink(text); 
+    } else {
+        // 👤 사용자 메시지
+        p.textContent = text;
     }
 
-    // [2] 텍스트 -> 버튼 변환 함수 (새로 추가)
-    function formatPageLink(text) {
-        // 1. 볼드체(**) 제거: **p.12** -> p.12 (버튼이 깨지는 원인 제거)
-        let cleanText = text.replace(/\*\*(p\.\s*\d+|page\s*\d+|페이지\s*\d+)\*\*/gi, '$1');
-
-        // 2. 정규식: "p.12", "p. 12", "page 12", "페이지 12" 다 잡음
-        const regex = /(?:p\.|page|페이지)\s*(\d+)/gi;
-        
-        // 3. 줄바꿈 처리 및 버튼 변환
-        return cleanText.replace(/\n/g, '<br>').replace(regex, (match, pageNum) => {
-            return `<button onclick="window.moveToPage(${pageNum})" 
-                    style="color:#2563eb; background:#eff6ff; border:none; padding:2px 6px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:0.9em; margin:0 2px; vertical-align:middle;">
-                    📄 ${pageNum}p 이동
-                    </button>`;
-        });
+    msgDiv.appendChild(p);
+    
+    const chatMessages = document.getElementById("chat-messages");
+    if (chatMessages) {
+        chatMessages.appendChild(msgDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    // ⭐️ [UI 헬퍼 함수] 말풍선 내용 업데이트
-    function updateChatMessage(element, newText) {
-            if (element) {
-                element.classList.remove("loading");
-                const p = element.querySelector("p");
-                
-                if (p) {
-                    // 🤖 봇 메시지(bot/assistant)인 경우에만 링크 변환 + HTML 적용
-                    if (element.classList.contains('bot') || element.classList.contains('assistant')) {
-                        p.innerHTML = formatPageLink(newText);
-                    } else {
-                        // 사용자 메시지는 보안상 텍스트로 처리
-                        p.textContent = newText;
-                    }
+    // ⭐️ [핵심] MathJax에게 "수식 그려줘!" 명령
+    if ((sender === 'bot' || sender === 'assistant') && type !== 'loading' && window.MathJax) {
+        window.MathJax.typesetPromise([p]).then(() => {
+            if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+        }).catch(err => console.warn('MathJax 렌더링 에러:', err));
+    }
+
+    return msgDiv;
+}
+
+// 2. 메시지 업데이트 함수 (스트리밍 답변용)
+function updateChatMessage(element, newText) {
+    if (element) {
+        element.classList.remove("loading");
+        const p = element.querySelector("p");
+        
+        if (p) {
+            // 🤖 봇 메시지 업데이트
+            if (element.classList.contains('bot') || element.classList.contains('assistant')) {
+                p.innerHTML = formatPageLink(newText); // 포맷팅 적용
+
+                // ⭐️ [핵심] 내용이 바뀔 때마다 MathJax 다시 실행
+                if (window.MathJax) {
+                    window.MathJax.typesetPromise([p]).then(() => {
+                        const chatMessages = document.getElementById("chat-messages");
+                        if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+                    }).catch(err => console.warn('MathJax 에러(무시 가능):', err));
                 }
-                
-                if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            } else {
+                p.textContent = newText;
             }
         }
+        
+        const chatMessages = document.getElementById("chat-messages");
+        if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
     }
+}
 
+// 3. 텍스트 포맷팅 함수 (버튼 + 볼드 + 줄바꿈)
+function formatPageLink(text) {
+    // (1) 페이지 링크 주변의 ** 제거 (버튼 깨짐 방지: **p.12** -> p.12)
+    let cleanText = text.replace(/\*\*(p\.\s*\d+|page\s*\d+|페이지\s*\d+)\*\*/gi, '$1');
+
+    // (2) 일반 텍스트 볼드체 처리 (**강조** -> <b>강조</b>)
+    cleanText = cleanText.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+
+    // (3) 줄바꿈 처리
+    cleanText = cleanText.replace(/\n/g, '<br>');
+
+    // (4) 페이지 링크 버튼 변환 ("p.12" -> <button...>)
+    const regex = /(?:p\.|page|페이지)\s*(\d+)/gi;
+    return cleanText.replace(regex, (match, pageNum) => {
+        return `<button onclick="window.moveToPage(${pageNum})" 
+                style="color:#2563eb; background:#eff6ff; border:none; padding:2px 6px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:0.9em; margin:0 2px; vertical-align:middle;">
+                📄 ${pageNum}p 이동
+                </button>`;
+    });
+}
+
+// 페이지 이동 함수
 window.moveToPage = function(pageNum) {
     console.log(`🚀 챗봇 요청으로 ${pageNum}페이지로 이동합니다.`);
-    
-    // [수정] renderDocument나 renderPage가 아니라, 'scrollToPage'를 호출합니다!
-    if (typeof scrollToPage === 'function') { // import한 함수 직접 사용
+    if (typeof scrollToPage === 'function') { 
         scrollToPage(parseInt(pageNum));
-    } 
-    // 만약 import가 안 되는 구조라면 window 전역 객체 등을 확인해야 함
-    else {
+    } else {
         console.error("scrollToPage 함수를 찾을 수 없습니다.");
     }
 };
 
-// [추가] 외부에서 챗봇 질문 트리거 (드래그 검색 / OCR 연동용)
-// =========================================
+// [추가] 외부 트리거
 document.addEventListener('triggerChatQuery', (e) => {
     const { text, mode } = e.detail;
     if (!text) return;
 
-    // 1. 채팅 패널 열기 (숨겨져 있을 경우)
-    // ※ 주의: 본인의 HTML ID에 맞게 수정 필요 (보통 chat-container 또는 chat-sidebar)
     const chatContainer = document.getElementById('chat-messages')?.parentElement; 
-    const toggleBtn = document.getElementById('chat-toggle-btn'); // 토글 버튼 ID
+    const toggleBtn = document.getElementById('chat-toggle-btn'); 
     
-    // 채팅창이 안 보이면 토글 버튼 클릭해서 열기
     if (chatContainer && (chatContainer.style.display === 'none' || chatContainer.classList.contains('hidden'))) {
         if(toggleBtn) toggleBtn.click();
     }
 
-    // 2. 채팅 입력창에 텍스트 넣기
     const chatInput = document.getElementById('chat-input');
     if (chatInput) {
         chatInput.value = text;
-        chatInput.focus(); // 포커스 이동 (타이핑 준비)
+        chatInput.focus(); 
     }
 
-    // 3. 자동으로 전송 버튼 누르기 (0.5초 뒤)
     setTimeout(() => {
         const sendBtn = document.getElementById('chat-send-btn');
-        // 모드 변경이 필요하면 여기서 select 변경 로직 추가 가능
         if (sendBtn) sendBtn.click();
     }, 500);
 });

@@ -28,7 +28,8 @@ import {
     Timestamp,
     updateDoc,
     writeBatch,
-    orderBy
+    orderBy,
+    arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { 
     getStorage, 
@@ -576,7 +577,18 @@ export async function openDoc(bookId) {
             }
         });
 
+        // 1. 챗봇 활성화
         if (window.setChatbotEnabled) window.setChatbotEnabled(true);
+
+        // 2. ⭐️ [수정됨] 현재 선택된 '페르소나'의 대화 기록 불러오기
+        if (window.loadChatToUI) {
+            // 화면에 있는 선택 상자(dropdown)를 찾아서 현재 값을 읽어옵니다.
+            const personaSelect = document.getElementById("chat-persona-select");
+            const currentPersona = personaSelect ? personaSelect.value : 'professor'; // 없으면 기본값 professor
+            
+            // bookId와 persona를 같이 넘겨줍니다!
+            window.loadChatToUI(bookId, currentPersona);
+        }
 
     } catch (error) {
         console.error("Failed to open document:", error);
@@ -742,3 +754,63 @@ window.sendQueryToBot = async function(bookId, messages, systemPrompt) {
         return `오류가 발생했습니다: ${error.message}`;
     }
 };
+
+
+export async function saveChatMessageToDb(bookId, messageObj, persona) {
+    if (!bookId || !persona) {
+        console.warn("❌ 저장 실패: BookID 또는 페르소나 정보 없음");
+        return;
+    }
+
+    // 모드별로 다른 방 이름을 씁니다 (예: chatHistory_professor)
+    const fieldName = `chatHistory_${persona}`;
+    
+    console.log(`💾 [${persona}] 대화 저장 중...`);
+    
+    const docRef = doc(db, "books", bookId);
+    try {
+        // 해당 모드의 배열에만 메시지 추가
+        await setDoc(docRef, {
+            [fieldName]: arrayUnion(messageObj)
+        }, { merge: true });
+    } catch (e) {
+        console.error("❌ DB 저장 에러:", e);
+    }
+}
+
+// 📂 2. 대화 기록 불러오기 (해당 모드의 기록만 가져옴)
+export async function loadChatHistoryFromDb(bookId, persona) {
+    if (!bookId || !persona) return [];
+    
+    const docRef = doc(db, "books", bookId);
+    try {
+        const snapshot = await getDoc(docRef);
+        if (snapshot.exists()) {
+            const data = snapshot.data();
+            const fieldName = `chatHistory_${persona}`;
+            // 해당 모드의 기록이 있으면 반환, 없으면 빈 배열
+            return data[fieldName] || []; 
+        }
+    } catch (e) {
+        console.error("❌ DB 로드 에러:", e);
+    }
+    return [];
+}
+
+// 🗑️ 3. 대화 기록 삭제하기 (현재 선택된 모드만 삭제)
+export async function clearChatHistoryInDb(bookId, persona) {
+    if (!bookId || !persona) return;
+    
+    const fieldName = `chatHistory_${persona}`;
+    const docRef = doc(db, "books", bookId);
+    
+    try {
+        // 해당 모드의 기록만 빈 배열로 초기화
+        await updateDoc(docRef, {
+            [fieldName]: [] 
+        });
+        console.log(`🗑️ [${persona}] 대화 기록 삭제 완료`);
+    } catch (e) {
+        console.error("❌ DB 삭제 에러:", e);
+    }
+}
