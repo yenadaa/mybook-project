@@ -601,31 +601,33 @@ function updateToggleIcons() {
 
     // 3. 통합 토글 함수 (안전장치 포함)
     const handleToggle = (isRight) => {
-        const hideClass = isRight ? 'right-hidden' : 'left-hidden';
-        const cssVar = isRight ? '--right-panel-width' : '--left-sidebar-width';
-        const storageKey = isRight ? 'rightPanelWidth' : 'leftSidebarWidth';
-        const defaultWidth = isRight ? '360' : '260';
+    const hideClass = isRight ? 'right-hidden' : 'left-hidden';
+    const cssVar = isRight ? '--right-panel-width' : '--left-sidebar-width';
+    const storageKey = isRight ? 'rightPanelWidth' : 'leftSidebarWidth';
+    const defaultWidth = isRight ? '360' : '260';
 
-        const willHide = !mainEl.classList.contains(hideClass);
-        if (willHide) {
-            document.documentElement.style.setProperty(cssVar, '0px');
-            // 숨길 때 현재 너비를 기억하되 0은 저장하지 않음 (다시 켤 때를 위해)
-            mainEl.classList.add(hideClass);
-        } else {
-            let lastWidth = parseInt(localStorage.getItem(storageKey), 10);
-            const limitMax = window.innerWidth * 0.35;
+    if (!mainEl.classList.contains(hideClass)) {
+        // [닫을 때]
+        document.documentElement.style.setProperty(cssVar, '0px');
+        mainEl.classList.add(hideClass);
+    } else {
+        // [열 때 - 여기가 핵심!]
+        let lastWidth = parseInt(localStorage.getItem(storageKey), 10);
+        
+        // 기존 50% 제한에서 -> 30%로 하향 조정하여 안전성 확보
+        const safetyLimit = window.innerWidth * 0.3; 
 
-            // 저장된 값이 없거나 너무 크면 기본값 사용
-            if (!lastWidth || lastWidth <= 0 || lastWidth > limitMax) {
-                lastWidth = defaultWidth;
-            }
-
-            document.documentElement.style.setProperty(cssVar, `${lastWidth}px`);
-            localStorage.setItem(storageKey, String(lastWidth));
-            mainEl.classList.remove(hideClass);
+        // 비정상적인 값(너무 큰 값)이 들어있으면 무조건 defaultWidth로 초기화
+        if (!lastWidth || lastWidth <= 0 || lastWidth > safetyLimit) {
+            lastWidth = defaultWidth;
         }
-        updateToggleIcons();
-    };
+
+        document.documentElement.style.setProperty(cssVar, `${lastWidth}px`);
+        localStorage.setItem(storageKey, String(lastWidth)); // 올바른 값을 다시 저장
+        mainEl.classList.remove(hideClass);
+    }
+    updateToggleIcons();
+};
 
     // 4. [중요] 왼쪽/오른쪽 버튼 리스너 연결
     // index.html에 id="toggleLeftSidebar" 버튼이 있는지 확인하세요!

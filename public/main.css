@@ -74,8 +74,8 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 
 /* [추가 12-19]왼쪽 패널 숨김 클래스 */
 .main.left-hidden {
-    grid-template-columns: 0px 15px 1fr 8px var(--right-panel-width) !important;
-}
+    grid-template-columns: 0px 8px 1fr 8px var(--right-panel-width) !important;
+}t
 .main.left-hidden .sidebar {
     display: none !important;
 }
@@ -87,7 +87,7 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 /*  [수정 12-19]오른쪽 패널을 숨기는 클래스 수정 */
 .main.right-hidden {
     /* 변경: 오른쪽 패널 너비와 리사이저 너비를 0으로 설정 */
-    grid-template-columns:var(--left-sidebar-width) 8px 1fr 15px 0px !important;
+    grid-template-columns:var(--left-sidebar-width) 8px 1fr 8px 0px !important;
 }
 .main.right-hidden .right {
     display: none !important; 
@@ -95,6 +95,10 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .main.right-hidden #right-resizer {
     display: flex !important; 
 }
+#left-resizer, #right-resizer{
+  visibility: visible !important;
+}
+
 
 /* [추가 12-19] 패널 토글 버튼 스타일 */
 #toggleLeftSidebar,#toggleRightPanel {
@@ -203,7 +207,7 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .outline li { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .outline li:hover { background: rgba(99,102,241,.08); }
 
-.viewer {position: relative; overflow: auto;/* [11-25][수정][높이를 100%로 설정하여 부모(.main)의 높이 채움] */height: 100%;flex-grow: 1; min-width: 400px !important;/* [추가12-19] 패널을 늘려도 PDF 영역은 최소 400px을 유지함 */}
+.viewer {position: relative; overflow: auto;/* [11-25][수정][높이를 100%로 설정하여 부모(.main)의 높이 채움] */height: 100%;flex-grow: 1; min-width: 600px !important;/* [추가12-19] 패널을 늘려도 PDF 영역은 최소 400px을 유지함 */}
 .pages { position: relative; padding: 20px 0 200px; display: grid; justify-content: center; gap: 18px; }
 .page-wrap { position: relative; }
 .page { display: block; background: white; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }
