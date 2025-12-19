@@ -236,25 +236,26 @@ function setupResizer(resizerId, panelEl, minWidth, isRight) {
     // ---------------------------------------------------------
     // [공통 로직 2] 드래그 중 계산
     // ---------------------------------------------------------
+// [수정 12-19] onDrag 함수 내부의 maxWidth 제한 로직
     const onDrag = (clientX) => {
         if (!isDragging) return;
         
         const deltaX = clientX - initialX;
         let newWidth;
 
-        // 오른쪽은 마우스가 왼쪽(-)으로 갈 때 증가, 왼쪽은 오른쪽(+)으로 갈 때 증가
         if (isRight) {
             newWidth = initialWidth - deltaX;
         } else {
             newWidth = initialWidth + deltaX;
         }
         
-        // 스냅 및 최소/최대 제한
+        // [설정] 최대 크기를 화면의 30%로 제한 (원하는 비율로 숫자 수정 가능)
+        const limitMax = window.innerWidth * 0.3; 
+        
         if (newWidth < minWidth) {
-            newWidth = 0;
-        } else {
-            const maxWidth = window.innerWidth * 0.5;
-            if (newWidth > maxWidth) newWidth = maxWidth;
+            newWidth = 0; // 스냅
+        } else if (newWidth > limitMax) {
+            newWidth = limitMax; // 최대 크기 고정
         }
         
         document.documentElement.style.setProperty(cssVar, `${newWidth}px`);
@@ -612,7 +613,7 @@ function updateToggleIcons() {
     // 4. 상단 툴바 버튼 리스너 연결
     document.getElementById('toggleLeftSidebar')?.addEventListener('click', () => handleToggle(false));
     document.getElementById('toggleRightPanel')?.addEventListener('click', () => handleToggle(true));
-    
+
     // -------------------------------------------------------
     // ⭐️ [추가] 백지 복습 모드 진입 버튼
     // -------------------------------------------------------
