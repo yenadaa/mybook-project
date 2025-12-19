@@ -568,60 +568,65 @@ function updateToggleIcons() {
 // -------------------------------------------------------
     // [수정 12-19] 양방향 리사이저(PC/터치) 및 통합 토글 초기화
     // -------------------------------------------------------
+
     const mainEl = document.querySelector('.main');
     const sidebarEl = document.querySelector('.sidebar');
     const rightEl = document.querySelector('.right');
 
-    // 1. 저장된 너비 데이터 복원
-    const restorePanel = (key, cssVar, hideClass) => {
-        const val = localStorage.getItem(key);
+    // 1. 저장된 너비 데이터 복원 (안전 수치 적용)
+    const restorePanel = (key, cssVar, hideClass, defaultW) => {
+        let val = localStorage.getItem(key);
+        const limitMax = window.innerWidth * 0.35; // 최대 35% 제한
+
         if (val) {
-            document.documentElement.style.setProperty(cssVar, `${val}px`);
-            if (val === '0') mainEl.classList.add(hideClass);
+            let numericVal = parseInt(val, 10);
+            // 비정상적으로 크면 기본값으로 교정
+            if (numericVal > limitMax) numericVal = defaultW;
+            
+            document.documentElement.style.setProperty(cssVar, `${numericVal}px`);
+            if (numericVal === 0) mainEl.classList.add(hideClass);
         }
     };
-    restorePanel('leftSidebarWidth', '--left-sidebar-width', 'left-hidden');
-    restorePanel('rightPanelWidth', '--right-panel-width', 'right-hidden');
+    restorePanel('leftSidebarWidth', '--left-sidebar-width', 'left-hidden', 260);
+    restorePanel('rightPanelWidth', '--right-panel-width', 'right-hidden', 360);
 
-    // 2. 리사이저 핸들 활성화 (왼쪽 150px / 오른쪽 100px 최소 너비 설정)
+    // 2. 리사이저 핸들 활성화
     if (sidebarEl) setupResizer('left-resizer', sidebarEl, 150, false); 
     if (rightEl) setupResizer('right-resizer', rightEl, 100, true); 
-    updateToggleIcons(); // 초기 실행 시 아이콘 방향 설정
-
-    // 3. 통합 토글 이벤트 로직
- // [수정 12-19] 패널 복구 시 최대 크기 제한 로직 추가
-const handleToggle = (isRight) => {
-    const hideClass = isRight ? 'right-hidden' : 'left-hidden';
-    const cssVar = isRight ? '--right-panel-width' : '--left-sidebar-width';
-    const storageKey = isRight ? 'rightPanelWidth' : 'leftSidebarWidth';
-    const defaultWidth = isRight ? '360' : '260';
-
-    const willHide = !mainEl.classList.contains(hideClass);
-    if (willHide) {
-        document.documentElement.style.setProperty(cssVar, '0px');
-        // 숨길 때 0을 저장하면 다음에 열 때 기본값으로 열리게 함
-        localStorage.setItem(storageKey, '0'); 
-        mainEl.classList.add(hideClass);
-    } else {
-        // [안전장치] 저장된 값을 가져오되, 너무 크면 기본값이나 최대치로 제한
-        let lastWidth = parseInt(localStorage.getItem(storageKey), 10);
-        const limitMax = window.innerWidth * 0.3; // 화면의 30%로 제한
-
-        // 0이거나, 숫자가 아니거나, 너무 크면 기본값으로 복구
-        if (!lastWidth || lastWidth === 0 || lastWidth > limitMax) {
-            lastWidth = defaultWidth;
-        }
-
-        document.documentElement.style.setProperty(cssVar, `${lastWidth}px`);
-        localStorage.setItem(storageKey, String(lastWidth));
-        mainEl.classList.remove(hideClass);
-    }
     updateToggleIcons();
-};
-    // 4. 상단 툴바 버튼 리스너 연결
+
+    // 3. 통합 토글 함수 (안전장치 포함)
+    const handleToggle = (isRight) => {
+        const hideClass = isRight ? 'right-hidden' : 'left-hidden';
+        const cssVar = isRight ? '--right-panel-width' : '--left-sidebar-width';
+        const storageKey = isRight ? 'rightPanelWidth' : 'leftSidebarWidth';
+        const defaultWidth = isRight ? '360' : '260';
+
+        const willHide = !mainEl.classList.contains(hideClass);
+        if (willHide) {
+            document.documentElement.style.setProperty(cssVar, '0px');
+            // 숨길 때 현재 너비를 기억하되 0은 저장하지 않음 (다시 켤 때를 위해)
+            mainEl.classList.add(hideClass);
+        } else {
+            let lastWidth = parseInt(localStorage.getItem(storageKey), 10);
+            const limitMax = window.innerWidth * 0.35;
+
+            // 저장된 값이 없거나 너무 크면 기본값 사용
+            if (!lastWidth || lastWidth <= 0 || lastWidth > limitMax) {
+                lastWidth = defaultWidth;
+            }
+
+            document.documentElement.style.setProperty(cssVar, `${lastWidth}px`);
+            localStorage.setItem(storageKey, String(lastWidth));
+            mainEl.classList.remove(hideClass);
+        }
+        updateToggleIcons();
+    };
+
+    // 4. [중요] 왼쪽/오른쪽 버튼 리스너 연결
+    // index.html에 id="toggleLeftSidebar" 버튼이 있는지 확인하세요!
     document.getElementById('toggleLeftSidebar')?.addEventListener('click', () => handleToggle(false));
     document.getElementById('toggleRightPanel')?.addEventListener('click', () => handleToggle(true));
-
     // -------------------------------------------------------
     // ⭐️ [추가] 백지 복습 모드 진입 버튼
     // -------------------------------------------------------
