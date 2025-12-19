@@ -33,7 +33,7 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .zoom-label { min-width: 54px; text-align: center; }
 
 /*[수정][11-25][기존 app역할]*/     /* [수정 12-17] 260px (왼쪽) / 1fr (중앙) / 4px (리사이저) / var(오른쪽) */
-.main { height: 100%;display: grid;grid-template-columns: var(--left-sidebar-width) 8px 1fr 8px var(--right-panel-width);background: var(--bg);color: var(--fg);}
+.main {overflow: hidden; width: 100%; height: 100%;display: grid;grid-template-columns: var(--left-sidebar-width) 15px 1fr 15px var(--right-panel-width);background: var(--bg);color: var(--fg);}
 /*  [추가 12-17].resizer (크기 조절 핸들) 스타일 (유지) */
 .resizer {
     width: 15px;
@@ -76,8 +76,12 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .main.left-hidden {
     grid-template-columns: 0px 15px 1fr 8px var(--right-panel-width) !important;
 }
-.main.left-hidden .sidebar, .main.left-hidden #left-resizer {
+.main.left-hidden .sidebar {
     display: none !important;
+}
+/* 리사이저를 display:none 하지 않고 투명하게 남겨둡니다 */
+.main.left-hidden #left-resizer {
+    display: flex !important; 
 }
 
 /*  [수정 12-19]오른쪽 패널을 숨기는 클래스 수정 */
@@ -89,7 +93,7 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
     display: none !important; 
 }
 .main.right-hidden #right-resizer {
-    display: none !important; 
+    display: flex !important; 
 }
 
 /* [추가 12-19] 패널 토글 버튼 스타일 */
@@ -199,7 +203,7 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .outline li { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .outline li:hover { background: rgba(99,102,241,.08); }
 
-.viewer {position: relative; overflow: auto;/* [11-25][수정][높이를 100%로 설정하여 부모(.main)의 높이 채움] */height: 100%; min-width: 400px;/* [추가12-19] 패널을 늘려도 PDF 영역은 최소 400px을 유지함 */}
+.viewer {position: relative; overflow: auto;/* [11-25][수정][높이를 100%로 설정하여 부모(.main)의 높이 채움] */height: 100%;flex-grow: 1; min-width: 400px !important;/* [추가12-19] 패널을 늘려도 PDF 영역은 최소 400px을 유지함 */}
 .pages { position: relative; padding: 20px 0 200px; display: grid; justify-content: center; gap: 18px; }
 .page-wrap { position: relative; }
 .page { display: block; background: white; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }

@@ -237,20 +237,28 @@ function setupResizer(resizerId, panelEl, minWidth, isRight) {
     // [공통 로직 2] 드래그 중 계산
     // ---------------------------------------------------------
 // [수정 12-19] onDrag 함수 내부의 maxWidth 제한 로직
+// viewer-ui.js 내부 onDrag 수정
+
     const onDrag = (clientX) => {
         if (!isDragging) return;
         
         const deltaX = clientX - initialX;
         let newWidth = isRight ? initialWidth - deltaX : initialWidth + deltaX;
         
-        const limitMax = window.innerWidth * 0.3; // 최대 30% 제한
-        
-        if (newWidth < 10) { // 10px보다 작아지면 0으로
+        // 최대 너비 제한 (화면의 35% 이상 커지지 않게 안전장치)
+        const limitMax = window.innerWidth * 0.35; 
+
+        if (newWidth < 15) { // 15px보다 작아지면 0으로 '스냅'해서 닫기
             newWidth = 0;
         } else {
-            // [추가] 10px 이상으로 끌어당기면 숨김 클래스 자동 제거
+            // [추가] 15px 이상으로 마우스를 끌면 자동으로 'hidden' 클래스 제거해서 꺼내기
             const mainEl = document.querySelector('.main');
-            mainEl.classList.remove(isRight ? 'right-hidden' : 'left-hidden');
+            if (isRight) {
+                mainEl.classList.remove('right-hidden');
+            } else {
+                mainEl.classList.remove('left-hidden');
+            }
+            
             if (newWidth > limitMax) newWidth = limitMax;
         }
         
