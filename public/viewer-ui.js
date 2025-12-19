@@ -241,21 +241,17 @@ function setupResizer(resizerId, panelEl, minWidth, isRight) {
         if (!isDragging) return;
         
         const deltaX = clientX - initialX;
-        let newWidth;
-
-        if (isRight) {
-            newWidth = initialWidth - deltaX;
+        let newWidth = isRight ? initialWidth - deltaX : initialWidth + deltaX;
+        
+        const limitMax = window.innerWidth * 0.3; // 최대 30% 제한
+        
+        if (newWidth < 10) { // 10px보다 작아지면 0으로
+            newWidth = 0;
         } else {
-            newWidth = initialWidth + deltaX;
-        }
-        
-        // [설정] 최대 크기를 화면의 30%로 제한 (원하는 비율로 숫자 수정 가능)
-        const limitMax = window.innerWidth * 0.3; 
-        
-        if (newWidth < minWidth) {
-            newWidth = 0; // 스냅
-        } else if (newWidth > limitMax) {
-            newWidth = limitMax; // 최대 크기 고정
+            // [추가] 10px 이상으로 끌어당기면 숨김 클래스 자동 제거
+            const mainEl = document.querySelector('.main');
+            mainEl.classList.remove(isRight ? 'right-hidden' : 'left-hidden');
+            if (newWidth > limitMax) newWidth = limitMax;
         }
         
         document.documentElement.style.setProperty(cssVar, `${newWidth}px`);
