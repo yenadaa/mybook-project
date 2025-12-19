@@ -42,6 +42,7 @@
   </header>
 
   <main id="main" class="container" role="main">
+    
     <section class="card card--hero" aria-labelledby="todayTitle">
       <div class="card__head">
         <h1 id="todayTitle" class="card__title">오늘의 학습</h1>
@@ -56,31 +57,31 @@
       </div>
 
       <div class="hero-grid">
-        <div class="hero-left">
-          <div class="doc-now" aria-label="현재 학습 중 문서">
-            <div class="doc-now__meta">
-              <div class="doc-now__label">현재 학습 중</div>
-              <div class="doc-now__title" id="currentDocTitle">-</div>
-              <div class="doc-now__sub" id="currentDocSub">-</div>
+        
+        <div class="doc-now" aria-label="현재 학습 중 문서">
+          <div class="doc-now__meta">
+            <div class="doc-now__label">현재 학습 중</div>
+            <div class="doc-now__title" id="currentDocTitle">-</div>
+            <div class="doc-now__sub" id="currentDocSub">-</div>
+          </div>
+
+          <div class="progress" aria-label="학습 진도">
+            <div class="progress__row">
+              <span class="progress__label">학습 진도</span>
+              <span class="progress__value" id="currentProgressText">0%</span>
             </div>
+            <div class="progress__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="progress__fill" id="currentProgressFill" style="width:0%"></div>
+            </div>
+            <div class="progress__hint" id="currentNextStep">다음 추천: -</div>
 
-            <div class="progress" aria-label="학습 진도">
-              <div class="progress__row">
-                <span class="progress__label">학습 진도</span>
-                <span class="progress__value" id="currentProgressText">0%</span>
-              </div>
-              <div class="progress__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                <div class="progress__fill" id="currentProgressFill" style="width:0%"></div>
-              </div>
-              <div class="progress__hint" id="currentNextStep">다음 추천: -</div>
-
-              <div class="milestones" aria-label="기억 단계">
-                <div class="milestone" id="ms1">1일</div>
-                <div class="milestone" id="ms3">3일</div>
-                <div class="milestone" id="ms7">7일</div>
-                <div class="milestone" id="ms14">14일</div>
-                <div class="milestone" id="ms30">30일</div>
-              </div>
+            <div class="milestones" aria-label="기억 단계">
+              <div class="milestone" id="ms1">1일</div>
+              <div class="milestone" id="ms3">3일</div>
+              <div class="milestone" id="ms7">7일</div>
+              <div class="milestone" id="ms14">14일</div>
+              <div class="milestone" id="ms30">30일</div>
+            </div>
           </div>
         </div>
 
@@ -105,8 +106,8 @@
             </ol>
           </div>
         </div>
-      </div>
-    </section>
+      
+      </div> </section>
 
     <section class="card" aria-labelledby="docsTitle">
       <div class="card__head">
@@ -162,7 +163,6 @@
       <div class="modal__title">미완료 문서</div>
       <button type="button" class="btn btn--text" id="closeAllDocsBtn">닫기</button>
     </div>
-
     <div class="modal__filters">
       <label class="select">
         <span class="select__label">필터</span>
@@ -174,7 +174,6 @@
         </select>
       </label>
     </div>
-
     <div class="modal__body">
       <div class="table-wrap">
         <table class="table">
@@ -198,18 +197,15 @@
       <div class="modal__title">일정 추가</div>
       <button type="button" class="btn btn--text" id="closeEventBtn">닫기</button>
     </div>
-
     <form class="modal__body form" id="eventForm">
       <label class="field">
         <span class="field__label">날짜</span>
         <input type="date" id="eventDate" required />
       </label>
-
       <label class="field">
         <span class="field__label">제목</span>
         <input type="text" id="eventTitle" maxlength="50" required placeholder="예: 통계학 퀴즈 복습" />
       </label>
-
       <div class="form__actions">
         <button type="submit" class="btn btn--primary">저장</button>
         <button type="button" class="btn btn--ghost" id="cancelEventBtn">취소</button>

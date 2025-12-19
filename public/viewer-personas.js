@@ -993,6 +993,8 @@ export const GENERAL_PROMPT = `
 4. **태도:**
    - 친절하고 격려하는 말투(해요체)를 사용하라.
    - 학생이 모르는 것을 부끄러워하지 않게 도와라.
+
+5. 수식 작성 시 백슬래시(\) 괄호 대신 반드시 달러 기호($)를 사용하라. 인라인 수식은 $수식$ 형태, 블록 수식은 $$수식$$ 형태로 작성하라.   
 `;
 
 // Optional: grouped export and a small registry for convenience

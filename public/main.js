@@ -13,183 +13,175 @@ import { httpsCallable, functions } from './A.firebase.js';
 import { PROMPTS } from './viewer-personas.js';
 console.log("✅ main.js 스크립트 파일 로드됨");
 
-    // --- 팝업창 표시 함수들 ---[수정][12-14][DOM 밖으로 꺼냄]
+// --- 팝업창 표시 함수들 ---
 
-    function showQuizModal(content, isLoading = false, isError = false, loadingText = "AI가 퀴즈를 생성하고 있습니다...") {
-        // [수정][12-14] 함수 내부에서 DOM을 찾고 const로 선언합니다.
-        const quizModalOverlay = document.getElementById("quiz-modal-overlay");
-        const quizModalBody = document.getElementById("quiz-modal-body");
-        if (!quizModalOverlay || !quizModalBody) {
-            console.error("❌ showQuizModal: 'quizModalOverlay' 또는 'quizModalBody'를 찾을 수 없습니다.");
-            return;
-        }
-        quizModalBody.innerHTML = '';
+function showQuizModal(content, isLoading = false, isError = false, loadingText = "AI가 퀴즈를 생성하고 있습니다...") {
+    const quizModalOverlay = document.getElementById("quiz-modal-overlay");
+    const quizModalBody = document.getElementById("quiz-modal-body");
+    if (!quizModalOverlay || !quizModalBody) {
+        console.error("❌ showQuizModal: 'quizModalOverlay' 또는 'quizModalBody'를 찾을 수 없습니다.");
+        return;
+    }
+    quizModalBody.innerHTML = '';
 
-        if (isLoading) {
-            quizModalBody.innerHTML = `
-              <div class="loading-container">
-                <div class="spinner"></div>
-                <div class="loading-text">${loadingText}</div>
-              </div>
+    if (isLoading) {
+        quizModalBody.innerHTML = `
+            <div class="loading-container">
+            <div class="spinner"></div>
+            <div class="loading-text">${loadingText}</div>
+            </div>
+        `;
+    } else if (isError) {
+        quizModalBody.innerHTML = `
+            <div class="loading-container">
+            <div style="font-size: 48px;">❌</div>
+            <div class="loading-text" style="color: #d9534f;">${loadingText || '오류가 발생했습니다. 다시 시도해주세요.'}</div>
+            </div>
+        `;
+    } else {
+        quizModalBody.innerHTML = content;
+    }
+    quizModalOverlay.classList.remove('hidden');
+}
+
+function hideQuizModal() {
+    const quizModalOverlay = document.getElementById("quiz-modal-overlay");
+    if (quizModalOverlay) {
+        quizModalOverlay.classList.add('hidden');
+    }
+}
+
+function showFullDocQuiz(data, saveResult) {
+    if (!data || (!data.summaries?.summary && (!data.review || (!data.review.ox?.length && !data.review.short?.length && !data.review.discussion?.length)))) {
+        showQuizModal(null, false, true, "AI가 퀴즈를 생성할 내용을 찾지 못했습니다.");
+        return;
+    }
+    
+    const { summaries, review } = data;
+    let feedbackHtml = '';
+    if (saveResult) {
+        const total = (saveResult.saved?.length || 0) + (saveResult.skipped?.length || 0);
+        const savedCount = saveResult.saved?.length || 0;
+        const skippedCount = saveResult.skipped?.length || 0;
+        if (total > 0) {
+            feedbackHtml = `
+                <div class="save-feedback">
+                    총 ${total}개 퀴즈 생성 완료 (신규 저장: ${savedCount}개 / 유사 중복: ${skippedCount}개)
+                </div>
             `;
-        } else if (isError) {
-            quizModalBody.innerHTML = `
-              <div class="loading-container">
-                <div style="font-size: 48px;">❌</div>
-                <div class="loading-text" style="color: #d9534f;">${loadingText || '오류가 발생했습니다. 다시 시도해주세요.'}</div>
-              </div>
-            `;
-        } else {
-            quizModalBody.innerHTML = content;
         }
-        quizModalOverlay.classList.remove('hidden');
     }
 
-    function hideQuizModal() {
-        // [수정][12-14][함수 내부에서 DOM을 찾고 const로 선언]
-        const quizModalOverlay = document.getElementById("quiz-modal-overlay");
-        if (quizModalOverlay) {
-            quizModalOverlay.classList.add('hidden');
-        }
+    let html = `<h1>AI 분석 결과</h1>${feedbackHtml}`;
+
+    if (summaries && summaries.summary) {
+        html += `
+            <div class="summary-section">
+                <h2>AI 생성 요약</h2>
+                <p>${summaries.summary.replace(/\n/g, '<br>')}</p>
+            </div>
+            <hr>
+        `;
     }
 
-    function showFullDocQuiz(data, saveResult) {
-        if (!data || (!data.summaries?.summary && (!data.review || (!data.review.ox?.length && !data.review.short?.length && !data.review.discussion?.length)))) {
-            showQuizModal(null, false, true, "AI가 퀴즈를 생성할 내용을 찾지 못했습니다.");
-            return;
+    if (review) {
+        html += '<h2>AI 생성 퀴즈</h2>';
+        if (review.ox && review.ox.length > 0) {
+            html += '<h3>OX 퀴즈</h3>';
+            html += review.ox.map((item, i) => `
+                <div class="quiz-item" data-answer="${item.answer}">
+                    <p class="quiz-question">${i+1}. ${item.q}</p>
+                    <ul class="quiz-options"><li>true</li><li>false</li></ul>
+                </div>
+            `).join(''); 
+        }
+        if (review.short && review.short.length > 0) {
+            html += '<h3>단답형 퀴즈</h3>';
+            html += review.short.map((item, i) => `
+                <div class="quiz-item short-answer-item" data-answer="${item.answer}">
+                    <p class="quiz-question">${i + 1}. ${item.q}</p>
+                    <div class="short-answer-container">
+                        <input type="text" class="short-answer-input" placeholder="정답을 입력하세요.">
+                        <button class="check-answer-btn">정답 확인</button>
+                    </div>
+                    <p class="answer-feedback hidden">정답: ${item.answer}</p>
+                </div>
+            `).join('');
         }
         
-        const { summaries, review } = data;
-        let feedbackHtml = '';
-        if (saveResult) {
-            const total = (saveResult.saved?.length || 0) + (saveResult.skipped?.length || 0);
-            const savedCount = saveResult.saved?.length || 0;
-            const skippedCount = saveResult.skipped?.length || 0;
-            if (total > 0) {
-                feedbackHtml = `
-                  <div class="save-feedback">
-                      총 ${total}개 퀴즈 생성 완료 (신규 저장: ${savedCount}개 / 유사 중복: ${skippedCount}개)
-                  </div>
-                `;
-            }
-        }
-
-        let html = `<h1>AI 분석 결과</h1>${feedbackHtml}`;
-
-        if (summaries && summaries.summary) {
-            html += `
-                <div class="summary-section">
-                    <h2>AI 생성 요약</h2>
-                    <p>${summaries.summary.replace(/\n/g, '<br>')}</p>
-                </div>
-                <hr>
-            `;
-        }
-
-        if (review) {
-            html += '<h2>AI 생성 퀴즈</h2>';
-            if (review.ox && review.ox.length > 0) {
-                html += '<h3>OX 퀴즈</h3>';
-                html += review.ox.map((item, i) => `
-                    <div class="quiz-item" data-answer="${item.answer}">
-                        <p class="quiz-question">${i+1}. ${item.q}</p>
-                        <ul class="quiz-options"><li>true</li><li>false</li></ul>
-                    </div>
-                `).join(''); 
-            }
-            if (review.short && review.short.length > 0) {
-                html += '<h3>단답형 퀴즈</h3>';
-                html += review.short.map((item, i) => `
-                    <div class="quiz-item short-answer-item" data-answer="${item.answer}">
-                        <p class="quiz-question">${i + 1}. ${item.q}</p>
-                        <div class="short-answer-container">
-                            <input type="text" class="short-answer-input" placeholder="정답을 입력하세요.">
-                            <button class="check-answer-btn">정답 확인</button>
+        if (review.discussion) {
+            review.discussion.forEach((item, i) => {
+                html += `
+                    <div class="quiz-item discussion-item">
+                        <p class="quiz-question">Q${i+1}. (서술) ${item.q}</p>
+                        <div class="discussion-input-container">
+                            <textarea class="discussion-input" placeholder="답변을 입력하세요..."></textarea>
                         </div>
-                        <p class="answer-feedback hidden">정답: ${item.answer}</p>
-                    </div>
-                `).join('');
-            }
-            
-            // --- [함수 전체 변경][12-01][힌트가없습니다 없앰] /[12/07]수정---
-            if (review.discussion) {
-                review.discussion.forEach((item, i) => {
-                    html += `
-                        <div class="quiz-item discussion-item">
-                            <p class="quiz-question">Q${i+1}. (서술) ${item.q}</p>
-                            <div class="discussion-input-container">
-                                <textarea class="discussion-input" placeholder="답변을 입력하세요..."></textarea>
-                            </div>
-                            <div class="quiz-actions">
-                                <button class="submit-discussion-btn">정답 제출 & 채점</button>
-                                
-                                ${item.hint ? `
-                                    <button class="hint-button" style="margin-left:10px; background:#f3f4f6; color:#333;">💡 힌트 보기</button>
-                                    <div class="hint-content" style="display:none; margin-top:10px; padding:10px; background:#fffbeb; border:1px solid #fcd34d; border-radius:5px; color:#92400e;">
-                                        ${item.hint}
-                                    </div>
-                                ` : ''}
-                            </div>
-                        </div>`;
-                });
-            }
-        }
-        showQuizModal(html);
-    }
-
-    async function handleDiscussionSubmit(submitButton) {
-        const quizItem = submitButton.closest('.quiz-item');
-        const textarea = quizItem.querySelector('.discussion-input');
-        const answer = textarea.value.trim();
-        const questionText = quizItem.querySelector('.quiz-question').textContent;
-
-        if (!answer) 
-            return alert("답변을 입력해주세요.");
-
-        const bookId = getCurrentBookId();
-        const user = getCurrentUser();
-
-        if (!bookId || !user) return alert("로그인이 필요합니다.");
-
-        submitButton.disabled = true;
-        submitButton.textContent = "제출 중...";
-
-        try {
-            // ⭐️ [수정] 백엔드 채점 API 호출
-            const scoreDiscussionAnswer = httpsCallable(functions, 'scoreDiscussionAnswer');
-            const result = await scoreDiscussionAnswer({
-                question: questionText,
-                user_answer: answer
+                        <div class="quiz-actions">
+                            <button class="submit-discussion-btn">정답 제출 & 채점</button>
+                            
+                            ${item.hint ? `
+                                <button class="hint-button" style="margin-left:10px; background:#f3f4f6; color:#333;">💡 힌트 보기</button>
+                                <div class="hint-content" style="display:none; margin-top:10px; padding:10px; background:#fffbeb; border:1px solid #fcd34d; border-radius:5px; color:#92400e;">
+                                    ${item.hint}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>`;
             });
-            
-            const { score, feedback } = result.data;
-
-            // 결과 표시 UI 생성
-            const feedbackDiv = document.createElement('div');
-            feedbackDiv.className = 'grading-result';
-            feedbackDiv.style.cssText = "margin-top:10px; padding:10px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px;";
-            feedbackDiv.innerHTML = `
-                <div style="font-weight:bold; color:#166534; margin-bottom:4px;">💯 점수: ${score} / 10</div>
-                <div style="font-size:14px; color:#374151;">${feedback}</div>
-            `;
-            
-            // 힌트 버튼 아래나 입력창 아래에 추가
-            quizItem.querySelector('.discussion-input-container').appendChild(feedbackDiv);
-
-            submitButton.textContent = "채점 완료";
-            textarea.disabled = true; // 수정 불가 처리
-
-        } catch (e) {
-            console.error("채점 실패:", e);
-            alert("채점 중 오류가 발생했습니다.");
-            submitButton.disabled = false;
-            submitButton.textContent = "정답 제출";
         }
     }
+    showQuizModal(html);
+}
 
+async function handleDiscussionSubmit(submitButton) {
+    const quizItem = submitButton.closest('.quiz-item');
+    const textarea = quizItem.querySelector('.discussion-input');
+    const answer = textarea.value.trim();
+    const questionText = quizItem.querySelector('.quiz-question').textContent;
 
+    if (!answer) 
+        return alert("답변을 입력해주세요.");
 
-// ⭐️ [복구] 챗봇 변수
+    const bookId = getCurrentBookId();
+    const user = getCurrentUser();
+
+    if (!bookId || !user) return alert("로그인이 필요합니다.");
+
+    submitButton.disabled = true;
+    submitButton.textContent = "제출 중...";
+
+    try {
+        const scoreDiscussionAnswer = httpsCallable(functions, 'scoreDiscussionAnswer');
+        const result = await scoreDiscussionAnswer({
+            question: questionText,
+            user_answer: answer
+        });
+        
+        const { score, feedback } = result.data;
+
+        const feedbackDiv = document.createElement('div');
+        feedbackDiv.className = 'grading-result';
+        feedbackDiv.style.cssText = "margin-top:10px; padding:10px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px;";
+        feedbackDiv.innerHTML = `
+            <div style="font-weight:bold; color:#166534; margin-bottom:4px;">💯 점수: ${score} / 10</div>
+            <div style="font-size:14px; color:#374151;">${feedback}</div>
+        `;
+        
+        quizItem.querySelector('.discussion-input-container').appendChild(feedbackDiv);
+
+        submitButton.textContent = "채점 완료";
+        textarea.disabled = true;
+
+    } catch (e) {
+        console.error("채점 실패:", e);
+        alert("채점 중 오류가 발생했습니다.");
+        submitButton.disabled = false;
+        submitButton.textContent = "정답 제출";
+    }
+}
+
+// ⭐️ 챗봇 변수
 let chatbotInitialized = false;
 let chatHistory = [];
 
@@ -217,11 +209,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await generateCustomReview({ bookId });
             const resultData = result.data; 
 
-            // ⭐️ [디버깅용 로그 추가]
             console.log("🔥 전체 데이터:", resultData);
             console.log("🔥 Discussion 데이터:", resultData?.review?.discussion);
 
-            // 만약 discussion 데이터가 있다면 첫 번째 문제의 힌트도 찍어보기
             if (resultData?.review?.discussion?.length > 0) {
                 console.log("🔥 첫 번째 문제 힌트:", resultData.review.discussion[0].hint);
             }
@@ -281,7 +271,7 @@ document.addEventListener('DOMContentLoaded', () => {
              data.review.short.forEach(it => items.push({ type: 'short', q: it.q, answer: it.answer || "", sources: it.sources || [], tags: it.tags || [] }));
            }
            if (data?.review?.discussion) {
-             data.review.discussion.forEach(it => items.push({ type: 'discussion', q: it.q, hint: it.hint, sources: it.sources || [], tags: it.tags || [] }));//12.07 수정
+             data.review.discussion.forEach(it => items.push({ type: 'discussion', q: it.q, hint: it.hint, sources: it.sources || [], tags: it.tags || [] }));
            }
 
            const saveQuizItems = httpsCallable(functions, 'saveQuizItems');
@@ -302,22 +292,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- 퀴즈 결과 팝업 관련 이벤트 핸들러 ---[수정][12-14] DOM 요소를 직접 찾아서 리스너 연결
+    // --- 퀴즈 결과 팝업 관련 이벤트 핸들러 ---
     document.getElementById("quiz-close-btn")?.addEventListener("click", hideQuizModal);
     document.getElementById("quiz-modal-overlay")?.addEventListener("click", (e) => {
-        // e.target과 오버레이가 일치하는지 확인 (외부 클릭 시 닫기)
         if (e.target === document.getElementById("quiz-modal-overlay")) hideQuizModal();
     });
 
-    // 퀴즈 정답 확인 로직[수정][12-14] [DOM 요소를 직접 찾아서 리스너 연결]
+    // 퀴즈 정답 확인 로직
     document.getElementById("quiz-modal-body")?.addEventListener('click', (e) => {
         const target = e.target;
         const optionLI = target.closest('li');
 
-        // [추가][12-01][힌트 버튼 클릭 로직]
-        // [12.07]💡 [수정] 힌트 버튼 클릭 시 토글
         if (target.matches('.hint-button')) {
-            const hintContent = target.nextElementSibling; // 버튼 바로 뒤 요소 찾기
+            const hintContent = target.nextElementSibling;
             if (hintContent && hintContent.classList.contains('hint-content')) {
                 const isHidden = hintContent.style.display === 'none';
                 hintContent.style.display = isHidden ? 'block' : 'none';
@@ -326,7 +313,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // 📝 [수정] 정답 제출 버튼 클릭 시
         if (target.matches('.submit-discussion-btn')) {
             handleDiscussionSubmit(target);
             return;
@@ -370,31 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    /*/[12.16]백지복습에 ID 넘겨주기
-    const btnWhiteboard = document.getElementById('btn-whiteboard');
-    if (btnWhiteboard) {
-    btnWhiteboard.addEventListener('click', () => {
-        // 현재 선택된 책 ID (없으면 폴더 ID, 그것도 없으면 에러)
-        const targetId = window.currentBookId || window.currentFolderId;
-
-        if (!targetId) {
-            alert("백지 복습을 할 문서를 먼저 열어주세요!");
-            return;
-        }
-        const width = 1200;
-        const height = 800;
-        const left = (window.screen.width - width) / 2;
-        const top = (window.screen.height - height) / 2;
-
-        window.open(
-            `whiteboard.html?bookId=${targetId}`, 
-            'WhiteboardWindow', 
-            `width=${width},height=${height},top=${top},left=${left},resizable=yes,scrollbars=yes`
-        );
-    });
-    }
-    */
-    // ⭐️ [복구] 챗봇 초기화 실행
+    // ⭐️ 챗봇 초기화 실행
     initChatbot();
 
     if ('serviceWorker' in navigator) {
@@ -414,7 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 }); 
 
-// ⭐️ [복구] 챗봇 로직
+// ⭐️ 챗봇 로직 (내부 중복 정의 삭제됨)
 function initChatbot() {
     if (chatbotInitialized) return;
     chatbotInitialized = true;
@@ -480,12 +442,11 @@ function initChatbot() {
         }
 
         try {
-            // 👇 [수정완료] 페르소나 파일에서 프롬프트 가져오기
+            // 페르소나 파일에서 프롬프트 가져오기
             const personaSelect = document.getElementById("chat-persona-select");
             const selectedKey = personaSelect ? personaSelect.value : 'professor';
 
             let systemPromptText = "";
-            // 화면 선택값(professor 등)을 실제 프롬프트 키(builder_v3 등)로 연결
             switch (selectedKey) {
                 case "socrates": 
                     systemPromptText = PROMPTS.socrates_v3;
@@ -510,40 +471,72 @@ function initChatbot() {
             chatHistory.pop(); 
         }
     }
+}
 
-    function addChatMessage(sender, text, type, id) {
-        const msgDiv = document.createElement("div");
-        msgDiv.classList.add("chat-message", sender);
-        if (type === 'loading') {
-            msgDiv.classList.add("loading");
-        }
-        if (id) {
-            msgDiv.id = id;
-        }
-        
-        const p = document.createElement("p");
-        p.textContent = text;
-        msgDiv.appendChild(p);
-        
-        const chatMessages = document.getElementById("chat-messages");
-        if (chatMessages) {
-             chatMessages.appendChild(msgDiv);
-             chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-        return msgDiv;
+// ✅ [수정] 메시지 추가 함수 (마크다운 + 수식 렌더링 기능 추가)
+function addChatMessage(sender, text, type, id) {
+    const msgDiv = document.createElement("div");
+    msgDiv.classList.add("chat-message", sender);
+    if (type === 'loading') {
+        msgDiv.classList.add("loading");
+    }
+    if (id) {
+        msgDiv.id = id;
     }
 
-    function updateChatMessage(element, newText) {
-        if (element) {
-            element.classList.remove("loading");
-            const p = element.querySelector("p");
-            if (p) {
-                p.textContent = newText;
+    // 1. 텍스트 포맷팅 (간단한 마크다운 처리)
+    let formattedText = text
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') // 볼드체 처리
+        .replace(/\n/g, '<br>'); // 줄바꿈 처리
+
+    const p = document.createElement("p");
+    p.innerHTML = formattedText;
+    msgDiv.appendChild(p);
+
+    const chatMessages = document.getElementById("chat-messages");
+    if (chatMessages) {
+        chatMessages.appendChild(msgDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // 2. ⭐️ [핵심] MathJax에게 "방금 추가된 수식을 예쁘게 그려줘"라고 명령
+    if (window.MathJax && type !== 'loading') {
+        window.MathJax.typesetPromise([p]).then(() => {
+            if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+        }).catch((err) => console.log('수식 렌더링 에러:', err));
+    }
+
+    return msgDiv;
+}
+
+// ✅ [수정] 챗봇 답변 업데이트 함수 (여기에 MathJax가 꼭 있어야 함!)
+function updateChatMessage(element, newText) {
+    if (element) {
+        element.classList.remove("loading");
+        
+        const p = element.querySelector("p");
+        if (p) {
+            let formattedText = newText
+                .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>') 
+                .replace(/\n/g, '<br>');
+
+            p.innerHTML = formattedText; 
+
+            if (window.MathJax) {
+                window.MathJax.typesetPromise([p]).then(() => {
+                    const chatMessages = document.getElementById("chat-messages");
+                    if (chatMessages) {
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                    }
+                }).catch((err) => {
+                    console.warn('MathJax 렌더링 오류(무시 가능):', err);
+                });
             }
-            const chatMessages = document.getElementById("chat-messages");
-            if (chatMessages) {
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
+        }
+
+        const chatMessages = document.getElementById("chat-messages");
+        if (chatMessages) {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
         }
     }
 }
@@ -593,8 +586,6 @@ window.testNoti = async function() {
 };
 
 // 🚀 [추가] 홈 화면에서 "열기" 눌렀을 때 문서 자동 로드 기능
-// ============================================================
-// main.js 맨 아래에 이 코드가 있어야 문서를 가져옵니다!
 import { auth } from './A.firebase.js'; 
 
 auth.onAuthStateChanged(async (user) => {
@@ -604,13 +595,11 @@ auth.onAuthStateChanged(async (user) => {
 
     if (docId) {
         console.log(`🚀 [Auto-Load] 문서 ID 감지: ${docId}`);
-        // doc_firebase.js에 있는 openDoc 함수가 있다면 호출
         if (typeof openDoc === 'function') {
              setTimeout(async () => {
-                await openDoc(docId); // 여기서 문서를 가져오고 화면에 그립니다.
+                await openDoc(docId); 
             }, 500);
         } else {
-             // 비상시 동적 로드
              const mod = await import('./doc_firebase.js');
              if(mod.openDoc) mod.openDoc(docId);
         }
