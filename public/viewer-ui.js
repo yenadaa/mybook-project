@@ -202,120 +202,140 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log("Viewer UI: Event listeners setup started...");
 
     // [추가12-17] 패널 리사이저 로직 함수 (setupResizer) - [12-17 수정] 태블릿 터치 지원 추가
-    function setupResizer(resizerId, panelEl, minWidth, isRight) {
-        const resizer = document.getElementById(resizerId);
-        if (!resizer) return;
+    //[수정 12-19] 패널 리사이저 로직 (양방향 대응 + 터치/PC 공용)
+function setupResizer(resizerId, panelEl, minWidth, isRight) {
+    const resizer = document.getElementById(resizerId);
+    if (!resizer) return;
 
-        let isDragging = false;
-        let initialX;
-        let initialWidth;
-        let newWidth; // 전역 스코프로 이동
+    let isDragging = false;
+    let initialX;
+    let initialWidth;
+    
+    // 방향에 따른 동적 설정
+    const cssVar = isRight ? '--right-panel-width' : '--left-sidebar-width';
+    const storageKey = isRight ? 'rightPanelWidth' : 'leftSidebarWidth';
 
-        // ---------------------------------------------------------
-        // [공통 로직 1] 드래그 시작 (마우스/터치 공용)
-        // ---------------------------------------------------------
-        const startDrag = (clientX) => {
-            isDragging = true;
-            resizer.classList.add('is-dragging');
-            initialX = clientX;
-            
-            // 숨겨져 있을 경우 초기 너비를 '이전 저장된 값'으로 설정
-            const currentProp = document.documentElement.style.getPropertyValue('--right-panel-width');
-            initialWidth = (currentProp === '0px' || currentProp === '') 
-                ? parseInt(localStorage.getItem('rightPanelWidth') || '360', 10) 
-                : panelEl.offsetWidth;
-            
-            document.body.style.userSelect = 'none'; 
-            document.body.style.cursor = 'col-resize'; 
-        };
+    // ---------------------------------------------------------
+    // [공통 로직 1] 드래그 시작
+    // ---------------------------------------------------------
+    const startDrag = (clientX) => {
+        isDragging = true;
+        resizer.classList.add('is-dragging');
+        initialX = clientX;
+        
+        const currentWidth = panelEl.offsetWidth;
+        // 숨겨져 있을 경우 초기 너비를 저장된 값으로 설정
+        initialWidth = (currentWidth === 0) 
+            ? parseInt(localStorage.getItem(storageKey) || (isRight ? '360' : '260'), 10) 
+            : currentWidth;
+        
+        document.body.style.userSelect = 'none'; 
+        document.body.style.cursor = 'col-resize'; 
+    };
 
-        // ---------------------------------------------------------
-        // [공통 로직 2] 드래그 중 계산 (마우스/터치 공용)
-        // ---------------------------------------------------------
-        const onDrag = (clientX) => {
-            if (!isDragging) return;
-            
-            const deltaX = clientX - initialX;
-            
-            // 오른쪽 패널: 마우스가 왼쪽으로 이동(deltaX < 0)하면 너비 증가
-            if (isRight) {
-                newWidth = initialWidth - deltaX;
-                
-                // minWidth(100px)보다 작아지면 0으로 '스냅'
-                if (newWidth < minWidth) {
-                     newWidth = 0;
-                } else {
-                    const maxWidth = window.innerWidth * 0.5;
-                    if (newWidth > maxWidth) newWidth = maxWidth;
-                }
-                
-                // CSS 변수 업데이트
-                document.documentElement.style.setProperty('--right-panel-width', `${newWidth}px`);
-            }
-        };
+    // ---------------------------------------------------------
+    // [공통 로직 2] 드래그 중 계산
+    // ---------------------------------------------------------
+    const onDrag = (clientX) => {
+        if (!isDragging) return;
+        
+        const deltaX = clientX - initialX;
+        let newWidth;
 
-        // ---------------------------------------------------------
-        // [공통 로직 3] 드래그 종료 (마우스/터치 공용)
-        // ---------------------------------------------------------
-        const endDrag = () => {
-            if (!isDragging) return; 
-            isDragging = false;
-            resizer.classList.remove('is-dragging');
-            document.body.style.userSelect = '';
-            document.body.style.cursor = '';
-            
-            // 0px 여부 확인 및 클래스 토글 (팀원 로직 유지)
-            const currentRightWidth = document.documentElement.style.getPropertyValue('--right-panel-width');
-            const finalWidth = parseInt(currentRightWidth, 10);
-            
-            const mainEl = document.querySelector('.main');
-            
-            if (finalWidth === 0) {
-                mainEl.classList.add('right-hidden');
-            } else if (mainEl.classList.contains('right-hidden')) {
-                 mainEl.classList.remove('right-hidden');
-            }
+        // 오른쪽은 마우스가 왼쪽(-)으로 갈 때 증가, 왼쪽은 오른쪽(+)으로 갈 때 증가
+        if (isRight) {
+            newWidth = initialWidth - deltaX;
+        } else {
+            newWidth = initialWidth + deltaX;
+        }
+        
+        // 스냅 및 최소/최대 제한
+        if (newWidth < minWidth) {
+            newWidth = 0;
+        } else {
+            const maxWidth = window.innerWidth * 0.5;
+            if (newWidth > maxWidth) newWidth = maxWidth;
+        }
+        
+        document.documentElement.style.setProperty(cssVar, `${newWidth}px`);
+    };
 
-            // 로컬 스토리지에 최종 너비 저장 
-            localStorage.setItem('rightPanelWidth', String(finalWidth));
-        };
+    // ---------------------------------------------------------
+    // [공통 로직 3] 드래그 종료
+    // ---------------------------------------------------------
+    const endDrag = () => {
+        if (!isDragging) return; 
+        isDragging = false;
+        resizer.classList.remove('is-dragging');
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        
+        const finalWidth = parseInt(document.documentElement.style.getPropertyValue(cssVar), 10);
+        const mainEl = document.querySelector('.main');
+        const hideClass = isRight ? 'right-hidden' : 'left-hidden';
+        
+        if (finalWidth === 0) {
+            mainEl.classList.add(hideClass);
+        } else {
+            mainEl.classList.remove(hideClass);
+        }
 
-        // ---------------------------------------------------------
-        // [이벤트 연결 1] 마우스 이벤트 (PC)
-        // ---------------------------------------------------------
-        resizer.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return; 
-            startDrag(e.clientX);
-        }, { passive: true });
+        localStorage.setItem(storageKey, String(finalWidth));
+        updateToggleIcons(); 
+    };
 
-        document.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                e.preventDefault(); // 드래그 중 텍스트 선택 방지
-                onDrag(e.clientX);
-            }
-        });
+    // ---------------------------------------------------------
+    // [이벤트 연결] 마우스 (PC)
+    // ---------------------------------------------------------
+    resizer.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return; 
+        startDrag(e.clientX);
+    }, { passive: true });
 
-        document.addEventListener('mouseup', endDrag);
+    document.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            onDrag(e.clientX);
+        }
+    });
 
-        // ---------------------------------------------------------
-        // [이벤트 연결 2] 터치 이벤트 (태블릿/모바일) - 새로 추가된 부분
-        // ---------------------------------------------------------
-        resizer.addEventListener('touchstart', (e) => {
-            if (e.touches.length > 0) {
-                startDrag(e.touches[0].clientX);
-            }
-        }, { passive: false }); // 스크롤 방지를 위해 passive: false
+    document.addEventListener('mouseup', endDrag);
 
-        document.addEventListener('touchmove', (e) => {
-            if (isDragging && e.touches.length > 0) {
-                e.preventDefault(); // 중요: 터치 드래그 중 화면 스크롤 막기
-                onDrag(e.touches[0].clientX);
-            }
-        }, { passive: false });
+    // ---------------------------------------------------------
+    // [이벤트 연결] 터치 (태블릿)
+    // ---------------------------------------------------------
+    resizer.addEventListener('touchstart', (e) => {
+        if (e.touches.length > 0) {
+            startDrag(e.touches[0].clientX);
+        }
+    }, { passive: false });
 
-        document.addEventListener('touchend', endDrag);
+    document.addEventListener('touchmove', (e) => {
+        if (isDragging && e.touches.length > 0) {
+            e.preventDefault(); // 스크롤 방지
+            onDrag(e.touches[0].clientX);
+        }
+    }, { passive: false });
 
-    } // setupResizer 함수 종료
+    document.addEventListener('touchend', endDrag);
+}// setupResizer 함수 종료
+
+// [추가 12-19] 툴바 아이콘 업데이트 함수
+function updateToggleIcons() {
+    const mainEl = document.querySelector('.main');
+    const leftBtn = document.getElementById('toggleLeftSidebar');
+    const rightBtn = document.getElementById('toggleRightPanel');
+
+    // 왼쪽 버튼 아이콘: 닫혀있으면 오른쪽 화살표, 열려있으면 왼쪽 화살표
+    if (leftBtn) {
+        const icon = leftBtn.querySelector('i');
+        if (icon) icon.className = mainEl.classList.contains('left-hidden') ? 'fa-solid fa-angles-right' : 'fa-solid fa-angles-left';
+    }
+    // 오른쪽 버튼 아이콘: 닫혀있으면 왼쪽 화살표, 열려있으면 오른쪽 화살표
+    if (rightBtn) {
+        const icon = rightBtn.querySelector('i');
+        if (icon) icon.className = mainEl.classList.contains('right-hidden') ? 'fa-solid fa-angles-left' : 'fa-solid fa-angles-right';
+    }
+}
 
     // 1. 네비게이션 & 줌
     state.els.prevPage?.addEventListener('click', () => { if (state.pdfDoc) { state.setCurrentPage(Math.max(1, state.currentPage - 1)); renderer.scrollToPage(state.currentPage); }});
@@ -545,55 +565,54 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 // -------------------------------------------------------
-    // [추가 12-17] 리사이저 초기화 및 토글 버튼 연결
+    // [수정 12-19] 양방향 리사이저(PC/터치) 및 통합 토글 초기화
     // -------------------------------------------------------
-    
-    // DOM 요소 가져오기
-    const rightEl = document.querySelector('.right');
     const mainEl = document.querySelector('.main');
-    const toggleRightPanelBtn = document.getElementById('toggleRightPanel'); 
-    const toggleIcon = toggleRightPanelBtn?.querySelector('i');
-    // 로컬 스토리지에서 이전 너비 로드
-    const storedRightPanelWidth = localStorage.getItem('rightPanelWidth');
+    const sidebarEl = document.querySelector('.sidebar');
+    const rightEl = document.querySelector('.right');
 
-    if (storedRightPanelWidth) {
-        document.documentElement.style.setProperty('--right-panel-width', `${storedRightPanelWidth}px`);
-        if (storedRightPanelWidth === '0') {
-             mainEl.classList.add('right-hidden');
+    // 1. 저장된 너비 데이터 복원
+    const restorePanel = (key, cssVar, hideClass) => {
+        const val = localStorage.getItem(key);
+        if (val) {
+            document.documentElement.style.setProperty(cssVar, `${val}px`);
+            if (val === '0') mainEl.classList.add(hideClass);
         }
-    }
+    };
+    restorePanel('leftSidebarWidth', '--left-sidebar-width', 'left-hidden');
+    restorePanel('rightPanelWidth', '--right-panel-width', 'right-hidden');
 
-    // 리사이저 설정 함수 호출 (오른쪽 패널만: 최소 100px 또는 0)
-    if (rightEl) setupResizer('right-resizer', rightEl, 100, true);  
+    // 2. 리사이저 핸들 활성화 (왼쪽 150px / 오른쪽 100px 최소 너비 설정)
+    if (sidebarEl) setupResizer('left-resizer', sidebarEl, 150, false); 
+    if (rightEl) setupResizer('right-resizer', rightEl, 100, true); 
+    updateToggleIcons(); // 초기 실행 시 아이콘 방향 설정
 
-    // [수정 12-17] 초기 상태에 따라 아이콘 설정 (새로고침 시)
-    if (mainEl.classList.contains('right-hidden')) {
-        if (toggleIcon) toggleIcon.className = 'fa-solid fa-angles-left'; // 닫힘: 왼쪽 화살표
-    } else {
-        if (toggleIcon) toggleIcon.className = 'fa-solid fa-angles-right'; // 열림: 오른쪽 화살표
-    }
-    
-    // [수정 12-17]오른쪽 패널 토글 버튼 이벤트
-    toggleRightPanelBtn?.addEventListener('click', () => {
-        // right-hidden 클래스를 토글하기 전에, 현재 상태를 확인합니다.
-        const willBeHidden = !mainEl.classList.contains('right-hidden'); 
+    // 3. 통합 토글 이벤트 로직
+    const handleToggle = (isRight) => {
+        const hideClass = isRight ? 'right-hidden' : 'left-hidden';
+        const cssVar = isRight ? '--right-panel-width' : '--left-sidebar-width';
+        const storageKey = isRight ? 'rightPanelWidth' : 'leftSidebarWidth';
+        const defaultWidth = isRight ? '360' : '260';
 
-        if (willBeHidden) {
-            // 숨길 때: CSS 변수를 0으로 설정하고 right-hidden 클래스 추가
-            document.documentElement.style.setProperty('--right-panel-width', `0px`);
-            localStorage.setItem('rightPanelWidth', '0');
-            mainEl.classList.add('right-hidden'); // 클래스 추가
-            if (toggleIcon) toggleIcon.className = 'fa-solid fa-angles-left'; // 왼쪽 화살표로 변경
+        const willHide = !mainEl.classList.contains(hideClass);
+        if (willHide) {
+            document.documentElement.style.setProperty(cssVar, '0px');
+            localStorage.setItem(storageKey, '0');
+            mainEl.classList.add(hideClass);
         } else {
-            // 보일 때: 이전 너비 (또는 기본값 360)로 복구하고 right-hidden 클래스 제거
-            const prevWidth = localStorage.getItem('rightPanelWidth') || '360';
-            const restoredWidth = prevWidth === '0' ? '360' : prevWidth; 
-            document.documentElement.style.setProperty('--right-panel-width', `${restoredWidth}px`);
-            localStorage.setItem('rightPanelWidth', restoredWidth);
-            mainEl.classList.remove('right-hidden'); // 클래스 제거
-            if (toggleIcon) toggleIcon.className = 'fa-solid fa-angles-right'; // 오른쪽 화살표로 변경
+            const lastWidth = localStorage.getItem(storageKey);
+            const restoreWidth = (lastWidth && lastWidth !== '0') ? lastWidth : defaultWidth;
+            document.documentElement.style.setProperty(cssVar, `${restoreWidth}px`);
+            localStorage.setItem(storageKey, restoreWidth);
+            mainEl.classList.remove(hideClass);
         }
-    });
+        updateToggleIcons();
+    };
+
+    // 4. 상단 툴바 버튼 리스너 연결
+    document.getElementById('toggleLeftSidebar')?.addEventListener('click', () => handleToggle(false));
+    document.getElementById('toggleRightPanel')?.addEventListener('click', () => handleToggle(true));
+    
     // -------------------------------------------------------
     // ⭐️ [추가] 백지 복습 모드 진입 버튼
     // -------------------------------------------------------

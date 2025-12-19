@@ -16,8 +16,8 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 /*[수정][11-25][툴바를 상단에 고정]*/
 .toolbar { position: fixed;top: 0;left: 0;width: 100%;height: 56px;z-index: 9999; /* 최상단에 표시 */display: flex; align-items: center; gap: 12px;padding: 8px 12px; border-bottom: 1px solid #e5e5e5; background: var(--toolbar-bg); color: var(--fg);}
 
-:root { --bg: #f6f7fb; --fg: #111; --panel: #fff; --toolbar-bg: #fff; --accent: #3b82f6; --muted: #8a8a8a; --chip:#eef2ff;--right-panel-width: 360px; /* [12-17]초기 오른쪽 패널 너비 */ }
-.dark { --bg: #0f1217; --fg: #f2f2f2; --panel: #171a21; --toolbar-bg: #131722; --accent: #60a5fa; --muted: #b9c0cc; --chip:#1f2937; --right-panel-width: 360px; /* [12-17]초기 오른쪽 패널 너비 */}
+:root { --bg: #f6f7fb; --fg: #111; --panel: #fff; --toolbar-bg: #fff; --accent: #3b82f6; --muted: #8a8a8a; --chip:#eef2ff;--right-panel-width: 360px; /* [12-17]초기 오른쪽 패널 너비 */--left-sidebar-width: 260px; /* 초기값 */ }
+.dark { --bg: #0f1217; --fg: #f2f2f2; --panel: #171a21; --toolbar-bg: #131722; --accent: #60a5fa; --muted: #b9c0cc; --chip:#1f2937; --right-panel-width: 360px; /* [12-17]초기 오른쪽 패널 너비 */--left-sidebar-width: 260px; /* 초기값 */}
 
 .toolbar .group { display: inline-flex; align-items: center; border: 1px solid #e6e6e6; border-radius: 10px; overflow: hidden; background: var(--panel); }
 .dark .toolbar .group { border-color: #2b2f36; }
@@ -33,28 +33,57 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .zoom-label { min-width: 54px; text-align: center; }
 
 /*[수정][11-25][기존 app역할]*/     /* [수정 12-17] 260px (왼쪽) / 1fr (중앙) / 4px (리사이저) / var(오른쪽) */
-.main { height: 100%;display: grid;grid-template-columns: 260px 1fr 4px var(--right-panel-width);background: var(--bg);color: var(--fg);}
+.main { height: 100%;display: grid;grid-template-columns: var(--left-sidebar-width) 8px 1fr 8px var(--right-panel-width);background: var(--bg);color: var(--fg);}
 /*  [추가 12-17].resizer (크기 조절 핸들) 스타일 (유지) */
 .resizer {
-    width: 4px;
+    width: 8px;
     height: 100%;
-    cursor: col-resize; 
+    cursor: col-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: transparent; 
-    z-index: 50; 
+    z-index: 100; 
     transition: background-color 0.2s;
     touch-action: none;
 }
 .resizer:hover {
-    background-color: rgba(99, 102, 241, 0.3); 
+    background: rgba(0, 0, 0, 0.05); 
 }
-.resizer.is-dragging {
-    background-color: var(--accent); 
+/* [추가 12-19]실제 눈에 보이는 손잡이(Grabber) */
+.grabber {
+    width: 4px;
+    height: 30px;
+    background: #ccc;
+    border-radius: 2px;
+    position: relative;
+}
+/*[추가 12-19] 점 세 개 모양의 디테일 추가 */
+.grabber::before {
+    content: '';
+    position: absolute;
+    top: 5px; left: 1px; width: 2px; height: 2px;
+    background: white; border-radius: 50%;
+    box-shadow: 0 9px 0 white, 0 18px 0 white;
 }
 
-/*  [추가 12-17]오른쪽 패널을 숨기는 클래스 수정 */
+.resizer.is-dragging .grabber {
+    background: var(--accent);
+    height: 50px; /* 드래그 중엔 길어지게 효과 */
+}
+
+/* [추가 12-19]왼쪽 패널 숨김 클래스 */
+.main.left-hidden {
+    grid-template-columns: 0px 0px 1fr 8px var(--right-panel-width) !important;
+}
+.main.left-hidden .sidebar, .main.left-hidden #left-resizer {
+    display: none !important;
+}
+
+/*  [수정 12-19]오른쪽 패널을 숨기는 클래스 수정 */
 .main.right-hidden {
     /* 변경: 오른쪽 패널 너비와 리사이저 너비를 0으로 설정 */
-    grid-template-columns: 260px 1fr 0px 0px !important;
+    grid-template-columns:var(--left-sidebar-width) 8px 1fr 0px 0px !important;
 }
 .main.right-hidden .right {
     display: none !important; 
