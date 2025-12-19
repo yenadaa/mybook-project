@@ -198,7 +198,7 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .outline li { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .outline li:hover { background: rgba(99,102,241,.08); }
 
-.viewer {position: relative; overflow: auto;/* [11-25][수정][높이를 100%로 설정하여 부모(.main)의 높이 채움] */height: 100%; min-width: 500px;/* [추가12-19] 패널을 늘려도 PDF 영역은 최소 500px을 유지함 */}
+.viewer {position: relative; overflow: auto;/* [11-25][수정][높이를 100%로 설정하여 부모(.main)의 높이 채움] */height: 100%; min-width: 400px;/* [추가12-19] 패널을 늘려도 PDF 영역은 최소 400px을 유지함 */}
 .pages { position: relative; padding: 20px 0 200px; display: grid; justify-content: center; gap: 18px; }
 .page-wrap { position: relative; }
 .page { display: block; background: white; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.08); }

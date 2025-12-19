@@ -589,27 +589,35 @@ function updateToggleIcons() {
     updateToggleIcons(); // 초기 실행 시 아이콘 방향 설정
 
     // 3. 통합 토글 이벤트 로직
-    const handleToggle = (isRight) => {
-        const hideClass = isRight ? 'right-hidden' : 'left-hidden';
-        const cssVar = isRight ? '--right-panel-width' : '--left-sidebar-width';
-        const storageKey = isRight ? 'rightPanelWidth' : 'leftSidebarWidth';
-        const defaultWidth = isRight ? '360' : '260';
+ // [수정 12-19] 패널 복구 시 최대 크기 제한 로직 추가
+const handleToggle = (isRight) => {
+    const hideClass = isRight ? 'right-hidden' : 'left-hidden';
+    const cssVar = isRight ? '--right-panel-width' : '--left-sidebar-width';
+    const storageKey = isRight ? 'rightPanelWidth' : 'leftSidebarWidth';
+    const defaultWidth = isRight ? '360' : '260';
 
-        const willHide = !mainEl.classList.contains(hideClass);
-        if (willHide) {
-            document.documentElement.style.setProperty(cssVar, '0px');
-            localStorage.setItem(storageKey, '0');
-            mainEl.classList.add(hideClass);
-        } else {
-            const lastWidth = localStorage.getItem(storageKey);
-            const restoreWidth = (lastWidth && lastWidth !== '0') ? lastWidth : defaultWidth;
-            document.documentElement.style.setProperty(cssVar, `${restoreWidth}px`);
-            localStorage.setItem(storageKey, restoreWidth);
-            mainEl.classList.remove(hideClass);
+    const willHide = !mainEl.classList.contains(hideClass);
+    if (willHide) {
+        document.documentElement.style.setProperty(cssVar, '0px');
+        // 숨길 때 0을 저장하면 다음에 열 때 기본값으로 열리게 함
+        localStorage.setItem(storageKey, '0'); 
+        mainEl.classList.add(hideClass);
+    } else {
+        // [안전장치] 저장된 값을 가져오되, 너무 크면 기본값이나 최대치로 제한
+        let lastWidth = parseInt(localStorage.getItem(storageKey), 10);
+        const limitMax = window.innerWidth * 0.3; // 화면의 30%로 제한
+
+        // 0이거나, 숫자가 아니거나, 너무 크면 기본값으로 복구
+        if (!lastWidth || lastWidth === 0 || lastWidth > limitMax) {
+            lastWidth = defaultWidth;
         }
-        updateToggleIcons();
-    };
 
+        document.documentElement.style.setProperty(cssVar, `${lastWidth}px`);
+        localStorage.setItem(storageKey, String(lastWidth));
+        mainEl.classList.remove(hideClass);
+    }
+    updateToggleIcons();
+};
     // 4. 상단 툴바 버튼 리스너 연결
     document.getElementById('toggleLeftSidebar')?.addEventListener('click', () => handleToggle(false));
     document.getElementById('toggleRightPanel')?.addEventListener('click', () => handleToggle(true));
