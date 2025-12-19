@@ -20,8 +20,8 @@ button { color: inherit; background: transparent; border: 0; cursor: pointer; }
 .dark { --bg: #0f1217; --fg: #f2f2f2; --panel: #171a21; --toolbar-bg: #131722; --accent: #60a5fa; --muted: #b9c0cc; --chip:#1f2937; --right-panel-width: 360px; /* [12-17]초기 오른쪽 패널 너비 */--left-sidebar-width: 260px; /* 초기값 */}
 
 .toolbar .group { display: inline-flex; align-items: center; border: 1px solid #e6e6e6; border-radius: 10px; overflow: hidden; background: var(--panel); }
-.dark .toolbar .group { border-color: #2b2f36; }
-.toolbar .group > * { padding: 6px 8px; border-right: 1px solid #ececec; }
+.dark .toolbar .group { border-color: #2b2f36;}
+.toolbar .group > * { padding: 6px 8px; border-right: 1px solid #ececec;}
 .dark .toolbar .group > * { border-right-color: #2b2f36; }
 .toolbar .group > *:last-child { border-right: 0; }
 
@@ -663,9 +663,9 @@ input[type="range"] { accent-color: var(--accent); }
 /* 로딩 인디케이터 */
 .chat-message.loading p {font-style: italic;color: #888;}
 /* 입력 영역 [수정][11-25][챗봇 입력창 위아래 여백]*/
-.chat-input-area {display: flex;padding: 10px;border-top: 1px solid #ccc; margin-bottom: 55px; padding-top: 65px;}
+.chat-input-area {display: flex;padding: 20px;border-top: 1px solid #ccc; margin-bottom: 100px; padding-top: 65px;}
 
-#chat-input {flex-grow: 1;border: 1px solid #ccc;border-radius: 20px;padding: 12px 16px;font-size: 18px;}
+#chat-input {flex-grow: 1;border: 1px solid #ccc;border-radius: 20px;padding: 12px 16px;font-size: 20px;}
 
 #chat-send-btn {margin-left: 10px;padding: 11px;font-size: 17px;/* 전송 버튼 글자도 확대 */border-radius: 8px;background-color: var(--primary-color);color: white;}
 .right-grid-container {display: grid; grid-template-rows: 44px 1fr 44px; height: 100%; /* 부모(aside.right) 높이를 꽉 채움 */}

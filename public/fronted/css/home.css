@@ -84,9 +84,10 @@ body{
 
 .hero-grid{
   display:grid;
-  grid-template-columns: 1.15fr .85fr;
+  grid-template-columns: 1fr 2fr 1fr;
   gap:14px;
 }
+.hero-left{grid-column: 2;}
 @media (max-width: 920px){
   .hero-grid{grid-template-columns:1fr}
 }
