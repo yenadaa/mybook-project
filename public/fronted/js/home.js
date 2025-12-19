@@ -1,4 +1,4 @@
-console.log("HOME.JS (Forgetting Curve Mode) Loaded");
+console.log("HOME.JS (Interactive Mode) Loaded");
 
 import { auth, db } from "/A.firebase.js"; 
 import { 
@@ -13,7 +13,7 @@ import { addReviewSchedule } from './calendar.js';
 const LS_ALARM = "mybook:alarmEnabled";
 
 // --------------------------------------------------------
-// 1. 유틸리티 & 망각곡선 로직
+// 1. 유틸리티 & 망각곡선
 // --------------------------------------------------------
 function clamp(n, a=0, b=100){ return Math.max(a, Math.min(b, Number(n||0))); }
 
@@ -27,17 +27,15 @@ function formatTs(timestamp){
     } catch { return "-"; }
 }
 
-// 🔥 [핵심] 진행률(%)을 망각곡선 단계(Level)로 변환
 function getRetentionLevel(percent) {
-    if (percent >= 100) return 5; // 30일차 완료 (마스터)
-    if (percent >= 80) return 4;  // 14일차 완료
-    if (percent >= 60) return 3;  // 7일차 완료
-    if (percent >= 40) return 2;  // 3일차 완료
-    if (percent >= 20) return 1;  // 1일차 완료
-    return 0;                     // 시작 전
+    if (percent >= 100) return 5; 
+    if (percent >= 80) return 4;
+    if (percent >= 60) return 3;
+    if (percent >= 40) return 2;
+    if (percent >= 20) return 1;
+    return 0;
 }
 
-// 🔥 [핵심] 다음 목표 텍스트
 function getNextGoalText(percent) {
     const level = getRetentionLevel(percent);
     const goals = [
@@ -75,21 +73,19 @@ function renderChips(list){
     }
 }
 
-// ⭐️ [중요] 마일스톤(1,3,7,14,30일) 색칠하기
 function setRetentionMilestones(percent) {
     const level = getRetentionLevel(percent);
-    // home.html의 ID들과 매칭
-    const ids = ["ms1", "ms3", "ms7", "ms14", "ms30"];
+    const ids = ["ms1", "ms3", "ms7", "ms14", "ms30"]; // HTML ID와 일치해야 함 (msRead 등 수정 필요하면 home.html 확인)
     
+    // 혹시 home.html을 수정 안 했을까봐 예외처리
     ids.forEach((id, idx) => {
-        const el = document.getElementById(id);
+        const el = document.getElementById(id) || document.getElementById(["msRead","msQuiz","msWhite"][idx]); 
         if (el) {
-            // 현재 레벨보다 낮거나 같으면 '완료(is-done)' 처리
             if (idx < level) {
                 el.classList.add("is-done");
                 el.style.opacity = "1";
                 el.style.fontWeight = "bold";
-                el.style.color = "#4CAF50"; // 초록색 강조
+                el.style.color = "#4CAF50";
             } else {
                 el.classList.remove("is-done");
                 el.style.opacity = "0.4";
@@ -106,46 +102,41 @@ function renderHero(userEmail, streakDays, doc){
 
     const scheduleBtn = document.getElementById("scheduleReviewBtn");
 
-    // 1) 문서 없음
     if (!doc){
-        document.getElementById("currentDocTitle").textContent = "학습 중인 문서가 없습니다";
-        document.getElementById("currentDocSub").textContent = "문서를 업로드하면 여기에 나타납니다.";
+        // 문서 없음 상태 처리
+        document.getElementById("currentDocTitle").textContent = "선택된 문서가 없습니다";
+        document.getElementById("currentDocSub").textContent = "아래 목록에서 문서를 선택해주세요.";
         document.getElementById("currentProgressText").textContent = "0%";
         document.getElementById("currentProgressFill").style.width = "0%";
-        document.getElementById("currentNextStep").textContent = "다음 추천: 문서 업로드";
-        document.getElementById("todayGoal").textContent = "새로운 문서를 업로드하고 학습을 시작해보세요!";
+        document.getElementById("todayGoal").textContent = "-";
         renderChips([]);
-        if (scheduleBtn) scheduleBtn.onclick = () => alert("먼저 문서를 열어주세요!");
+        if (scheduleBtn) scheduleBtn.onclick = () => alert("목록에서 문서를 먼저 선택해주세요.");
         return;
     }
 
-    // 2) 문서 있음
+    // 문서 정보 바인딩
     document.getElementById("currentDocTitle").textContent = doc.title || "제목 없음";
     document.getElementById("currentDocSub").textContent = `마지막 학습: ${formatTs(doc.lastActivityAt)}`;
 
     const p = clamp(doc.progressPercent);
     const level = getRetentionLevel(p);
 
-    // 🔥 [변경] 텍스트를 '학습 진도' -> '기억 보존율' 느낌으로 변경
-    document.querySelector(".progress__label").textContent = "기억 보존율 (망각곡선)";
-    document.getElementById("currentProgressText").textContent = `${p}%`; // or `Lv.${level}`
+    document.getElementById("currentProgressText").textContent = `${p}%`;
     document.getElementById("currentProgressFill").style.width = `${p}%`;
     
-    // 다음 단계 멘트
     const nextDays = [1, 3, 7, 14, 30, "완료"];
     document.getElementById("currentNextStep").textContent = 
-        level < 5 ? `다음 복습: ${nextDays[level]}일 후` : "모든 복습 완료!";
+        level < 5 ? `다음: ${nextDays[level]}일 후 복습` : "졸업!";
 
     document.getElementById("todayGoal").textContent = getNextGoalText(p);
     
-    // 칩 & 마일스톤 렌더링
     renderChips(doc.missedKeywords || []);
     setRetentionMilestones(p); 
 
     const startBtn = document.getElementById("startTodayBtn");
     if(startBtn) startBtn.onclick = () => gotoIndexWithDoc(doc.docId);
 
-    // 스케줄 버튼
+    // 스케줄 버튼 (현재 선택된 문서 기준)
     if (scheduleBtn) {
         scheduleBtn.onclick = async () => {
             if (typeof addReviewSchedule === 'function') {
@@ -153,11 +144,12 @@ function renderHero(userEmail, streakDays, doc){
             } else if (window.Calendar && window.Calendar.addReviewSchedule) {
                 await window.Calendar.addReviewSchedule(doc.docId, doc.title);
             } else {
-                alert("캘린더 기능을 불러오는 중입니다.");
+                alert("캘린더 로딩 중...");
             }
         };
     }
     
+    // 퀵 액션 (현재 선택된 문서 기준)
     document.querySelectorAll("[data-action]").forEach(btn => {
         btn.onclick = () => {
             const action = btn.getAttribute("data-action");
@@ -170,18 +162,14 @@ function renderHero(userEmail, streakDays, doc){
     renderAI(doc);
 }
 
-function renderDocsGrid(docs){
+// ⭐️ [핵심 수정] 목록 렌더링 - 클릭 시 Hero 섹션 업데이트
+function renderDocsGrid(docs, userEmail){
     const grid = document.getElementById("docsGrid");
     if (!grid) return;
     grid.innerHTML = "";
 
     if (!docs || docs.length === 0){
-        grid.innerHTML = `
-            <div class="doc-card" style="grid-column:1/-1;">
-                <div class="doc-card__title">문서가 없습니다</div>
-                <div class="doc-card__meta"><span>우측 상단 '문서 업로드'를 이용하세요.</span></div>
-            </div>
-        `;
+        grid.innerHTML = `<div class="doc-card" style="grid-column:1/-1;">문서가 없습니다.</div>`;
         return;
     }
 
@@ -189,6 +177,11 @@ function renderDocsGrid(docs){
         const p = clamp(doc.progressPercent);
         const card = document.createElement("article");
         card.className = "doc-card";
+        
+        // 현재 선택된 문서 하이라이트
+        const currentId = localStorage.getItem("mybook:selectedDocId");
+        if(doc.docId === currentId) card.style.border = "2px solid #4CAF50";
+
         card.innerHTML = `
             <div class="doc-card__title">${doc.title || "제목 없음"}</div>
             <div class="doc-card__meta">
@@ -197,12 +190,39 @@ function renderDocsGrid(docs){
             </div>
             <div class="doc-card__foot">
                 <span class="badge">Lv.${getRetentionLevel(p)}</span>
-                <button type="button" class="btn btn--secondary">열기</button>
+                <button type="button" class="btn btn--secondary open-viewer-btn">📄 문서 열기</button>
             </div>
         `;
-        const move = () => gotoIndexWithDoc(doc.docId);
-        card.querySelector("button").onclick = move;
-        card.ondblclick = move;
+        
+        // 1. 카드 배경 클릭 -> 상단(Hero) 정보만 갱신 (뷰어 이동 X)
+        card.addEventListener('click', (e) => {
+            // 버튼을 눌렀을 땐 이 이벤트가 발생하면 안 됨 (아래 stopPropagation으로 방지됨)
+            localStorage.setItem("mybook:selectedDocId", doc.docId);
+            localStorage.setItem("mybook:selectedDocTitle", doc.title);
+            
+            renderHero(userEmail, 0, doc);
+            
+            document.querySelectorAll('.doc-card').forEach(c => c.style.border = "1px solid #eee");
+            card.style.border = "2px solid #4CAF50";
+            
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+
+        // 2. [열기] 버튼 클릭 -> 무조건 뷰어로 납치 (이게 원하시는 기능!)
+        const openBtn = card.querySelector('.open-viewer-btn');
+        openBtn.onclick = (e) => {
+            e.stopPropagation(); // ✋ 카드 클릭 이벤트가 발생하지 않도록 막음 (중요!)
+            
+            console.log(`🚀 문서 열기 클릭: ${doc.title} (${doc.docId})`);
+            
+            // (1) 로컬 스토리지에 "이거 열거야"라고 저장 (뷰어가 이걸 보고 문서를 띄움)
+            localStorage.setItem("mybook:selectedDocId", doc.docId);
+            localStorage.setItem("mybook:selectedDocTitle", doc.title);
+            
+            // (2) URL에도 ID를 박아서 이동 (이중 안전장치)
+            window.location.href = `/index.html?docId=${encodeURIComponent(doc.docId)}`;
+        };
+        
         grid.appendChild(card);
     });
 }
@@ -216,7 +236,7 @@ function renderAI(doc){
     routine.innerHTML = "";
 
     if (!doc) {
-        ul.innerHTML = `<li class="muted">최근 학습한 문서가 없습니다.</li>`;
+        ul.innerHTML = `<li class="muted">문서를 선택해주세요.</li>`;
         return;
     }
 
@@ -224,9 +244,9 @@ function renderAI(doc){
     const level = getRetentionLevel(p);
 
     const actions = [];
-    if (level === 0) actions.push("아직 초기 단계입니다. 1일차 복습을 예약하세요.");
-    else if (level < 3) actions.push("기억이 휘발되기 전입니다. 퀴즈로 꽉 잡으세요.");
-    else actions.push("장기 기억 단계입니다. 백지 복습으로 인출 연습을 하세요.");
+    if (level === 0) actions.push("1일차 복습 스케줄을 생성하세요.");
+    else if (level < 3) actions.push("퀴즈를 풀어 기억을 강화하세요.");
+    else actions.push("백지 복습으로 마스터하세요.");
 
     actions.forEach(t => {
         const li = document.createElement("li");
@@ -234,10 +254,9 @@ function renderAI(doc){
         ul.appendChild(li);
     });
     
-    // 루틴도 레벨에 맞춰 추천
     const steps = level < 2 
-        ? ["5분: 목차 훑어보기", "10분: 하이라이트 다시 읽기", "15분: 퀴즈 풀기"]
-        : ["5분: 지난 퀴즈 오답 확인", "25분: 백지 복습 (아무것도 안 보고 쓰기)"];
+        ? ["5분: 목차 훑어보기", "10분: 하이라이트 정독", "15분: 퀴즈"]
+        : ["5분: 오답 노트 확인", "25분: 백지 복습"];
         
     steps.forEach(s => {
         const li = document.createElement("li");
@@ -259,7 +278,7 @@ function gotoWhiteboard(docId){
     location.href = `/whiteboard.html?docId=${encodeURIComponent(docId || "")}`;
 }
 
-function bindTabsAndSearch(allDocs){
+function bindTabsAndSearch(allDocs, userEmail){
     const tabs = document.querySelectorAll(".tab[data-tab]");
     const searchInput = document.getElementById("docSearch");
     let currentFilter = "incomplete"; 
@@ -272,7 +291,7 @@ function bindTabsAndSearch(allDocs){
         const q = searchInput?.value.trim().toLowerCase();
         if (q) result = result.filter(d => (d.title||"").toLowerCase().includes(q));
         
-        renderDocsGrid(result);
+        renderDocsGrid(result, userEmail);
     }
 
     tabs.forEach(t => {
@@ -300,7 +319,7 @@ function bindModals(allDocs){
                 tbody.innerHTML = allDocs.filter(d => d.progressPercent < 100).map(d => `
                     <tr>
                         <td>${d.title}</td>
-                        <td>${getRetentionLevel(d.progressPercent)}단계 (${d.progressPercent}%)</td>
+                        <td>${getRetentionLevel(d.progressPercent)}단계</td>
                         <td><button class="btn btn--xs" onclick="location.href='/index.html?docId=${d.docId}'">열기</button></td>
                     </tr>
                 `).join("");
@@ -333,7 +352,7 @@ document.addEventListener("DOMContentLoaded", () => {
     onAuthStateChanged(auth, (user) => {
         if (!user) {
             renderHero(null, 0, null);
-            renderDocsGrid([]);
+            renderDocsGrid([], null);
             return;
         }
 
@@ -366,18 +385,14 @@ document.addEventListener("DOMContentLoaded", () => {
                 return tB - tA;
             });
             
-            console.log(`🔥 문서 ${docs.length}개 로드 완료`);
+            console.log(`🔥 문서 ${docs.length}개 로드`);
             
-            bindTabsAndSearch(docs);
+            bindTabsAndSearch(docs, user.email);
             bindModals(docs);
             
             if(docs.length > 0) {
                 const selectedId = localStorage.getItem("mybook:selectedDocId");
                 const targetDoc = docs.find(d => d.docId === selectedId) || docs[0];
-                
-                localStorage.setItem("mybook:selectedDocId", targetDoc.docId);
-                localStorage.setItem("mybook:selectedDocTitle", targetDoc.title);
-                
                 renderHero(user.email, 0, targetDoc);
             } else {
                 renderHero(user.email, 0, null);

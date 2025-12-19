@@ -591,3 +591,28 @@ window.testNoti = async function() {
         alert("에러 발생 (콘솔 확인)");
     }
 };
+
+// 🚀 [추가] 홈 화면에서 "열기" 눌렀을 때 문서 자동 로드 기능
+// ============================================================
+// main.js 맨 아래에 이 코드가 있어야 문서를 가져옵니다!
+import { auth } from './A.firebase.js'; 
+
+auth.onAuthStateChanged(async (user) => {
+    if (!user) return;
+    const params = new URLSearchParams(window.location.search);
+    const docId = params.get('docId');
+
+    if (docId) {
+        console.log(`🚀 [Auto-Load] 문서 ID 감지: ${docId}`);
+        // doc_firebase.js에 있는 openDoc 함수가 있다면 호출
+        if (typeof openDoc === 'function') {
+             setTimeout(async () => {
+                await openDoc(docId); // 여기서 문서를 가져오고 화면에 그립니다.
+            }, 500);
+        } else {
+             // 비상시 동적 로드
+             const mod = await import('./doc_firebase.js');
+             if(mod.openDoc) mod.openDoc(docId);
+        }
+    }
+});
