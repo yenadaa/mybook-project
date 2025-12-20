@@ -84,8 +84,9 @@ body{
 
 .hero-grid{
   display:grid;
-  grid-template-columns: 1fr 2fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap:14px;
+  margin: 0 150px;
 }
 .hero-left{grid-column: 2;}
 @media (max-width: 920px){

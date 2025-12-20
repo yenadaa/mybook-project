@@ -236,34 +236,34 @@ function setupResizer(resizerId, panelEl, minWidth, isRight) {
     // ---------------------------------------------------------
     // [공통 로직 2] 드래그 중 계산
     // ---------------------------------------------------------
-// [수정 12-19] onDrag 함수 내부의 maxWidth 제한 로직
+// [수정 12-20] onDrag 함수 내부의 maxWidth 제한 로직
 // viewer-ui.js 내부 onDrag 수정
 
     const onDrag = (clientX) => {
-        if (!isDragging) return;
-        
-        const deltaX = clientX - initialX;
-        let newWidth = isRight ? initialWidth - deltaX : initialWidth + deltaX;
-        
-        // 최대 너비 제한 (화면의 35% 이상 커지지 않게 안전장치)
-        const limitMax = window.innerWidth * 0.35; 
+    if (!isDragging) return;
+    
+    const deltaX = clientX - initialX;
+    let newWidth = isRight ? initialWidth - deltaX : initialWidth + deltaX;
+    
+    // [수정] 최대 너비 제한을 화면의 35% -> 50%로 변경
+    const limitMax = window.innerWidth * 0.5; 
 
-        if (newWidth < 15) { // 15px보다 작아지면 0으로 '스냅'해서 닫기
-            newWidth = 0;
+    if (newWidth < 15) { 
+        newWidth = 0;
+    } else {
+        const mainEl = document.querySelector('.main');
+        if (isRight) {
+            mainEl.classList.remove('right-hidden');
         } else {
-            // [추가] 15px 이상으로 마우스를 끌면 자동으로 'hidden' 클래스 제거해서 꺼내기
-            const mainEl = document.querySelector('.main');
-            if (isRight) {
-                mainEl.classList.remove('right-hidden');
-            } else {
-                mainEl.classList.remove('left-hidden');
-            }
-            
-            if (newWidth > limitMax) newWidth = limitMax;
+            mainEl.classList.remove('left-hidden');
         }
         
-        document.documentElement.style.setProperty(cssVar, `${newWidth}px`);
-    };
+        // 최대 너비 적용
+        if (newWidth > limitMax) newWidth = limitMax;
+    }
+    
+    document.documentElement.style.setProperty(cssVar, `${newWidth}px`);
+};
 
     // ---------------------------------------------------------
     // [공통 로직 3] 드래그 종료
@@ -606,24 +606,21 @@ function updateToggleIcons() {
     const storageKey = isRight ? 'rightPanelWidth' : 'leftSidebarWidth';
     const defaultWidth = isRight ? '360' : '260';
 
-    if (!mainEl.classList.contains(hideClass)) {
-        // [닫을 때]
+   if (!mainEl.classList.contains(hideClass)) {
         document.documentElement.style.setProperty(cssVar, '0px');
         mainEl.classList.add(hideClass);
     } else {
-        // [열 때 - 여기가 핵심!]
         let lastWidth = parseInt(localStorage.getItem(storageKey), 10);
         
-        // 기존 50% 제한에서 -> 30%로 하향 조정하여 안전성 확보
-        const safetyLimit = window.innerWidth * 0.3; 
+        // [수정] 토글로 열 때 적용되는 안전 한계치도 30% -> 45% 정도로 상향
+        const safetyLimit = window.innerWidth * 0.45; 
 
-        // 비정상적인 값(너무 큰 값)이 들어있으면 무조건 defaultWidth로 초기화
         if (!lastWidth || lastWidth <= 0 || lastWidth > safetyLimit) {
             lastWidth = defaultWidth;
         }
 
         document.documentElement.style.setProperty(cssVar, `${lastWidth}px`);
-        localStorage.setItem(storageKey, String(lastWidth)); // 올바른 값을 다시 저장
+        localStorage.setItem(storageKey, String(lastWidth));
         mainEl.classList.remove(hideClass);
     }
     updateToggleIcons();
@@ -693,7 +690,7 @@ function updateToggleIcons() {
       observer.observe(container, { childList: true, subtree: true });
       console.log('[UI] Chat Observer installed.');
     }
-
+    
     (function waitForChat() {
       const c = findChatContainer();
       if (c) return installBotMessageObserver(c);
