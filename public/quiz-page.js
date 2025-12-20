@@ -1,140 +1,89 @@
-// quiz-page.js
-
-// 1. A.firebase.js에서 필요한 기능들을 가져옵니다.
 import { db, doc, getDoc, functions } from './A.firebase.js'; 
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js"; 
 
-// UI 요소 참조
 const quizContent = document.getElementById('quiz-content');
 const sidebarNav = document.getElementById('sidebar-nav');
 const submitBtn = document.getElementById('submit-session-btn');
-
-// 현재 세션 ID 저장용
 let currentSessionId = null;
 
-/**
- * [초기화] 페이지 로드 시 실행
- */
+// 1. 로드
 async function loadQuiz() {
     const urlParams = new URLSearchParams(window.location.search);
     currentSessionId = urlParams.get('session');
-
-    if (!currentSessionId) {
-        showError('퀴즈 세션 ID가 없습니다. 알림 링크를 다시 확인해주세요.');
-        return;
-    }
+    if (!currentSessionId) return showError('세션 ID가 없습니다.');
 
     try {
         const docRef = doc(db, "reviewSessions", currentSessionId); 
         const docSnap = await getDoc(docRef);
-
-        if (!docSnap.exists()) {
-            showError(`퀴즈 데이터를 찾을 수 없습니다. (ID: ${currentSessionId})`);
-            return;
-        }
+        if (!docSnap.exists()) return showError(`퀴즈를 찾을 수 없습니다.`);
 
         const data = docSnap.data();
-
         if (data.status === 'completed') {
-            alert("이미 제출이 완료된 퀴즈입니다.\n결과 점수: " + (data.score || "기록 없음"));
+            alert(`이미 제출된 퀴즈입니다. (점수: ${data.score}점)`);
             window.location.href = '/'; 
             return;
         }
 
         const quizItems = data.items || [];
         if (quizItems.length === 0) {
-            quizContent.innerHTML = '<div class="loading">복습할 퀴즈가 없습니다.</div>';
+            quizContent.innerHTML = '<div class="loading">생성된 문제가 없습니다.</div>';
             return;
         }
 
         renderQuiz(quizItems);
 
     } catch (error) {
-        console.error("퀴즈 로딩 오류:", error);
-        showError(`로딩 중 오류가 발생했습니다: ${error.message}`);
+        console.error("로딩 에러:", error);
+        showError(error.message);
     }
 }
 
-/**
- * [렌더링] 퀴즈 본문과 사이드바 버튼 생성
- */
+// 2. 렌더링 (★템플릿 스타일 적용됨★)
 function renderQuiz(items) {
     let html = '';
-    if (sidebarNav) sidebarNav.innerHTML = '';
+    
+    // (1) 유형별로 분류하기
+    const oxItems = items.filter(i => i.type === 'ox');
+    const shortItems = items.filter(i => i.type === 'short');
+    const mcqItems = items.filter(i => i.type === 'mcq' || i.type === '객관식');
 
-    let globalIndex = 0; 
+    let globalIndex = 0;
 
-    items.forEach(item => {
-        globalIndex++;
-        const type = item.type || 'unknown';
-        const qId = `question-${globalIndex}`;
-        
-        // 사이드바 버튼
-        if (sidebarNav) {
-            const navBtn = document.createElement('button');
-            navBtn.className = 'nav-btn';
-            navBtn.textContent = globalIndex;
-            navBtn.dataset.targetId = qId;
-            navBtn.onclick = () => {
-                document.getElementById(qId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            };
-            sidebarNav.appendChild(navBtn);
-        }
+    // (2) OX 퀴즈 섹션
+    if (oxItems.length > 0) {
+        html += `<h2 style="margin: 30px 0 15px 0; border-left:5px solid #3b82f6; padding-left:10px;">OX 퀴즈</h2>`;
+        oxItems.forEach(item => {
+            globalIndex++;
+            html += buildQuizItemHtml(item, globalIndex);
+        });
+    }
 
-        // 퀴즈 아이템 HTML
-        const commonAttr = `
-            id="${qId}" 
-            class="quiz-item" 
-            data-index="${globalIndex}" 
-            data-original-id="${item.originalDocId}" 
-            data-type="${type}"
-            data-answer="${item.answer}"
-        `;
+    // (3) 단답형 퀴즈 섹션
+    if (shortItems.length > 0) {
+        html += `<h2 style="margin: 40px 0 15px 0; border-left:5px solid #22c55e; padding-left:10px;">단답형 퀴즈</h2>`;
+        shortItems.forEach(item => {
+            globalIndex++;
+            html += buildQuizItemHtml(item, globalIndex);
+        });
+    }
 
-        if (type === 'ox') {
-            html += `
-                <div ${commonAttr}>
-                    <p class="quiz-question">Q${globalIndex}. ${item.q}</p>
-                    <ul class="quiz-options">
-                        <li>True</li>
-                        <li>False</li>
-                    </ul>
-                </div>
-            `;
-        } else if (type === 'short') {
-            html += `
-                <div ${commonAttr} class="short-answer-item">
-                    <p class="quiz-question">Q${globalIndex}. ${item.q}</p>
-                    <div class="short-answer-container">
-                        <input type="text" class="short-answer-input" placeholder="정답을 입력하세요">
-                        <button class="check-answer-btn">확인</button>
-                    </div>
-                    <p class="answer-feedback hidden">정답: ${item.answer}</p>
-                </div>
-            `;
-        } else if (type === 'mcq') {
-            const options = item.options || [];
-            const optionsHtml = options.map(opt => `<li>${opt}</li>`).join('');
-            html += `
-                <div ${commonAttr}>
-                    <p class="quiz-question">Q${globalIndex}. ${item.q}</p>
-                    <ul class="quiz-options">${optionsHtml}</ul>
-                </div>
-            `;
-        } else if (type === 'discussion') {
-            html += `
-                <div ${commonAttr}>
-                      <p class="quiz-question">Q${globalIndex}. ${item.q}</p>
-                      <textarea class="discussion-input" placeholder="답변을 입력하세요"></textarea>
-                      <button class="save-discussion-btn">저장</button>
-                </div>
-            `;
-        }
-    });
+    // (4) 객관식 퀴즈 섹션
+    if (mcqItems.length > 0) {
+        html += `<h2 style="margin: 40px 0 15px 0; border-left:5px solid #f59e0b; padding-left:10px;">객관식 퀴즈</h2>`;
+        mcqItems.forEach(item => {
+            globalIndex++;
+            html += buildQuizItemHtml(item, globalIndex);
+        });
+    }
 
+    // (5) HTML 삽입
     quizContent.innerHTML = html;
     quizContent.addEventListener('click', handleQuizInteraction);
 
+    // 사이드바 업데이트
+    updateSidebar(globalIndex);
+
+    // 제출 버튼 활성화
     if (submitBtn) {
         submitBtn.style.display = 'block';
         const newBtn = submitBtn.cloneNode(true);
@@ -143,13 +92,86 @@ function renderQuiz(items) {
     }
 }
 
-/**
- * [상호작용] 클릭 이벤트 핸들러
- */
+// 헬퍼: 개별 문제 HTML 생성
+function buildQuizItemHtml(item, index) {
+    const qId = `question-${index}`;
+    const type = item.type || 'unknown';
+    
+    // 원본 보기 버튼
+    let sourceBtn = '';
+    if (item.originalDocId && item.originalDocId !== 'dummy') {
+        sourceBtn = `
+            <div style="margin-bottom:8px; text-align:right;">
+                <button type="button" class="btn-text-small" onclick="window.openViewer('${item.originalDocId}')">
+                    📄 원본 확인 ↗
+                </button>
+            </div>
+        `;
+    }
+
+    const commonAttr = `id="${qId}" class="quiz-item" data-index="${index}" data-original-id="${item.originalDocId}" data-type="${type}" data-answer="${item.answer}"`;
+
+    // 1. OX
+    if (type === 'ox') {
+        return `
+            <div ${commonAttr}>
+                ${sourceBtn}
+                <p class="quiz-question">Q${index}. ${item.q}</p>
+                <ul class="quiz-options">
+                    <li>True</li>
+                    <li>False</li>
+                </ul>
+            </div>`;
+    } 
+    // 2. 단답형
+    else if (type === 'short') {
+        return `
+            <div ${commonAttr}>
+                ${sourceBtn}
+                <p class="quiz-question">Q${index}. ${item.q}</p>
+                <div class="short-answer-container">
+                    <input type="text" class="short-answer-input" placeholder="정답 입력">
+                    <button class="check-answer-btn">확인</button>
+                </div>
+                <p class="answer-feedback hidden">정답: ${item.answer}</p>
+            </div>`;
+    } 
+    // 3. 객관식
+    else if (type === 'mcq' || type === '객관식') {
+        const options = item.options || [];
+        const optionsHtml = options.length > 0 
+            ? options.map(opt => `<li>${opt}</li>`).join('') 
+            : `<li style="color:red;">보기 데이터 없음</li>`;
+        
+        return `
+            <div ${commonAttr}>
+                ${sourceBtn}
+                <p class="quiz-question">Q${index}. ${item.q}</p>
+                <ul class="quiz-options">${optionsHtml}</ul>
+            </div>`;
+    }
+    return '';
+}
+
+// 사이드바 생성 함수
+function updateSidebar(totalCount) {
+    if (sidebarNav) {
+        sidebarNav.innerHTML = '';
+        for (let i = 1; i <= totalCount; i++) {
+            const navBtn = document.createElement('button');
+            navBtn.className = 'nav-btn';
+            navBtn.textContent = i;
+            navBtn.onclick = () => document.getElementById(`question-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            sidebarNav.appendChild(navBtn);
+        }
+    }
+}
+
+// 3. 상호작용 (클릭 처리)
 function handleQuizInteraction(e) {
     const target = e.target;
     
-    // OX / 객관식
+    // (A) 보기 클릭 (OX, 객관식 공통)
     const optionLI = target.closest('li');
     if (optionLI && optionLI.parentElement.classList.contains('quiz-options')) {
         const quizItem = optionLI.closest('.quiz-item');
@@ -158,8 +180,8 @@ function handleQuizInteraction(e) {
         const userVal = optionLI.textContent.trim();
         quizItem.dataset.userAnswer = userVal;
 
-        const correctAnswer = String(quizItem.dataset.answer).toLowerCase();
-        const selectedAnswer = userVal.toLowerCase();
+        const correctAnswer = String(quizItem.dataset.answer).toLowerCase().trim();
+        const selectedAnswer = userVal.toLowerCase().trim();
         
         quizItem.classList.add('answered');
 
@@ -169,16 +191,13 @@ function handleQuizInteraction(e) {
             optionLI.classList.add('incorrect');
             const options = quizItem.querySelectorAll('.quiz-options li');
             options.forEach(opt => {
-                if (opt.textContent.toLowerCase() === correctAnswer) opt.classList.add('correct');
+                if (opt.textContent.toLowerCase().trim() === correctAnswer) opt.classList.add('correct');
             });
         }
-        
-        const options = quizItem.querySelectorAll('.quiz-options li');
-        options.forEach(opt => opt.classList.add('disabled'));
-        updateSidebarStatus(quizItem.dataset.index);
+        markSidebarCompleted(quizItem.dataset.index);
     }
     
-    // 단답형
+    // (B) 단답형 확인 버튼
     else if (target.matches('.check-answer-btn')) {
         const quizItem = target.closest('.quiz-item');
         if (!quizItem || quizItem.classList.contains('answered')) return;
@@ -187,63 +206,39 @@ function handleQuizInteraction(e) {
         const userVal = input.value.trim();
         
         quizItem.dataset.userAnswer = userVal;
-
-        const correctAnswer = quizItem.dataset.answer;
-        const feedback = quizItem.querySelector('.answer-feedback');
+        const correctAnswer = String(quizItem.dataset.answer).toLowerCase().replace(/\s/g, '');
+        const userInputClean = userVal.toLowerCase().replace(/\s/g, '');
 
         quizItem.classList.add('answered');
         input.disabled = true;
         target.disabled = true;
         
-        if (userVal.replace(/\s/g, '').toLowerCase() === correctAnswer.replace(/\s/g, '').toLowerCase()) {
+        const feedback = quizItem.querySelector('.answer-feedback');
+        feedback.classList.remove('hidden');
+
+        if (userInputClean === correctAnswer) {
             input.classList.add('correct');
         } else {
             input.classList.add('incorrect');
         }
-        
-        feedback.classList.remove('hidden');
-        updateSidebarStatus(quizItem.dataset.index);
-    }
-    
-    // 서술형
-    else if (target.matches('.save-discussion-btn')) {
-        const quizItem = target.closest('.quiz-item');
-        const textarea = quizItem.querySelector('.discussion-input');
-        const userVal = textarea.value.trim();
-        
-        if(!userVal) return alert("내용을 입력해주세요.");
-
-        quizItem.dataset.userAnswer = userVal;
-        quizItem.classList.add('answered');
-        textarea.disabled = true;
-        target.textContent = "저장됨";
-        target.disabled = true;
-        
-        updateSidebarStatus(quizItem.dataset.index);
+        markSidebarCompleted(quizItem.dataset.index);
     }
 }
 
-function updateSidebarStatus(index) {
+function markSidebarCompleted(index) {
     if (!sidebarNav) return;
     const btns = sidebarNav.querySelectorAll('.nav-btn');
     const targetBtn = btns[index - 1];
     if (targetBtn) targetBtn.classList.add('completed');
 }
 
-/**
- * [제출] 결과 서버 전송 및 오답노트 저장
- */
+// 4. 제출 (자동 채점)
 async function handleSubmitSession() {
-    if (!currentSessionId) return alert("세션 정보가 없습니다.");
-
-    const totalItems = document.querySelectorAll('.quiz-item').length;
-    const answeredItems = document.querySelectorAll('.quiz-item.answered').length;
-
-    if (answeredItems < totalItems) {
-        if (!confirm(`총 ${totalItems}문제 중 ${answeredItems}문제만 풀었습니다.\n제출할까요?`)) return;
-    } else {
-        if (!confirm("모든 문제를 풀었습니다. 결과를 제출할까요?")) return;
-    }
+    if (!currentSessionId) return;
+    
+    const total = document.querySelectorAll('.quiz-item').length;
+    const answered = document.querySelectorAll('.quiz-item.answered').length;
+    if (answered < total && !confirm(`${total - answered}문제 안 풀었습니다. 제출할까요?`)) return;
 
     const btn = document.getElementById('submit-session-btn');
     btn.disabled = true;
@@ -251,103 +246,32 @@ async function handleSubmitSession() {
 
     const answersPayload = {};
     document.querySelectorAll('.quiz-item').forEach(item => {
-        const originalId = item.dataset.originalId;
-        const userAnswer = item.dataset.userAnswer || "";
-        if (originalId) answersPayload[originalId] = userAnswer;
+        const oid = item.dataset.originalId;
+        if (oid) answersPayload[oid] = item.dataset.userAnswer || "";
     });
 
     try {
-        console.log("📤 서버로 제출 중:", answersPayload);
-
         const submitFunc = httpsCallable(functions, 'submitReviewSession');
-        const result = await submitFunc({
-            sessionId: currentSessionId,
-            answers: answersPayload
-        });
+        const result = await submitFunc({ sessionId: currentSessionId, answers: answersPayload });
+        const { score, correctCount, totalCount } = result.data;
 
-        console.log("✅ 채점 완료:", result.data);
-        const { correctCount, totalCount, message } = result.data;
-
-        // ===== [오답 분석 및 저장 로직 통합] =====
-        
-        // 1. 오답 추리기
-        const wrongQuestions = [];
-        const normalize = (s) => String(s || "").replace(/\s/g, "").toLowerCase();
-
-        document.querySelectorAll(".quiz-item").forEach(item => {
-            const qText = item.querySelector(".quiz-question")?.textContent?.trim() || "";
-            const correctAnswer = (item.dataset.answer || "").trim();
-            const userAnswer = (item.dataset.userAnswer || "").trim();
-
-            if (!normalize(userAnswer) || normalize(userAnswer) !== normalize(correctAnswer)) {
-                wrongQuestions.push({ question: qText, userAnswer, correctAnswer });
-            }
-        });
-
-        // 2. 점수 계산
-        const score = totalCount ? Math.round((correctCount / totalCount) * 100) : 0;
-        
-        // 3. 현재 Doc ID 가져오기 (없으면 unknown)
-        const docId = localStorage.getItem("mybook:selectedDocId") || 
-                      localStorage.getItem("mybook:currentDocId") || 
-                      "unknown-doc";
-
-        // 4. 로컬 스토리지 저장 (홈 화면 진행률 반영용)
-        saveQuizResultToProgress(docId, score, wrongQuestions);
-
-        alert(`🎉 채점 완료!\n\n맞은 개수: ${correctCount} / ${totalCount}\n점수: ${score}점\n\n${message}`);
-        window.location.href = "/";
-
-    } catch (error) {
-        console.error("제출 실패:", error);
-        alert(`제출 중 오류가 발생했습니다.\n${error.message}`);
+        alert(`💯 채점 완료!\n점수: ${score}점 (${correctCount}/${totalCount})`);
+        window.location.href = '/';
+    } catch (e) {
+        alert("제출 실패: " + e.message);
         btn.disabled = false;
         btn.textContent = "결과 제출하기";
     }
 }
 
-/**
- * [저장] 로컬 스토리지에 퀴즈 결과 저장 (홈 화면 연동)
- */
-function saveQuizResultToProgress(docId, score, wrongQuestions) {
-    try {
-        const PROGRESS_KEY = "mybook:progress:v1";
-        const progress = JSON.parse(localStorage.getItem(PROGRESS_KEY) || "{}");
-        const docInfo = progress[docId] || { docId, missedKeywords: [] };
-
-        docInfo.quiz = {
-            done: score >= 80,
-            lastScore: score,
-            wrongQuestions
-        };
-
-        // 오답 키워드 추출 (간단 버전)
-        const STOP_WORDS = new Set(["무엇", "의미", "설명", "이란", "하는", "것은", "다음", "중", "옳은", "틀린", "대한"]);
-        const keywords = new Set(docInfo.missedKeywords || []);
-
-        wrongQuestions.forEach(wq => {
-            const combined = `${wq.question || ""} ${wq.correctAnswer || ""}`;
-            combined.replace(/[^\w가-힣 ]/g, " ")
-                .split(/\s+/)
-                .filter(w => w.length >= 2 && !STOP_WORDS.has(w))
-                .forEach(w => keywords.add(w));
-        });
-
-        docInfo.missedKeywords = Array.from(keywords).slice(0, 50);
-        docInfo.lastActivityAt = Date.now();
-
-        progress[docId] = docInfo;
-        localStorage.setItem(PROGRESS_KEY, JSON.stringify(progress));
-        console.log("💾 퀴즈 결과 저장 완료:", docId, score);
-    } catch (e) {
-        console.error("저장 중 오류:", e);
-    }
-}
-
 function showError(msg) {
-    if (quizContent) quizContent.innerHTML = `<div class="loading" style="color:red;">⚠️ ${msg}</div>`;
+    if (quizContent) quizContent.innerHTML = `<div style="padding:20px; color:red; text-align:center;">⚠️ ${msg}</div>`;
     else alert(msg);
 }
 
-// 시작
+window.openViewer = function(docId) {
+    if(!docId || docId === 'undefined') return alert("문서 정보 없음");
+    window.open(`/index.html?docId=${docId}`, '_blank');
+};
+
 document.addEventListener('DOMContentLoaded', loadQuiz);

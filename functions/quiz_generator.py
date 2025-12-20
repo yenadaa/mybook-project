@@ -70,6 +70,7 @@ class ReviewOut(BaseModel):
     ox: List[Dict[str, Any]]
     short: List[Dict[str, Any]]
     discussion: List[Dict[str, Any]]
+    mcq: List[Dict[str, Any]] = []
 
 class Output(BaseModel):
     summaries: SummaryOut
@@ -319,19 +320,59 @@ def _prompt_keywords(text: str) -> str:
 def _prompt_review(text: str, kws: List[str], counts: Dict[str, int]) -> str:
     kw_str = ", ".join(kws)
     return textwrap.dedent(f"""
-    [과제] 제공된 텍스트와 키워드를 바탕으로 학습용 문제를 출제하세요.
-    - 문항 수: OX 퀴즈 {counts['ox']}개, 단답형 {counts['short']}개
-    - 언어: 한국어
+    [역할] JSON 데이터 생성기. (학습용 퀴즈)
+    [지시] 아래 텍스트를 분석하여 3가지 유형의 퀴즈를 **각각 지정된 개수만큼** 생성하시오.
+
+    [★필수 목표: 총 15문제 생성★]
+    1. "ox": 5문제 (내용의 참/거짓 판별)
+    2. "short": 5문제 (단답형 주관식)
+    3. "mcq": 5문제 (4지 선다형 객관식)
+    
+    [★유형별 작성 규칙 (엄수)★]
+    1. "ox" (OX 퀴즈):
+       - 질문("q")은 반드시 **"~이다."** 형태의 평서문이어야 함.
+       - 정답("answer")은 소문자 "true" 또는 "false" 만 가능.
+       - 절대 질문 형태(~인가?)로 쓰지 말 것.
+
+    2. "short" (단답형):
+       - 질문("q")은 반드시 **"~은 무엇인가?", "~는 언제인가?"** 같은 의문문이어야 함.
+       - 정답("answer")은 본문에 나오는 '핵심 용어', '숫자', '사람 이름' 이어야 함.
+       - **서술형(설명하시오) 절대 금지.**
+
+    3. "mcq" (객관식):
+       - 질문("q")은 4지 선다형에 적합해야 함.
+       - "options": ["보기1", "보기2", "보기3", "보기4"] 리스트 필수.
+       - 정답("answer")은 options 리스트 중 하나와 **정확히 일치**하는 문자열일 것.
+
+    [★출력 포맷 (JSON 구조 엄수)★]
+    - 반드시 아래 JSON 형식을 따르시오. 키(Key) 이름을 바꾸지 마시오.
+    {{
+        "review": {{
+            "ox": [
+                {{"q": "본문의 내용은 사실이다.", "answer": "true", "why": "해설", "sources": []}},
+                {{"q": "이것은 틀린 내용이다.", "answer": "false", "why": "해설", "sources": []}},
+                ... (반드시 5개 채울 것)
+            ],
+            "short": [
+                {{"q": "이 법칙의 이름은 무엇인가?", "answer": "상대성이론", "sources": []}},
+                ... (반드시 5개 채울 것)
+            ],
+            "mcq": [
+                {{
+                    "q": "다음 중 올바른 것은?", 
+                    "options": ["A내용", "B내용", "C내용", "D내용"], 
+                    "answer": "A내용", 
+                    "sources": []
+                }},
+                ... (반드시 5개 채울 것)
+            ]
+        }}
+    }}
+
     [키워드] {kw_str}
-    [형식]
-    - OX: "q", "answer"(true/false), "why", "sources"
-    - 단답: "q", "answer", "sources"
-    [출력(JSON)]
-    {{ "review": {{ "ox": [], "short": [] }} }}
     [텍스트]
     {text}
     """).strip()
-
 # ---------------------------------------------
 # --- 6. Base Summary & Quiz Generation ---
 # ---------------------------------------------
@@ -525,9 +566,9 @@ def generate_custom_review(
     model: str = "gpt-4o-mini",
     counts_override: Optional[Dict[str, int]] = None,
 ) -> ReviewOut:
-    # 1. 텍스트 및 키워드 준비
-    all_ids = _normalize_ids(doc)
     
+    # 1. 텍스트 추출
+    all_ids = _normalize_ids(doc)
     target_chunks = []
     if search_query:
         target_chunks = search_chunks_with_bm25(doc, search_query, top_k=4)       
@@ -537,9 +578,8 @@ def generate_custom_review(
     elif section:
         target_chunks = [c for c in doc.chunks if section in " / ".join(c.section_path or [])]
     
-    # 청크가 없으면 빈 결과 반환
     if not target_chunks: 
-        return ReviewOut(ox=[], short=[], discussion=[])
+        return ReviewOut(ox=[], short=[], mcq=[], discussion=[])
 
     selected_text = "\n\n".join([c.text for c in target_chunks])
     
@@ -548,81 +588,35 @@ def generate_custom_review(
             keywords = _ask_gpt_json(_prompt_keywords(selected_text), model, 0.2, 200).get("keywords", [])
         except: 
             keywords = []
-    
     kws = keywords
 
-    # 2. 문제 개수 설정
-    counts = counts_override or {"ox": 3, "short": 3, "discussion": 3}
-    final_out = ReviewOut(ox=[], short=[], discussion=[])
+    # 🛑 [강제 설정] 서술형 0개, 나머지는 5개씩 (총 15문제)
+    counts = {"ox": 5, "short": 5, "mcq": 5, "discussion": 0}
+    
+    final_out = ReviewOut(ox=[], short=[], mcq=[], discussion=[])
 
-    # 3. OX 및 단답형 생성 (기존 유지)
-    if counts.get("ox", 0) > 0 or counts.get("short", 0) > 0:
-        try:
-            c_qa = counts.copy()
-            c_qa["discussion"] = 0
-            raw = _ask_gpt_json(_prompt_review(selected_text, kws, c_qa), model, 0.4, 2000).get("review", {})
+    # 2. 문제 생성 실행
+    try:
+        # 프롬프트 호출
+        raw = _ask_gpt_json(_prompt_review(selected_text, kws, counts), model, 0.5, 3000).get("review", {})
+        
+        hl_ids = [c.id for c in target_chunks]
+        def fix(it, t):
+            it["tags"] = list(set((it.get("tags") or []) + [t]))
+            it["sources"] = _fix_sources(it.get("sources", []), all_ids, hl_ids)
+            return it
             
-            hl_ids = [c.id for c in target_chunks]
-            def fix(it, t):
-                it["tags"] = list(set((it.get("tags") or []) + [t]))
-                it["sources"] = _fix_sources(it.get("sources", []), all_ids, hl_ids)
-                return it
-                
-            final_out.ox = [fix(x, "OX") for x in raw.get("ox", [])]
-            final_out.short = [fix(x, "단답") for x in raw.get("short", [])]
-        except Exception as e: 
-            print(f"OX/Short Error: {e}")
+        final_out.ox = [fix(x, "OX") for x in raw.get("ox", [])]
+        final_out.short = [fix(x, "단답") for x in raw.get("short", [])]
+        final_out.mcq = [fix(x, "객관식") for x in raw.get("mcq", [])]
+        
+    except Exception as e: 
+        print(f"Quiz Gen Error: {e}")
 
-    # 4. ⭐️ [핵심 수정] 서술형(Discussion) 생성 - GPT 직접 호출 & 힌트 강제
-    if counts.get("discussion", 0) > 0:
-        try:
-            # 복잡한 함수 호출 대신, 여기서 바로 프롬프트를 쏩니다.
-            prompt = f"""
-            [역할] 한국어 학습 교재 출제자.
-            [자료] {selected_text[:5000]}
-            [키워드] {", ".join(kws)}
-            
-            [지시사항]
-            위 자료를 바탕으로 '심층 서술형/논술형 문제(Discussion)'를 {counts['discussion']}개 출제하세요.
-            학생이 답변하기 어려울 수 있으므로, 각 문제마다 **반드시 'hint'(힌트)**를 포함해야 합니다.
-            
-            [출력 포맷(JSON)]
-            {{
-                "review": {{
-                    "discussion": [
-                        {{
-                            "q": "질문 내용...",
-                            "hint": "핵심 키워드나 생각할 거리를 주는 1문장 힌트", 
-                            "sources": []
-                        }}
-                    ]
-                }}
-            }}
-            """
-            
-            # GPT 호출
-            res = _ask_gpt_json(prompt, model, 0.7, 2000)
-            raw_discussions = res.get("review", {}).get("discussion", [])
-            
-            hl_ids = [c.id for c in target_chunks]
-            final_discussions = []
-            
-            for d in raw_discussions:
-                d["sources"] = _fix_sources(d.get("sources", []), all_ids, hl_ids[:1])
-                
-                # ⭐️ 힌트 안전장치 (혹시라도 비어있으면 기본값 채움)
-                if not d.get("hint"): 
-                    d["hint"] = "지문의 핵심 키워드를 다시 확인해보세요."
-                
-                final_discussions.append(d)
-                
-            final_out.discussion = final_discussions
-
-        except Exception as e:
-            print(f"Discussion Error: {e}")
+    # discussion은 아예 생성 안 함
+    final_out.discussion = [] 
 
     return final_out
-
 # ---------------------------------------------
 # --- 10. Scoring ---
 # ---------------------------------------------

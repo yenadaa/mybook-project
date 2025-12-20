@@ -18,7 +18,8 @@ from routers.quiz import (
 # 4. Review
 from routers.review import (
     createDemoSchedule,
-    testTriggerNotifications,
+    generateReviewSession,
+    submitReviewSession
 
 )
 

@@ -87,24 +87,48 @@ export async function addReviewSchedule(docId, docTitle) {
 // --------------------------------------------------------
 // 전역에서 접근 가능하도록 window에 등록 (HTML onClick에서 사용)
 window.startReviewSession = async function(docId, docTitle) {
-    if(!confirm(`'${docTitle}' 복습 퀴즈를 지금 바로 시작하시겠습니까?`)) return;
+    // 1. 확인 메시지
+    if(!confirm(`'${docTitle}' 내용으로만 퀴즈를 보시겠습니까?`)) return;
+
+    // 2. 로딩 표시 (버튼 찾아서 텍스트 변경)
+    const btn = window.event ? window.event.target : null; // 클릭한 버튼 찾기
+    let originalText = "";
+    if(btn) {
+        originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = "데이터 분석 중...";
+    }
 
     try {
-        // 1. 강제로 "지금 복습할 시간"으로 설정 (시연용 치트키)
-        const createFn = httpsCallable(functions, 'createDemoSchedule');
-        await createFn({ docId: docId, title: docTitle, forceNow: true });
-
-        // 2. 세션 생성 및 ID 발급
-        const triggerFn = httpsCallable(functions, 'testTriggerNotifications');
-        const result = await triggerFn();
+        // 3. 백엔드 함수 호출 (generateReviewSession)
+        // ⭐️ 중요: 'bookId'에 클릭한 문서의 ID(docId)를 딱 넣어서 보냅니다!
+        const generateFn = httpsCallable(functions, 'generateReviewSession');
         
-        if (result.data && result.data.sessionId) {
-            window.location.href = `/quiz-page.html?session=${result.data.sessionId}`;
+        console.log(`🎯 [퀴즈 요청] 문서 ID: ${docId} 만 사용하여 생성`);
+        
+        const result = await generateFn({
+            bookId: docId,    // 👈 [핵심] "이 책만 보세요" 라고 지정
+            mode: 'single_doc' // (선택) 백엔드에서 구분하기 위한 태그
+        });
+
+        const { sessionId } = result.data;
+
+        if (sessionId) {
+            // 4. 퀴즈 페이지로 이동
+            window.location.href = `/quiz-page.html?session=${sessionId}`;
         } else {
-            alert("⚠️ 복습할 문제가 없습니다.");
+            throw new Error("세션 ID를 받지 못했습니다.");
         }
+
     } catch (error) {
-        alert(`오류 발생: ${error.message}`);
+        console.error("퀴즈 생성 실패:", error);
+        alert(`오류가 발생했습니다: ${error.message}`);
+        
+        // 에러 나면 버튼 원상복구
+        if(btn) {
+            btn.disabled = false;
+            btn.innerText = originalText;
+        }
     }
 };
 

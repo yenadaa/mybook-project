@@ -95,9 +95,16 @@ def generateFullDocQuiz(req: https_fn.CallableRequest) -> any:
 def generateCustomReview(req: https_fn.CallableRequest) -> any:
     try:
         doc_obj = _load_doc_data(req.data)
+        
+        # 👇 [수정] 서술형 0개! 나머지는 5개씩 (총 15문제)
         review_out = generate_custom_review(
             doc=doc_obj,
-            counts_override={"ox": 3, "short": 3, "discussion": 3},
+            counts_override={
+                "ox": 5, 
+                "short": 5, 
+                "mcq": 5,       # 객관식
+                "discussion": 0 # ❌ 서술형 삭제
+            },
             model="gpt-4o-mini"
         )
         return {"review": review_out.dict()}
