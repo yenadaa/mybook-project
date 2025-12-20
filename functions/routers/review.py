@@ -17,18 +17,21 @@ def _extract_questions_from_book(book_data):
     
     for p in payloads:
         if not p: continue
-        # 데이터 구조 파싱
-        raw_list = []
-        if isinstance(p, dict):
-            if "items" in p: raw_list = p["items"]
-            elif "quiz" in p: raw_list = p["quiz"]
-            elif "review" in p: 
-                # review 안에 ox, short, mcq 등이 있는 경우
-                for k in ["ox", "short", "mcq", "discussion"]:
-                    if k in p["review"]: raw_list.extend(p["review"][k])
         
-        if raw_list:
-            items.extend(raw_list)
+        # 데이터 구조 파싱
+        if isinstance(p, dict):
+            # (A) review 키 안에 ox, short, mcq 등이 분류된 경우 (가장 흔함)
+            if "review" in p: 
+                for k in ["ox", "short", "mcq", "discussion"]:
+                    if k in p["review"]: 
+                        # 🚨 [핵심 수정] 리스트를 꺼내면서 "type" 이름표를 강제로 붙임!
+                        for q_item in p["review"][k]:
+                            q_item["type"] = k  # 예: "mcq", "ox" 등
+                        items.extend(p["review"][k])
+
+            # (B) 예전 방식 (items나 quiz 리스트에 뭉쳐 있는 경우)
+            elif "items" in p: items.extend(p["items"])
+            elif "quiz" in p: items.extend(p["quiz"])
     
     return items
 
