@@ -3,43 +3,64 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PDF Viewer — Extended (Marker+Text Capture+Thickness)</title>
-  <!-- pdf.js -->
+  <title>PDF Viewer — Chatbot Integrated</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   </script>
-  <!-- Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
-  <!-- Tesseract.js (OCR) -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <link rel = "stylesheet" href = "main.css">
+  <link rel="stylesheet" href="main.css">
   <script>
-  window.MathJax = {
-    tex: {
-      inlineMath: [['\\(', '\\)'], ['$', '$']], // \( ... \) 또는 $ ... $ 를 수식으로 인식
-      displayMath: [['\\[', '\\]'], ['$$', '$$']]
-    },
-    svg: { fontCache: 'global' }
-  };
-</script>
-<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)'], ['$', '$']], 
+        displayMath: [['\\[', '\\]'], ['$$', '$$']]
+      },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  
+  <style>
+      /* 챗봇이 기본으로 보이도록 추가 스타일 */
+      .right {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          overflow: hidden; /* 내부 스크롤 사용 */
+      }
+      /* 챗봇 창을 꽉 채우기 */
+      #chat-window {
+          display: flex !important; /* 강제로 보이기 */
+          flex-direction: column;
+          height: 100%;
+          border: none;
+          box-shadow: none;
+          position: static; /* absolute 해제 */
+          width: 100%;
+          max-height: none;
+      }
+      /* 불필요한 요소 숨김 */
+      .right-tabs, .notes, .notes-footer, #chat-toggle-btn, #chat-close-btn {
+          display: none !important;
+      }
+  </style>
 </head>
 <body>
-  <div class="toolbar"><!--[수정][11-25][app에서 빼고 상단으로 이동하여 css로 fix]-->
+  <div class="toolbar">
     <div class="group">
       <button id="toggleLeftSidebar" title="왼쪽 패널 토글">
           <i class="fa-solid fa-angles-left"></i>
       </button>
-    <a id="btnGoHome" class="nav-home-btn" href="home.html" style="text-decoration:none; display:inline-block; text-align:center;">홈으로</a>      
-    <span id="pipeline-status" style="font-size: 12px; color: var(--muted); margin-right: 8px;">
+      <a id="btnGoHome" class="nav-home-btn" href="home.html" style="text-decoration:none; display:inline-block; text-align:center;">홈으로</a>      
+      <span id="pipeline-status" style="font-size: 12px; color: var(--muted); margin-right: 8px;">
           문서 대기 중...
-        </span><!-- 로딩 상태 표시 -->
+      </span>
       <button id="btn-whiteboard" class="label-btn">📝 백지 복습</button>
       <button id="modal-full-doc-btn" title="전체 문서 퀴즈">전체 요약/퀴즈</button>
-      <button id="modal-highlights-btn" title="하이라이트 기반 퀴즈">하이라이트 퀴즈</button>
-    </div>
+      </div>
     <input id="file" class="file-input" type="file" accept="application/pdf" />
     <span class="divider"></span>
 
@@ -67,15 +88,10 @@
       <button id="undoBtn" title="되돌리기 (Ctrl+Z)"><i class="fa-solid fa-arrow-rotate-left"></i></button>
       <button id="redoBtn" title="다시하기 (Ctrl+Y)"><i class="fa-solid fa-arrow-rotate-right"></i></button>
       <button id="penBtn" title="형광펜 (H)"><i class="fa-solid fa-pen"></i></button>
-      <!--[수정][12-14][검정펜 삭제 후 위치 이동]-->
       <button id="eraserBtn" title="지우개 (E)"><i class="fa-solid fa-eraser"></i></button>
       <button id="ocrSelectBtn" title="텍스트 선택 (OCR)"><i class="fa-solid fa-i-cursor"></i></button>
-      <div class="divider"></div>
-      <button class="chip-btn tag-btn" data-tag="기본">전체</button>
-      <button class="chip-btn tag-btn" data-tag="중요">중요</button>
-      <button class="chip-btn tag-btn" data-tag="암기">암기</button>
-      <button class="chip-btn tag-btn" data-tag="참고">참고</button>
-    </div>
+      
+      </div>
 
     <div class="group" title="형광펜 두께">
       <span style="padding-left:8px">두께</span>
@@ -83,42 +99,36 @@
       <div id="thicknessLabel" class="zoom-label" style="min-width:60px">20 px</div>
     </div>
 
-    
-   <!--[추가][12-14][필기 모드 + 필기 모드 모달(두께, 지우개 설정)]--> 
     <div class="group" title="자유 필기 툴">
       <button id="markerBtn" title="자유 필기 펜 (M)"><i class="fa-solid fa-highlighter"></i></button>
-      
       <button id="markerSettingsBtn" title="자유 필기 설정"><i class="fa-solid fa-gear"></i></button> 
     </div>
 
     <div id="marker-setting-modal-overlay" class="modal-overlay hidden">
       <div class="modal-body" id="marker-setting-modal-body">
         <h2>자유 필기 펜 설정</h2>
-        
         <div class="form-group" style="margin-top: 15px;">
           <label for="modalMarkerThickness">필기 두께</label>
           <input id="modalMarkerThickness" type="range" min="3" max="30" step="1" value="15" style="width:100%;" />
           <div id="modalMarkerThicknessLabel" style="text-align: right; font-size: 14px;">15 px</div>
         </div>
-        
         <div class="form-group" style="margin-top: 20px;">
           <button id="modalMarkerEraserBtn" class="primary-btn" style="width: 100%;">
             <i class="fa-solid fa-eraser"></i> 지우개 모드로 전환
           </button>
         </div>
-
         <button id="marker-setting-modal-close-btn" class="modal-close-btn">&times;</button>
       </div>
     </div>
 
-  <div class="group" style="margin-left:auto;">
-    <!--[추가 12-17 오른쪽 사이드바 토글 버튼]-->
-    <button id="toggleRightPanel" title="오른쪽 패널 토글"><i class="fa-solid fa-angles-right"></i></button>
-    <span id="authStatus" class="zoom-label" style="min-width:140px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px;">로그인 상태...</span>
-    <button id="loginBtn" title="로그인"><i class="fa-solid fa-user-lock"></i> 로그인</button>
-    <button id="logoutBtn" title="로그아웃"><i class="fa-solid fa-right-from-bracket"></i> 로그아웃</button>
+    <div class="group" style="margin-left:auto;">
+      <button id="toggleRightPanel" title="오른쪽 패널 토글"><i class="fa-solid fa-angles-right"></i></button>
+      <span id="authStatus" class="zoom-label" style="min-width:140px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px;">로그인 상태...</span>
+      <button id="loginBtn" title="로그인"><i class="fa-solid fa-user-lock"></i> 로그인</button>
+      <button id="logoutBtn" title="로그아웃"><i class="fa-solid fa-right-from-bracket"></i> 로그아웃</button>
+    </div>
   </div>
-  </div>
+
   <div class="app">
     <div class="main">
       <aside class="sidebar">
@@ -134,7 +144,7 @@
           <ul id="bookmarks" class="outline" style="display:none"></ul> 
         </div>
       </aside>
-      <!--[추가][12-19][리사이저 왼쪽 핸들]-->
+      
       <div class="resizer" id="left-resizer">
         <div class="grabber"></div>
       </div>
@@ -143,30 +153,13 @@
         <div id="empty" class="empty">PDF 파일을 열어보세요</div>
         <div id="pages" class="pages" style="display:none"></div>
       </section>
-    <!--[추가][12-17][리사이저 핸들]-->
-    <div class="resizer" id="right-resizer">
-      <div class="grabber"></div>
-    </div>
-    <aside class="right">
-      <div class="right-grid-container">
-        <div class="right-tabs">
-            <button class="active" data-filter="all" id="tabAll">전체</button>
-            <button data-filter="중요">중요</button>
-            <button data-filter="암기">암기</button>
-            <button data-filter="참고">참고</button>
-          </div>
-          <div id="notes" class="notes"></div>
-          <div class="notes-footer">
-            <small style="color:var(--muted)">형광펜 스트로크를 지우려면 지우개(E)로 드래그해요 · 두께 단축키: [ / ]</small>
-          <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px;">
-                <button id="clearData" class="btn-danger-outline" title="필기, 하이라이트, 대화내용 모두 삭제">
-                  <i class="fa-solid fa-trash-can"></i> 모든 기록 초기화
-                </button>
-              </div>
-            </div>
+      
+      <div class="resizer" id="right-resizer">
+        <div class="grabber"></div>
+      </div>
 
-        </div>  
-        <div id="chat-window" class="chat-window hidden">
+      <aside class="right">
+        <div id="chat-window" class="chat-window">
           <div class="chat-header">
             <select id="chat-persona-select" class="chat-persona-select">
               <option value="professor">개념 구축형 챗봇</option>
@@ -178,9 +171,7 @@
             <button id="chat-clear-btn" title="현재 대화 지우기" style="margin-left: auto; margin-right: 8px; color: #ef4444; background: none; border: none; cursor: pointer;">
               <i class="fa-solid fa-trash-can"></i>
             </button>
-            
-            <button id="chat-close-btn">&times;</button>
-          </div>
+            </div>
 
           <div id="chat-messages" class="chat-messages">
             <div class="chat-message bot">
@@ -197,16 +188,13 @@
     </div>
   </div>
 
-
   <div id="quiz-modal-overlay" class="modal-overlay hidden">
-    <div id="quiz-modal-body" class="modal-body quiz-results">
-    </div>
+    <div id="quiz-modal-body" class="modal-body quiz-results"></div>
     <button id="quiz-close-btn" class="modal-close-btn">&times;</button>
   </div>
 
   <div id="login-modal-overlay" class="modal-overlay hidden">
     <div class="modal-body" id="login-modal-body">
-
       <div id="login-choice-view">
         <h2>로그인</h2>
         <p>로그인 방식을 선택하세요.</p>
@@ -238,14 +226,11 @@
           <button id="email-signup-btn">회원가입</button>
         </div>
       </div>
-
       <button id="login-modal-close-btn" class="modal-close-btn">&times;</button>
     </div>
   </div>
 
-  <button id="chat-toggle-btn" class="chat-toggle-btn">💬</button>
-
-<script src="A.firebase.js" type="module" defer></script>
+  <script src="A.firebase.js" type="module" defer></script>
 <script src="viewer-main.js" type="module" defer></script> 
 <script src="doc_firebase.js" type="module" defer></script>
 <script src="main.js" type="module" defer></script>

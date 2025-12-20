@@ -28,7 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // 심화 질문 영역 요소
     const challengeArea = document.getElementById('challenge-area');
     const challengeText = document.getElementById('challenge-text');
-    const btnCloseChallenge = document.getElementById('btn-close-challenge');
+    const btnCloseChallenge = document.getElementById('btn-challenge-close');
 
     let inputMode = 'drawing'; 
     let isDrawing = false; 

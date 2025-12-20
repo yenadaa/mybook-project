@@ -232,13 +232,22 @@
 
   </div> 
 
-  <div id="challenge-area">
-    <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
-      <strong style="color:var(--primary);">🤔 심화 질문 (소크라테스 튜터)</strong>
-      <button id="btn-challenge-close" class="btn" style="padding:4px 8px; font-size:12px">닫기</button>
+  <div id="challenge-area" style="display:none; position:fixed; top:80px; left:50%; transform:translateX(-50%); width: 90%; max-width: 600px; background:#ffffff; border:1px solid #3b82f6; border-radius:12px; box-shadow:0 8px 20px rgba(0,0,0,0.15); z-index:100; overflow:hidden; animation: slideDown 0.3s ease-out;">
+    <div style="background:#eef2ff; padding:10px 16px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #dbeafe;">
+      <strong style="color:#3b82f6; font-size:14px;">🤔 소크라테스 튜터</strong>
+      <button id="btn-challenge-close" style="background:none; border:none; font-size:18px; color:#6b7280; cursor:pointer; padding:0;">&times;</button>
     </div>
-    <p id="challenge-text">...</p>
+    <div style="padding:16px;">
+      <p id="challenge-text" style="margin:0; font-size:15px; line-height:1.5; color:#374151;">...</p>
+    </div>
   </div>
+
+  <style>
+    @keyframes slideDown {
+      from { transform: translate(-50%, -20px); opacity: 0; }
+      to { transform: translate(-50%, 0); opacity: 1; }
+    }
+  </style>
 
   <button id="btn-open-challenge" style="display:none; position:absolute; top:130px; left:50%; transform:translateX(-50%); z-index:90; padding:8px 16px; border-radius:20px; background:#eef2ff; color:#3b82f6; border:2px solid #3b82f6; font-weight:bold; cursor:pointer; box-shadow:0 4px 10px rgba(0,0,0,0.1);">
     ❓ 질문 다시 보기
@@ -255,31 +264,33 @@
             막막하다면 아래 질문들에 답해보세요!
         </p>
 
-        <h3>작성 가이드라인</h3>
-        <ul>
-            <li>오늘 학습 목표는 무엇이었나요?</li>
-            <li>학습 내용 중 <strong>핵심 개념</strong>은 무엇이었나요?</li>
-            <li>이 개념이 이전/이후 배울 내용과 어떻게 연결되나요?</li>
-            <li>오늘 배운 내용들은 서로 어떤 관계가 있나요?</li>
-            <li>개념 설명이 어렵다면 <strong>예시</strong>를 들어볼까요?</li>
-            <li>공부하면서 <strong>새롭게 알게 된 내용</strong>은 무엇인가요?</li>
-            <li>어려웠거나 다시 봐야 할 부분은 어디인가요?</li>
-            <li>챗봇과의 대화 중 가장 기억에 남는 것은?</li>
-            <li>답변하기 어려웠던 질문이 있었나요?</li>
-            <li>이 내용은 어디에 활용될 수 있을까요?</li>
-        </ul>
+      <h3>작성 가이드라인</h3>
+              <ul>
+                  <li>복습한 부분에서 해결하고자 하는 문제는 무엇인가요?</li>
+              <li>이 문제는 언제 발생하나요? 어떤 상황에서 이런 문제가 나타날까요?</li>
+                  <li>그 문제는 어떻게 분석될 수 있나요? 문제 해결에 있어서 <strong>핵심 개념들</strong>은 무엇이었나요?</li>
+              <li>개념 설명이 어렵다면 <strong>예시</strong>를 들어볼까요?</li>
+                  <li>이 개념이 이전/이후 내용과 어떻게 연결되나요?</li>
+                  <li>오늘 복습한 내용들은 서로 어떤 관계가 있나요?</li>
+                  <li>복습하면서 <strong>새롭게 알게 된 내용</strong>은 무엇인가요?</li>
+                  <li>어려웠거나 나중에 다시 봐야 할 부분은 어디인가요?</li>
+                  <li>챗봇과의 대화 중 가장 기억에 남는 것이 있었나요?</li>
+                  <li>챗봇의 질문 가운데 답변하기 어려웠던 질문이 있었나요?</li>
+                  <li>이 내용은 어디에 활용될 수 있을까요? 실생활에 적용된 예시를 찾아볼 수 있을까요?</li>
+              </ul>
 
-        <h3>Check Point</h3>
-        <ul>
-            <li>설명이 오늘 학습 목표와 부합하나요?</li>
-            <li>내용이 일관성 있게 연결되나요?</li>
-            <li>혹시 누락된 핵심 내용은 없나요?</li>
-            <li><strong>'이게 왜 필요한 개념인지'</strong> 드러나 있나요?</li>
-            <li>다른 사람에게 설명해도 이해할 수 있을까요?</li>
-            <li>한 문장으로 요약하면 무엇인가요?</li>
-        </ul>
-    </div>
-  </aside>
+              <h3>Check Point</h3>
+              <ul>
+                  <li>설명이 해결하고자 한 문제를 잘 정의하고 해소하고 있나요?</li>
+                  <li>내용이 일관성 있게 연결되나요?</li>
+                  <li>혹시 누락된 핵심 내용은 없나요?</li>
+                  <li><strong>'이게 왜 필요한 개념인지'</strong> 드러나 있나요?</li>
+                  <li>이대로 다른 사람에게 설명해도 이해할 수 있을까요?</li>
+                  <li>한 문장으로 설명을 요약한다면 무어라 할 수 있을까요?</li>
+              </ul>
+          </div>
+        </aside>
+
 
   <button id="btn-open-panel" style="display:none; position:fixed; bottom:20px; right:20px; z-index:200; padding:12px 16px; border-radius:50px; background:#3b82f6; color:white; border:none; box-shadow:0 4px 12px rgba(0,0,0,0.2); font-weight:bold; cursor:pointer;">
     📖 가이드 보기

@@ -1,6 +1,6 @@
 console.log("HOME.JS (Interactive Mode) Loaded");
 
-import { auth, db } from "/A.firebase.js"; 
+import { auth, db, functions } from "/A.firebase.js"; 
 import { 
     collection, 
     query, 
@@ -8,6 +8,7 @@ import {
     onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"; 
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-functions.js";
 import { addReviewSchedule } from './calendar.js';
 
 const LS_ALARM = "mybook:alarmEnabled";
@@ -50,6 +51,44 @@ function getNextGoalText(percent) {
 }
 
 // --------------------------------------------------------
+// 1.5. [추가] 레벨/경험치 업데이트 함수
+// --------------------------------------------------------
+async function updateLevelProgress() {
+    try {
+        const getStats = httpsCallable(functions, 'getUserStats');
+        const res = await getStats();
+        const data = res.data;
+
+        // HTML 요소 찾기 (기존 HTML 구조 활용)
+        const progressBar = document.getElementById('currentProgressFill');
+        const progressText = document.getElementById('currentProgressText');
+        const todayGoal = document.getElementById('todayGoal'); 
+
+        if (progressBar && progressText) {
+            // 게이지 채우기
+            progressBar.style.width = `${data.progress}%`;
+            progressText.textContent = `${data.progress}% (Lv.${data.level})`;
+            
+            // 오늘의 목표 텍스트 업데이트 (레벨 정보 표시)
+            if(todayGoal) {
+                // 기존 텍스트(getNextGoalText) 대신 레벨 정보를 보여줄지, 
+                // 아니면 별도 공간에 보여줄지는 선택 사항입니다.
+                // 여기서는 기존 '오늘의 목표' 텍스트 뒤에 덧붙이는 방식으로 처리합니다.
+                const originalText = todayGoal.textContent;
+                if(originalText === "-") {
+                    todayGoal.textContent = `현재 Lv.${data.level} (총 ${data.totalSolved}문제 해결)`;
+                } else {
+                    // 기존 목표 텍스트 유지하고 싶으면 아래 줄 주석 처리
+                    // todayGoal.textContent = `Lv.${data.level} 달성! (총 ${data.totalSolved}문제) | ${originalText}`;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("레벨 정보 로드 실패:", e);
+    }
+}
+
+// --------------------------------------------------------
 // 2. 렌더링 함수
 // --------------------------------------------------------
 function renderChips(list){
@@ -73,28 +112,6 @@ function renderChips(list){
     }
 }
 
-function setRetentionMilestones(percent) {
-    const level = getRetentionLevel(percent);
-    const ids = ["ms1", "ms3", "ms7", "ms14", "ms30"]; // HTML ID와 일치해야 함 (msRead 등 수정 필요하면 home.html 확인)
-    
-    // 혹시 home.html을 수정 안 했을까봐 예외처리
-    ids.forEach((id, idx) => {
-        const el = document.getElementById(id) || document.getElementById(["msRead","msQuiz","msWhite"][idx]); 
-        if (el) {
-            if (idx < level) {
-                el.classList.add("is-done");
-                el.style.opacity = "1";
-                el.style.fontWeight = "bold";
-                el.style.color = "#4CAF50";
-            } else {
-                el.classList.remove("is-done");
-                el.style.opacity = "0.4";
-                el.style.fontWeight = "normal";
-                el.style.color = "";
-            }
-        }
-    });
-}
 
 function renderHero(userEmail, streakDays, doc){
     document.getElementById("userEmail").textContent = userEmail || "로그인 필요";
@@ -106,6 +123,7 @@ function renderHero(userEmail, streakDays, doc){
         // 문서 없음 상태 처리
         document.getElementById("currentDocTitle").textContent = "선택된 문서가 없습니다";
         document.getElementById("currentDocSub").textContent = "아래 목록에서 문서를 선택해주세요.";
+        // 레벨 정보로 대체될 것이므로 0% 초기화는 유지하되, updateLevelProgress가 덮어쓸 수 있음
         document.getElementById("currentProgressText").textContent = "0%";
         document.getElementById("currentProgressFill").style.width = "0%";
         document.getElementById("todayGoal").textContent = "-";
@@ -121,6 +139,9 @@ function renderHero(userEmail, streakDays, doc){
     const p = clamp(doc.progressPercent);
     const level = getRetentionLevel(p);
 
+    // [주의] 여기서 문서 진도율을 보여줄지, 전체 레벨을 보여줄지 결정해야 합니다.
+    // 일단은 문서 진도율을 보여주되, 상단 updateLevelProgress 함수가 실행되면 
+    // '전체 레벨' 정보로 덮어씌워지게 됩니다. (전체 레벨이 더 동기부여 되니까요!)
     document.getElementById("currentProgressText").textContent = `${p}%`;
     document.getElementById("currentProgressFill").style.width = `${p}%`;
     
@@ -131,12 +152,11 @@ function renderHero(userEmail, streakDays, doc){
     document.getElementById("todayGoal").textContent = getNextGoalText(p);
     
     renderChips(doc.missedKeywords || []);
-    setRetentionMilestones(p); 
 
     const startBtn = document.getElementById("startTodayBtn");
     if(startBtn) startBtn.onclick = () => gotoIndexWithDoc(doc.docId);
 
-    // 스케줄 버튼 (현재 선택된 문서 기준)
+    // 스케줄 버튼
     if (scheduleBtn) {
         scheduleBtn.onclick = async () => {
             if (typeof addReviewSchedule === 'function') {
@@ -149,7 +169,7 @@ function renderHero(userEmail, streakDays, doc){
         };
     }
     
-    // 퀵 액션 (현재 선택된 문서 기준)
+    // 퀵 액션
     document.querySelectorAll("[data-action]").forEach(btn => {
         btn.onclick = () => {
             const action = btn.getAttribute("data-action");
@@ -162,7 +182,6 @@ function renderHero(userEmail, streakDays, doc){
     renderAI(doc);
 }
 
-// ⭐️ [핵심 수정] 목록 렌더링 - 클릭 시 Hero 섹션 업데이트
 function renderDocsGrid(docs, userEmail){
     const grid = document.getElementById("docsGrid");
     if (!grid) return;
@@ -178,7 +197,6 @@ function renderDocsGrid(docs, userEmail){
         const card = document.createElement("article");
         card.className = "doc-card";
         
-        // 현재 선택된 문서 하이라이트
         const currentId = localStorage.getItem("mybook:selectedDocId");
         if(doc.docId === currentId) card.style.border = "2px solid #4CAF50";
 
@@ -194,13 +212,14 @@ function renderDocsGrid(docs, userEmail){
             </div>
         `;
         
-        // 1. 카드 배경 클릭 -> 상단(Hero) 정보만 갱신 (뷰어 이동 X)
+        // 1. 카드 클릭 -> Hero 정보 갱신
         card.addEventListener('click', (e) => {
-            // 버튼을 눌렀을 땐 이 이벤트가 발생하면 안 됨 (아래 stopPropagation으로 방지됨)
             localStorage.setItem("mybook:selectedDocId", doc.docId);
             localStorage.setItem("mybook:selectedDocTitle", doc.title);
             
             renderHero(userEmail, 0, doc);
+            // Hero 정보 갱신 후, 다시 레벨 정보를 불러와 덮어씀 (선택 사항)
+            updateLevelProgress();
             
             document.querySelectorAll('.doc-card').forEach(c => c.style.border = "1px solid #eee");
             card.style.border = "2px solid #4CAF50";
@@ -208,18 +227,12 @@ function renderDocsGrid(docs, userEmail){
             window.scrollTo({ top: 0, behavior: 'smooth' });
         });
 
-        // 2. [열기] 버튼 클릭 -> 무조건 뷰어로 납치 (이게 원하시는 기능!)
+        // 2. 열기 버튼 클릭 -> 뷰어 이동
         const openBtn = card.querySelector('.open-viewer-btn');
         openBtn.onclick = (e) => {
-            e.stopPropagation(); // ✋ 카드 클릭 이벤트가 발생하지 않도록 막음 (중요!)
-            
-            console.log(`🚀 문서 열기 클릭: ${doc.title} (${doc.docId})`);
-            
-            // (1) 로컬 스토리지에 "이거 열거야"라고 저장 (뷰어가 이걸 보고 문서를 띄움)
+            e.stopPropagation(); 
             localStorage.setItem("mybook:selectedDocId", doc.docId);
             localStorage.setItem("mybook:selectedDocTitle", doc.title);
-            
-            // (2) URL에도 ID를 박아서 이동 (이중 안전장치)
             window.location.href = `/index.html?docId=${encodeURIComponent(doc.docId)}`;
         };
         
@@ -230,6 +243,7 @@ function renderDocsGrid(docs, userEmail){
 function renderAI(doc){
     const ul = document.getElementById("aiActionList");
     const routine = document.getElementById("aiRoutine");
+    // home.html에 해당 ID가 없는 경우를 대비 (없으면 무시)
     if (!ul || !routine) return;
     
     ul.innerHTML = "";
@@ -349,6 +363,9 @@ document.addEventListener("DOMContentLoaded", () => {
         };
     }
 
+    // ⭐️ [추가] 페이지 로드 시 레벨 정보 업데이트 호출
+    updateLevelProgress();
+
     onAuthStateChanged(auth, (user) => {
         if (!user) {
             renderHero(null, 0, null);
@@ -357,6 +374,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         console.log(`로그인 감지: ${user.email}`);
+        
+        // 로그인 후에도 한 번 더 레벨 정보 갱신 (유저 ID 필요할 수 있으므로)
+        updateLevelProgress();
 
         const appId = "default-app-id"; 
         const userDocsPath = `artifacts/${appId}/users/${user.uid}/userDocs`;
@@ -384,8 +404,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 const tB = b.createdAt?.seconds || 0;
                 return tB - tA;
             });
-            
-            console.log(`🔥 문서 ${docs.length}개 로드`);
             
             bindTabsAndSearch(docs, user.email);
             bindModals(docs);
