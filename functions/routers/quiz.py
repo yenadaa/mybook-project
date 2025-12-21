@@ -132,7 +132,6 @@ def scoreQuizAnswer(req: https_fn.CallableRequest) -> any:
         raise https_fn.HttpsError("internal", f"채점 중 오류: {e}")
 
 
-# ⭐️ [수정됨] 백지 복습 채점 (한글 강제 + 폴더 지원 + Vision)
 @https_fn.on_request(
     secrets=["OPENAI_API_KEY"],
     memory=options.MemoryOption.GB_1,
@@ -140,7 +139,6 @@ def scoreQuizAnswer(req: https_fn.CallableRequest) -> any:
     region="asia-northeast3"
 )
 def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
-    # CORS
     headers = {
         "Access-Control-Allow-Origin": ALLOWED_ORIGIN, 
         "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -175,7 +173,7 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
                         {
                             "role": "user", 
                             "content": [
-                                {"type": "text", "text": "이미지의 필기 내용을 텍스트로 변환해줘. 설명 없이 내용만 출력해. (Korean Only if possible)"},
+                                {"type": "text", "text": "이미지의 필기 내용을 텍스트로 변환해줘. 수식은 LaTeX 형태로 바꿔줘. 설명 없이 내용만 출력해."},
                                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
                             ]
                         }
@@ -189,10 +187,10 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
         if not user_text:
             return https_fn.Response(json.dumps({"score": 0, "feedback": "내용을 인식할 수 없습니다."}), status=200, headers=headers)
 
-        # 2. RAG 검색 (폴더/파일 통합 로더 사용)
+        # 2. RAG 검색 (실패해도 괜찮음)
         target_question = data.get("targetQuestion") 
         is_hint_request = data.get("isHint", False)
-        ground_truth = "관련 교재 내용 없음"
+        ground_truth = "검색된 교재 내용 없음 (일반 지식으로 평가 요망)"
 
         try:
             doc_obj = _load_doc_data({"bookId": book_id, "folderId": folder_id})
@@ -201,36 +199,55 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
             if relevant_chunks:
                 ground_truth = "\n\n".join([c.text for c in relevant_chunks])
         except Exception as e:
-            print(f"⚠️ RAG Search Error: {e}")
+            print(f"⚠️ RAG Search Warning: {e}")
 
-        # 3. 프롬프트 생성 (🇰🇷 한국어 강제)
+        # 3. 프롬프트 생성 (🇰🇷 한국어 강제 + 유도리 있는 헛소리 필터)
         if target_question:
+            # [소크라테스 튜터 모드]
             prompt = f"""
             [역할] 소크라테스식 튜터.
             [언어] **반드시 한국어(Korean)로만 답변할 것.**
             [질문] {target_question}
-            [답안] {user_text}
-            [교재] {ground_truth}
-            [지시] 답안 평가 후 정답 대신 힌트나 추가 질문 제공. 칭찬 포함.
+            [사용자 답변] {user_text}
+            [참고 교재] {ground_truth}
+            
+            [지시사항]
+            1. 사용자의 답변이 질문이나 교재 내용과 관련이 있거나, **질문에 대한 논리적인 대답**이라면 인정하세요.
+            2. 단, "안녕하세요", "ㅋㅋ", "ㅁㄴㅇㄹ" 같은 **완전한 잡담이나 무의미한 텍스트**인 경우에만 대화를 바로잡으세요.
+            3. 답변이 타당하다면 정답을 주는 대신, 생각을 확장할 수 있는 추가 질문을 던지세요.
+            
             [출력(JSON)] {{ "feedback": "...", "next_question": "..." }}
             """
         elif is_hint_request:
+            # [힌트 모드]
             prompt = f"""
             [역할] 학습 도우미.
             [언어] **반드시 한국어(Korean)로만 답변할 것.**
-            [글] {user_text}
-            [교재] {ground_truth}
-            [지시] 다음 내용 방향 제시.
+            [사용자 글] {user_text}
+            [참고 교재] {ground_truth}
+            [지시] 사용자가 작성한 내용과 문맥을 파악하여 다음 작성 방향을 제시하세요.
             [출력(JSON)] {{ "feedback": "...", "score": null }}
             """
         else:
+            # ⭐️ [채점 모드 - 수정됨]
             prompt = f"""
-            [역할] 채점관.
+            [역할] 융통성 있고 지적인 채점관.
             [언어] **피드백과 심화 질문은 반드시 한국어(Korean)로 작성할 것.**
-            [글] {user_text}
-            [교재] {ground_truth}
-            [지시] 100점 만점 채점, 피드백 제공.
-            [출력(JSON)] {{ "score": 85, "feedback": "...", "challenge_question": "..." }}
+            [입력된 글] {user_text}
+            [참고 교재 내용] {ground_truth}
+
+            [지시사항]
+            1. **유효성 판단 (중요)**:
+               - **0점 처리 대상**: "안녕하세요", "ㅋㅋ", "테스트", 단순 자음 나열, 욕설 등 **학습과 전혀 무관한 잡담**.
+               - **인정 대상**: [참고 교재 내용]에 없더라도, 입력된 글이 **해당 주제와 관련된 일반적인 지식, 수식, 논리적인 설명**을 포함하고 있다면 **유효한 답안으로 인정**하고 채점하세요. (RAG 검색 실패 가능성 고려)
+            
+            2. **채점 기준**:
+               - 내용의 정확성, 논리성, 깊이를 평가하여 100점 만점으로 점수를 매기세요.
+               - 수식이나 전문 용어가 포함되어 있다면 가산점을 고려하세요.
+               - 교재 내용과 비교하되, 교재에 없는 내용이라도 틀린 말이 아니라면 점수를 깎지 마세요.
+
+            [출력 형식(JSON)] 
+            {{ "score": 85, "feedback": "...", "challenge_question": "..." }}
             """
             
         resp = openai_client.chat.completions.create(
@@ -247,8 +264,7 @@ def gradeBlankPaper(req: https_fn.Request) -> https_fn.Response:
         print(f"❌ Error: {e}")
         return https_fn.Response(json.dumps({"error": str(e)}), status=500, headers=headers)
 
-
-# ⭐️ [수정됨] 정답 제출 채점 (한글 강제 + CORS 해결)
+# ⭐️ [수정됨] 정답 제출 채점 (한글 강제 + CORS 해결 + 헛소리 방지)
 @https_fn.on_call(
     region="asia-northeast3",
     secrets=["OPENAI_API_KEY"],
@@ -270,7 +286,11 @@ def scoreDiscussionAnswer(req: https_fn.CallableRequest) -> any:
         [언어] **피드백은 반드시 한국어(Korean)로만 작성하세요.**
         [문제] {question}
         [학생 답안] {user_answer}
-        [지시] 10점 만점 채점 및 피드백.
+        
+        [지시] 
+        1. 학생 답안이 문제와 전혀 상관없는 잡담이면 0점을 주세요.
+        2. 관련이 있다면 10점 만점으로 채점하고 구체적인 피드백을 주세요.
+        
         [출력(JSON)] {{ "score": 8, "feedback": "..." }}
         """
         

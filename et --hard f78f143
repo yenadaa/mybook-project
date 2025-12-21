@@ -1,0 +1,123 @@
+[33me454bbd[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfinal[m[33m, [m[1;31morigin/final[m[33m)[m 챗봇/홈 수정
+[33mf78f143[m 백지모드 개선
+[33m5bc54d0[m 백지모드 개선
+[33m30473c5[m progress바 수정
+[33m2d0a9a0[m 수정
+[33m6d46d66[m 망각스캐줄 개선
+[33m1b07f12[m 리사이저 오류 수정 6
+[33m04d9039[m 챗봇 저장가능
+[33m9563df9[m Merge branch 'final' of https://github.com/yenadaa/mybook-project into final
+[33m093b77a[m 챗봇변경3
+[33m2da84f5[m Merge branch 'final' of https://github.com/yenadaa/mybook-project into final
+[33m960ccc2[m 홈/챗봇 오류 수정
+[33ma6362f1[m 챗봇변경2
+[33m4659499[m 챗봇 변경
+[33mca1997a[m 리사이저 오류 수정 5
+[33mff8ffb1[m 리사이저 오류 수정 4
+[33m48d2958[m 리사이저 오류 수정 3
+[33m9b72567[m 리사이저 오류 수정 2
+[33mdb96235[m 리사이저 오류 수정
+[33mf3ec6d6[m 왼쪽 리사이저 및 양쪽 패널 핸들 추가
+[33m45f6e55[m home->index 문서 이동가능
+[33m2407a5b[m 1차 수정
+[33mb6bd455[m 1차수정
+[33mc3479f1[m 1차 수정
+[33m80cf8ad[m 수정중..롤백용
+[33m1ff839d[m 망각곡선 업데이트중
+[33m5cd6442[m 수정중-복습문제 시연용생성
+[33ma69c5c4[m home/index연동
+[33m292da78[m index쓸모없는거삭제
+[33m3d13981[m 챗봇 업데이트
+[33m67bfb37[m 백지모드 답안수정
+[33m755a106[m 챗봇 추가
+[33m3ddee8b[m 백지모드 필기 개선
+[33me125379[m 사이드바-태블릿에도 연동
+[33me56da5b[m 오른쪽 사이드바 토글 버튼 추가
+[33m94a7bc7[m 오른쪽 사이드바 조절 기능
+[33mefd5b30[m 오류 수정
+[33m67266a6[m 중복기능제거
+[33m28261dc[m ㅅ
+[33m9d5bd7b[m 사소
+[33mb9a75cc[m pdf 저장
+[33mfbaee4e[m 백지가이드라인
+[33m5eb78c3[m Merge commit 'e28482832e94141025d766c3bf6f0e929fef7b0b' into HEAD
+[33me284828[m 선 오류 보강7
+[33m7256268[m 선 오류 보강6
+[33mde488e6[m 선 오류 보강5
+[33me4328f6[m firebase.json 오류 수정
+[33m0cedb49[m Merge commit '4f02be148f15a99842b015c0f25e2e65e6bf8f90' into HEAD
+[33m4f02be1[m home 버그 수정
+[33ma2acbd6[m home 업데이트(로직 구현중)
+[33m2eaa54c[m feat: home 업데이트(로직 연결중)
+[33m6491487[m 선 오류 보강4
+[33m565eade[m 선 오류 보강3
+[33m2ab104f[m 선 오류 보강2
+[33m8b5d4af[m 선 오류 보강
+[33m734e1f6[m 지우개 분리
+[33mebd26c9[m[33m ([m[1;31morigin/final_home-version[m[33m)[m 선 끊김 보강, 모달 오타 수정
+[33mc3476c7[m 필기모드 main.js 재수정
+[33m5f17108[m 필기모드 main.js/viewer-ui.js 수정
+[33m0608543[m 필기모드 viewer-state.js 오타 수정
+[33m647d108[m 필기모드 viewer-state/ui.js 재수정
+[33m670bac6[m 필기모드 viewer-drawing.js 재수정
+[33mb7fcf5c[m 필기모드 viewer-ui.js 재수정
+[33m1107c6d[m 필기모드 viewer-state.js 재수정
+[33me1d2bb6[m 필기모드 index  재수정_2
+[33ma5a63d7[m 필기모드 index  재수정
+[33m121d549[m 색상/두께 설정 전으로 롤백
+[33m3f747f3[m Revert "자유 필기 모드 형광펜 로직과 분리"
+[33mb95ef89[m 자유 필기 모드 색상/두께 조절
+[33md4f6abe[m 자유 필기 모드 형광펜 로직과 분리
+[33m1ab6a1a[m 사소한거
+[33m784ae06[m Ver 0.43 pdf저장버튼
+[33m376ac04[m Ver 0.42 백지모드 저장 추가
+[33m9270edb[m 자유 필기 펜 인식 모드 수정
+[33m5d52269[m 자유 필기 펜 버튼 모드/두께 로직 연결
+[33md38f022[m 필기 추가
+[33m3a67c0c[m Ver 0.41 서술형퀴즈 정답 추가
+[33me112286[m Ver 0.4 태블릿 화면 최적화 + whiteboard 점수 제거
+[33m9e59f27[m Ver 0.38 프롬포트 변경+챗봇 불러오는 방식 변경
+[33m1514caf[m ocr 기능 롤백
+[33m99dbae4[m Merge branch 'final' of https://github.com/yenadaa/mybook-project into final
+[33m81bb6dc[m quiz.py 모듈 경로 문제 해결 및 헬퍼 함수 복구, Cloud Functions 리전 설정 추가
+[33m2847651[m 테서랙트 ocr 부분 삭제
+[33m4716b94[m Merge branch 'final' of https://github.com/yenadaa/mybook-project into final
+[33m59c37fd[m 힌트 버튼 오류 수정 v1
+[33m7218b72[m Ver 0.372 태블릿 친화(진행중)
+[33mbed6b52[m Ver 0.371 오류수정
+[33ma450058[m Ver 0.37 whiteboard개선
+[33m6129d08[m 페이지 인디케이터 수정v1
+[33ma81886c[m Ver 0.36 pdf 페이지 병렬처리
+[33m817121f[m Ver 0.35 백엔드 코드 나눔
+[33m34467d7[m Ver 0.34 RAG개선
+[33mf778fec[m Ver 0.33 알람기능 정상화
+[33m701ecac[m 챗봇 입력창 위치 조정, 상단바 오류 수정
+[33m3f8d0d5[m Ver 0.32 수식추가
+[33mc353e04[m 서술형,문서목록-파일명 ui+css 수정
+[33m2540324[m 퀴즈, 문서목록 파일명 UI 및 CSS 수정
+[33m2ff6b7a[m Ver 0.31 (힌트 추가)
+[33mc2c629d[m Ver 0.3(백지 복습)
+[33m7717310[m Ver 0.221(약간만 수정)
+[33ma1764be[m ver 0.22 (rag 개선-BM25 알고리즘)
+[33m6956b75[m ver 0.21
+[33m09aec81[m Ver 0.2
+[33maea09fd[m[33m ([m[1;32mrefactor-viewer[m[33m)[m ver0.1 jsk5166
+[33mcfab6d6[m[33m ([m[1;31morigin/refactor-viewer[m[33m)[m Ver 0.4 - RAG 챗봇 프로토타입
+[33m7528a61[m Ver 0.3 - RAG 챗봇 프로토타입
+[33mca0daa3[m Ver 0.2 - RAG 챗봇 프로토타입
+[33m926e475[m Refactor code structure for improved readability
+[33m73e747d[m ver 0.1
+[33mdbfc72c[m[33m ([m[1;31morigin/seg[m[33m, [m[1;32msegyeong-dev[m[33m)[m hapchae 0.7
+[33m70af31f[m hapchae 0.6
+[33me588344[m hapchae 0.5
+[33me90895a[m hapchae 0.4
+[33m62e7c3f[m hapchae 0.3
+[33m8f50b91[m hapchae 0.2
+[33m08d6a9e[m ver 0.01
+[33m03d80b0[m[33m ([m[1;31morigin/segyeong-dev[m[33m)[m 0.5
+[33m21daab4[m 0.4
+[33m2624d65[m 0.4
+[33md602986[m backup
+[33maf5cb4c[m ver 0.3
+[33mdd305e5[m ver 0.2
+[33m02a7f07[m ver 0.1
